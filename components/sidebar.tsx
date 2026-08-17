@@ -31,9 +31,8 @@ export function Sidebar() {
       </nav>
       <div className="sidebar-bottom">
         <div className="source-health">
-          <div className="source-health-top"><span>Source health</span><strong>99.4%</strong></div>
-          <div className="health-bar"><i /></div>
-          <small>Federal + SLED sources monitored</small>
+          <div className="source-health-top"><span>Data sources</span><strong>Federal live</strong></div>
+          <small>SAM.gov connected · SLED next</small>
         </div>
         <button className="nav-item"><Settings2 size={17} /><span>Selling profile</span></button>
       </div>
