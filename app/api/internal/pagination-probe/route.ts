@@ -41,40 +41,68 @@ function extractUpdate(xml: string, id: string) {
   return plain ? decodeXml(plain[1]) : null;
 }
 
-async function requestPage(initial: Awaited<ReturnType<typeof initialGet>>, first: number) {
-  const $ = load(initial.html);
+function serializeForm(html: string) {
+  const $ = load(html);
   const form = $("#bidSearchResultsForm");
-  const action = form.attr("action") || new URL(initial.finalUrl).pathname;
-  const viewState = form.find('input[name="javax.faces.ViewState"]').first().attr("value") || "";
-  if (!viewState) throw new Error("JSF ViewState was not found");
-
-  const component = "bidSearchResultsForm:bidResultId";
+  if (!form.length) throw new Error("bidSearchResultsForm was not found");
   const body = new URLSearchParams();
-  body.set("javax.faces.partial.ajax", "true");
-  body.set("javax.faces.source", component);
-  body.set("javax.faces.partial.execute", component);
-  body.set("javax.faces.partial.render", component);
-  body.set(component, component);
-  body.set(`${component}_pagination`, "true");
-  body.set(`${component}_first`, String(first));
-  body.set(`${component}_rows`, "25");
-  body.set(`${component}_skipChildren`, "true");
-  body.set(`${component}_encodeFeature`, "true");
-  body.set("bidSearchResultsForm", "bidSearchResultsForm");
-  body.set("javax.faces.ViewState", viewState);
 
-  const response = await fetch(new URL(action, initial.finalUrl).toString(), {
+  form.find("input[name]").each((_, node) => {
+    const input = $(node);
+    const name = input.attr("name");
+    if (!name) return;
+    const type = (input.attr("type") || "text").toLowerCase();
+    if ((type === "checkbox" || type === "radio") && !input.is(":checked")) return;
+    if (["submit", "button", "image", "file"].includes(type)) return;
+    body.append(name, input.attr("value") || "");
+  });
+  form.find("select[name]").each((_, node) => {
+    const select = $(node);
+    const name = select.attr("name");
+    if (!name) return;
+    select.find("option:selected").each((__, option) => body.append(name, $(option).attr("value") || ""));
+  });
+  form.find("textarea[name]").each((_, node) => {
+    const field = $(node);
+    const name = field.attr("name");
+    if (name) body.append(name, field.text());
+  });
+  if (!body.has("bidSearchResultsForm")) body.set("bidSearchResultsForm", "bidSearchResultsForm");
+  return {
+    action: form.attr("action") || "",
+    body,
+    fieldNames: [...new Set([...body.keys()])],
+  };
+}
+
+async function requestPage(initial: Awaited<ReturnType<typeof initialGet>>, first: number, useCurrentUrl: boolean) {
+  const built = serializeForm(initial.html);
+  const component = "bidSearchResultsForm:bidResultId";
+  built.body.set("javax.faces.partial.ajax", "true");
+  built.body.set("javax.faces.source", component);
+  built.body.set("javax.faces.partial.execute", component);
+  built.body.set("javax.faces.partial.render", component);
+  built.body.set(component, component);
+  built.body.set(`${component}_pagination`, "true");
+  built.body.set(`${component}_first`, String(first));
+  built.body.set(`${component}_rows`, "25");
+  built.body.set(`${component}_skipChildren`, "true");
+  built.body.set(`${component}_encodeFeature`, "true");
+
+  const postUrl = useCurrentUrl ? initial.finalUrl : new URL(built.action || initial.finalUrl, initial.finalUrl).toString();
+  const response = await fetch(postUrl, {
     method: "POST",
     headers: {
       accept: "application/xml, text/xml, */*; q=0.01",
       "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
       "faces-request": "partial/ajax",
       "x-requested-with": "XMLHttpRequest",
+      origin: new URL(initial.finalUrl).origin,
       referer: initial.finalUrl,
       ...(initial.cookie ? { cookie: initial.cookie } : {}),
       "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
     },
-    body,
+    body: built.body,
     redirect: "follow",
     cache: "no-store",
   });
@@ -94,17 +122,27 @@ async function requestPage(initial: Awaited<ReturnType<typeof initialGet>>, firs
     rows,
     current,
     firstSolicitations,
-    xmlHead: compact(xml).slice(0, 1200),
+    xmlHead: compact(xml).slice(0, 800),
   };
 }
 
 export async function GET() {
   try {
-    const initial = await initialGet();
-    const $ = load(initial.html);
-    const firstPageIds = $("table").filter((_, table) => /Bid Solicitation #/i.test(compact($(table).find("tr").first().text()))).first().find("tbody tr").slice(0, 3).map((_, row) => compact($(row).text()).slice(0, 300)).get();
-    const page2 = await requestPage(initial, 25);
-    return NextResponse.json({ ok: true, firstPageIds, page2 });
+    const first = await initialGet();
+    const second = await initialGet();
+    const firstBuilt = serializeForm(first.html);
+    const cookieNames = first.cookie.split(";").map(piece => piece.split("=")[0].trim()).filter(Boolean);
+    const [actionPost, currentUrlPost] = await Promise.all([
+      requestPage(first, 25, false),
+      requestPage(second, 25, true),
+    ]);
+    return NextResponse.json({
+      ok: true,
+      formFieldNames: firstBuilt.fieldNames,
+      cookieNames,
+      actionPost,
+      currentUrlPost,
+    });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
