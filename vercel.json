@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/sam-bulk",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/opengov",
+      "schedule": "30 7 * * *"
     }
   ]
 }
