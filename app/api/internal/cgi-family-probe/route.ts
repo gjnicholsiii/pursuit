@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 90;
+export const maxDuration = 120;
 
-const URL = "https://vss.ky.gov/vssprod-ext/Advantage4";
+const PORTAL = "https://vss.ky.gov/vssprod-ext/Advantage4";
+const DATASET = "T1SO_SRCH_QRY";
+const GRID_KEY = "vss.page.VVSSX10019.gridView1.group1.cardGrid.grid1";
 type Obj = Record<string, any>;
 
 function extractJsonObject(source: string, start: number) {
@@ -62,28 +64,8 @@ function findByName(value: unknown, name: string): Obj | null {
   return null;
 }
 
-function pageOpenPayload(state: Obj, nav: Obj) {
-  return {
-    action: {
-      key: nav.key,
-      actionType: "pageOpen",
-      params: {
-        targetLocation: nav.targetLocation,
-        targetComponentType: nav.targetComponentType,
-        isEntpriseSrchCreateAction: Boolean(nav.isEntpriseSrchCreateAction),
-      },
-      isCarouselNavigation: nav.isCarouselNavigation,
-      targetQualifiedName: nav.targetQualifiedName,
-      ...(nav.viewName ? { viewName: nav.viewName } : {}),
-      suppressLeafing: Boolean(nav.suppressLeafing),
-    },
-    session_info: state.session_info,
-    data: state.data,
-  };
-}
-
-async function pageOpen(referer: string, state: Obj, nav: Obj, cookie: string) {
-  const response = await fetch(nav.applicationUrl || referer, {
+async function postState(referer: string, state: Obj, action: Obj, cookie: string) {
+  const response = await fetch(referer, {
     method: "POST",
     headers: {
       accept: "application/json,text/plain,*/*",
@@ -94,76 +76,89 @@ async function pageOpen(referer: string, state: Obj, nav: Obj, cookie: string) {
       ...(cookie ? { cookie } : {}),
       "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
     },
-    body: JSON.stringify(pageOpenPayload(state, nav)),
+    body: JSON.stringify({ action, session_info: state.session_info, data: state.data }),
     cache: "no-store",
   });
   const text = await response.text();
-  if (!response.ok) throw new Error(`pageOpen returned ${response.status}: ${text.slice(0, 250)}`);
-  return { state: JSON.parse(text) as Obj, cookie: mergeCookies(cookie, response.headers.get("set-cookie")) };
+  if (!response.ok) throw new Error(`POST returned ${response.status}: ${text.slice(0, 350)}`);
+  let json: Obj;
+  try { json = JSON.parse(text); } catch { throw new Error(`POST returned non-JSON: ${text.slice(0, 350)}`); }
+  return { state: json, cookie: mergeCookies(cookie, response.headers.get("set-cookie")), status: response.status };
 }
 
-function collectGridCandidates(value: unknown, path = "$", out: Array<Record<string, unknown>> = []) {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => collectGridCandidates(item, `${path}[${index}]`, out));
-    return out;
+function pageOpenAction(nav: Obj) {
+  return {
+    key: nav.key,
+    actionType: "pageOpen",
+    params: {
+      targetLocation: nav.targetLocation,
+      targetComponentType: nav.targetComponentType,
+      isEntpriseSrchCreateAction: Boolean(nav.isEntpriseSrchCreateAction),
+    },
+    isCarouselNavigation: nav.isCarouselNavigation,
+    targetQualifiedName: nav.targetQualifiedName,
+    ...(nav.viewName ? { viewName: nav.viewName } : {}),
+    suppressLeafing: Boolean(nav.suppressLeafing),
+  };
+}
+
+async function openSolicitations() {
+  const initialResponse = await fetch(PORTAL, {
+    headers: { accept: "text/html,*/*", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
+    cache: "no-store",
+  });
+  if (!initialResponse.ok) throw new Error(`Kentucky VSS returned ${initialResponse.status}`);
+  const initial = parseInitial(await initialResponse.text());
+  let cookie = cookieHeader(initialResponse.headers.get("set-cookie"));
+  const carouselNav = findByName(initial, "carousalAction");
+  if (!carouselNav) throw new Error("carousalAction was not found");
+  const carousel = await postState(initialResponse.url, initial, pageOpenAction(carouselNav), cookie);
+  cookie = carousel.cookie;
+  const solicitationNav = findByName(carousel.state, "solicitations");
+  if (!solicitationNav) throw new Error("solicitations action was not found");
+  const solicitations = await postState(initialResponse.url, carousel.state, pageOpenAction(solicitationNav), cookie);
+  return { referer: initialResponse.url, state: solicitations.state, cookie: solicitations.cookie };
+}
+
+function summary(state: Obj) {
+  const ds = state.data?.ds_data?.[DATASET] || {};
+  const rows = Array.isArray(ds.row_data) ? ds.row_data : [];
+  return {
+    rows: rows.length,
+    ids: rows.slice(0, 5).map((row: Obj) => row.DOC_REF || row.DOC_CD_CONCAT || row.ADV_ROW_ID || null),
+    startDataWindow: ds.start_data_window ?? null,
+    endDataWindow: ds.end_data_window ?? null,
+    startPageWindow: ds.start_page_window ?? null,
+    endPageWindow: ds.end_page_window ?? null,
+    rowsPerPage: ds.rows_per_page ?? null,
+    rowsTotal: ds.rows_total ?? null,
+    totalCountSuffix: ds.total_count_suffix ?? null,
+  };
+}
+
+async function testKey(key: string) {
+  const opened = await openSolicitations();
+  const before = summary(opened.state);
+  try {
+    const next = await postState(opened.referer, opened.state, {
+      key,
+      actionType: "dsAction",
+      actionCode: "nextpage",
+      dsNameList: DATASET,
+      bypassPopupClose: false,
+    }, opened.cookie);
+    return { key, ok: true, status: next.status, before, after: summary(next.state), responseAction: next.state.action ?? null };
+  } catch (error) {
+    return { key, ok: false, before, error: error instanceof Error ? error.message : String(error) };
   }
-  if (!value || typeof value !== "object") return out;
-  const object = value as Obj;
-  const stringValues = Object.values(object).filter(item => typeof item === "string") as string[];
-  if (stringValues.some(item => item.includes("T1SO_SRCH_QRY"))) {
-    out.push({
-      path,
-      key: object.key ?? null,
-      name: object.name ?? null,
-      dataSource: object.dataSource ?? object.data_source ?? object.datasource ?? object.dsName ?? object.ds_name ?? null,
-      template: object.template ?? null,
-      title: object.title ?? null,
-      type: object.type ?? null,
-      parentKey: object.parentKey ?? null,
-      properties: Object.fromEntries(Object.entries(object).filter(([key, child]) => typeof child === "string" && /key|name|source|template|title|type/i.test(key)).slice(0, 20)),
-    });
-  }
-  for (const [key, child] of Object.entries(object)) collectGridCandidates(child, `${path}.${key}`, out);
-  return out;
 }
 
 export async function GET() {
   try {
-    const initialResponse = await fetch(URL, {
-      headers: { accept: "text/html,*/*", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
-      cache: "no-store",
-    });
-    if (!initialResponse.ok) throw new Error(`Kentucky VSS returned ${initialResponse.status}`);
-    const initial = parseInitial(await initialResponse.text());
-    let cookie = cookieHeader(initialResponse.headers.get("set-cookie"));
-    const carouselAction = findByName(initial, "carousalAction");
-    if (!carouselAction) throw new Error("carousalAction was not found");
-    const carousel = await pageOpen(initialResponse.url, initial, carouselAction, cookie);
-    cookie = carousel.cookie;
-    const solicitationsAction = findByName(carousel.state, "solicitations");
-    if (!solicitationsAction) throw new Error("solicitations action was not found");
-    const solicitations = await pageOpen(initialResponse.url, carousel.state, solicitationsAction, cookie);
-    const ds = solicitations.state.data?.ds_data?.T1SO_SRCH_QRY || {};
-    return NextResponse.json({
-      ok: true,
-      page: {
-        action: solicitations.state.action ?? null,
-        sessionPageId: solicitations.state.session_info?.page_id ?? null,
-        targetQualifiedName: solicitations.state.session_info?.targetQualifiedName ?? solicitationsAction.targetQualifiedName ?? null,
-      },
-      dataset: {
-        name: ds.name ?? "T1SO_SRCH_QRY",
-        rows: Array.isArray(ds.row_data) ? ds.row_data.length : 0,
-        startDataWindow: ds.start_data_window ?? null,
-        endDataWindow: ds.end_data_window ?? null,
-        startPageWindow: ds.start_page_window ?? null,
-        endPageWindow: ds.end_page_window ?? null,
-        rowsPerPage: ds.rows_per_page ?? null,
-        rowsTotal: ds.rows_total ?? null,
-        totalCountSuffix: ds.total_count_suffix ?? null,
-      },
-      gridCandidates: collectGridCandidates(solicitations.state).slice(0, 30),
-    });
+    const candidates = [`${GRID_KEY}pagination`, `${GRID_KEY}.pagination`];
+    const results = [];
+    for (const key of candidates) results.push(await testKey(key));
+    return NextResponse.json({ ok: results.some(result => result.ok), results });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
