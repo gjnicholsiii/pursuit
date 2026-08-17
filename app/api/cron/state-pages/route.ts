@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { syncOfficialStatePages } from "@/lib/sled/official-state-pages";
 import { syncPeriscopeFirstPages } from "@/lib/sled/periscope";
 import { syncJaggaerFirstPages } from "@/lib/sled/jaggaer";
+import { syncPublicPeopleSoft } from "@/lib/sled/peoplesoft";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -13,16 +14,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const [official, periscope, jaggaer] = await Promise.all([
+  const [official, periscope, jaggaer, peoplesoft] = await Promise.all([
     syncOfficialStatePages(false),
     syncPeriscopeFirstPages(),
     syncJaggaerFirstPages(),
+    syncPublicPeopleSoft(),
   ]);
 
-  const failures = [...official, ...periscope, ...jaggaer].filter(result => !result.ok);
+  const failures = [...official, ...periscope, ...jaggaer, ...peoplesoft].filter(result => !result.ok);
   return NextResponse.json({
     ok: failures.length === 0,
-    sync: { official, periscope, jaggaer },
+    sync: { official, periscope, jaggaer, peoplesoft },
     failures,
   }, { status: failures.length === 0 ? 200 : 207 });
 }
