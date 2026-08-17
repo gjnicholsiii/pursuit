@@ -11,94 +11,155 @@ function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function tagName(node: unknown) {
-  return (node as { tagName?: string } | null)?.tagName || null;
+function cookieHeader(setCookie: string | null) {
+  if (!setCookie) return "";
+  return setCookie.split(/,(?=[^;,]+=)/).map(part => part.split(";")[0].trim()).filter(Boolean).join("; ");
 }
 
-async function getHtml(url: string) {
+async function initialGet(url: string) {
   const response = await fetch(url, {
-    headers: {
-      accept: "text/html,application/xhtml+xml",
-      "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
-    },
+    headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
     redirect: "follow",
     cache: "no-store",
   });
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
-  return { html: await response.text(), finalUrl: response.url };
+  return {
+    html: await response.text(),
+    finalUrl: response.url,
+    cookie: cookieHeader(response.headers.get("set-cookie")),
+  };
 }
 
-function periscopeDetails(html: string) {
-  const $ = load(html);
-  const forms = $("form").toArray().map(form => ({
-    id: $(form).attr("id") || null,
-    name: $(form).attr("name") || null,
-    action: $(form).attr("action") || null,
-    method: $(form).attr("method") || null,
-  }));
-  const hidden = $('input[type="hidden"]').toArray().map(input => ({
-    id: $(input).attr("id") || null,
-    name: $(input).attr("name") || null,
-    value: ($(input).attr("value") || "").slice(0, 500),
-  })).filter(item => /viewstate|javax\.faces|pagination|page|first/i.test(`${item.id} ${item.name}`));
-  const paginator = $("*[class*='paginator'], *[id*='paginator'], *[class*='pagination'], *[id*='pagination']").toArray().slice(0, 20).map(node => ({
-    tag: tagName(node),
-    id: $(node).attr("id") || null,
-    className: $(node).attr("class") || null,
-    text: compact($(node).text()).slice(0, 500),
-    html: compact($.html(node)).slice(0, 4000),
-  }));
-  const nextish = $("a,button,input").toArray().filter(node => /next|last|page|rows/i.test(compact($(node).text()) + " " + ($(node).attr("title") || "") + " " + ($(node).attr("aria-label") || "") + " " + ($(node).attr("id") || "") + " " + ($(node).attr("name") || ""))).slice(0, 30).map(node => ({
-    tag: tagName(node),
-    id: $(node).attr("id") || null,
-    name: $(node).attr("name") || null,
-    href: $(node).attr("href") || null,
-    onclick: ($(node).attr("onclick") || "").slice(0, 1500) || null,
-    value: $(node).attr("value") || null,
-    title: $(node).attr("title") || null,
-    text: compact($(node).text()).slice(0, 200),
-  }));
-  const scripts = $("script").toArray().map(node => compact($(node).html() || "")).filter(script => /paginator|pagination|first|rows|page/i.test(script)).slice(0, 10).map(script => script.slice(0, 5000));
-  return { forms, hidden, paginator, nextish, scripts };
+async function testPeriscopeExport(initial: Awaited<ReturnType<typeof initialGet>>) {
+  const $ = load(initial.html);
+  const form = $("#bidSearchResultsForm");
+  const action = form.attr("action") || new URL(initial.finalUrl).pathname;
+  const viewState = form.find('input[name="javax.faces.ViewState"]').first().attr("value") || "";
+  const csv = form.find('a[title="Export to CSV File"]').first();
+  const onclick = csv.attr("onclick") || "";
+  const command = onclick.match(/\{'([^']+)':'([^']+)'\}/)?.[1] || "";
+  if (!viewState || !command) throw new Error("Periscope CSV export command was not found");
+
+  const body = new URLSearchParams();
+  body.set("bidSearchResultsForm", "bidSearchResultsForm");
+  body.set(command, command);
+  body.set("javax.faces.ViewState", viewState);
+
+  const postUrl = new URL(action, initial.finalUrl).toString();
+  const response = await fetch(postUrl, {
+    method: "POST",
+    headers: {
+      accept: "text/csv,text/plain,*/*",
+      "content-type": "application/x-www-form-urlencoded",
+      referer: initial.finalUrl,
+      ...(initial.cookie ? { cookie: initial.cookie } : {}),
+      "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
+    },
+    body,
+    redirect: "follow",
+    cache: "no-store",
+  });
+  const payload = await response.text();
+  const lines = payload.split(/\r?\n/).filter(line => line.trim().length > 0);
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    contentDisposition: response.headers.get("content-disposition"),
+    bytes: payload.length,
+    nonEmptyLines: lines.length,
+    firstLines: lines.slice(0, 5),
+  };
 }
 
-function jaggaerDetails(html: string) {
+function formParams(html: string) {
   const $ = load(html);
-  const forms = $("form").toArray().map(form => ({
-    id: $(form).attr("id") || null,
-    name: $(form).attr("name") || null,
-    action: $(form).attr("action") || null,
-    method: $(form).attr("method") || null,
-  }));
-  const inputs = $("input,select,button").toArray().filter(node => /page|result|sort|search|nav/i.test(`${$(node).attr("id") || ""} ${$(node).attr("name") || ""} ${$(node).attr("aria-label") || ""} ${$(node).attr("title") || ""}`)).slice(0, 40).map(node => ({
-    tag: tagName(node),
-    id: $(node).attr("id") || null,
-    name: $(node).attr("name") || null,
-    type: $(node).attr("type") || null,
-    value: $(node).attr("value") || null,
-    onclick: ($(node).attr("onclick") || "").slice(0, 2000) || null,
-    onchange: ($(node).attr("onchange") || "").slice(0, 2000) || null,
-  }));
-  const pageTextNodes = $("body *").toArray().filter(node => /\bPage\b|\bResults\b|Per Page/i.test(compact($(node).text()))).slice(-30).map(node => ({
-    tag: tagName(node),
-    id: $(node).attr("id") || null,
-    className: $(node).attr("class") || null,
-    text: compact($(node).text()).slice(0, 500),
-    html: compact($.html(node)).slice(0, 5000),
-  }));
-  const scripts = $("script").toArray().map(node => compact($(node).html() || "")).filter(script => /page|paging|pagination|results|sourcing/i.test(script)).slice(0, 15).map(script => script.slice(0, 6000));
-  const scriptSrc = $("script[src]").toArray().map(node => $(node).attr("src") || null).filter((value): value is string => Boolean(value)).slice(0, 50);
-  return { forms, inputs, pageTextNodes, scripts, scriptSrc };
+  const form = $('form[name="ActiveForm"]').first();
+  const params = new URLSearchParams();
+  form.find("input[name]").each((_, node) => {
+    const input = $(node);
+    const name = input.attr("name");
+    if (!name) return;
+    const type = (input.attr("type") || "text").toLowerCase();
+    if ((type === "checkbox" || type === "radio") && !input.is(":checked")) return;
+    if (["submit", "button", "image", "file"].includes(type)) return;
+    params.append(name, input.attr("value") || "");
+  });
+  form.find("select[name]").each((_, node) => {
+    const select = $(node);
+    const name = select.attr("name");
+    if (!name) return;
+    const selected = select.find("option:selected").attr("value") || select.find("option").first().attr("value") || "";
+    params.set(name, selected);
+  });
+  return { action: form.attr("action") || "", params };
+}
+
+function functionSnippet(source: string, name: string) {
+  const start = source.indexOf(`function ${name}`);
+  if (start < 0) return null;
+  return compact(source.slice(start, start + 3000));
+}
+
+async function testJaggaerPageSize(initial: Awaited<ReturnType<typeof initialGet>>) {
+  const $ = load(initial.html);
+  const scriptSrc = $('script[src*="CombinedJavascript.js"]').first().attr("src") || "";
+  let functions: Record<string, string | null> = {};
+  if (scriptSrc) {
+    const scriptResponse = await fetch(new URL(scriptSrc, initial.finalUrl), {
+      headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
+      cache: "no-store",
+    });
+    const source = scriptResponse.ok ? await scriptResponse.text() : "";
+    functions = {
+      submitSizeChange: functionSnippet(source, "submitSizeChange"),
+      submitPageChange: functionSnippet(source, "submitPageChange"),
+      goToPage: functionSnippet(source, "goToPage"),
+    };
+  }
+
+  const built = formParams(initial.html);
+  built.params.set("PageSize", "200");
+  built.params.set("PageNum", "1");
+  built.params.set("ESSearchAfter", "");
+  const postUrl = new URL(built.action || initial.finalUrl, initial.finalUrl).toString();
+  const response = await fetch(postUrl, {
+    method: "POST",
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "content-type": "application/x-www-form-urlencoded",
+      referer: initial.finalUrl,
+      ...(initial.cookie ? { cookie: initial.cookie } : {}),
+      "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
+    },
+    body: built.params,
+    redirect: "follow",
+    cache: "no-store",
+  });
+  const html = await response.text();
+  const result$ = load(html);
+  const resultText = compact(result$(".readOnlyPageOf").first().text());
+  const hiddenPageSize = result$('input[name="PageSize"]').first().attr("value") || null;
+  const hiddenPageNum = result$('input[name="PageNum"]').first().attr("value") || null;
+  const eventRows = result$('a[href*="app01.jaggaer.com/apps/Router/ViewSourcingEvent"]').length;
+  return {
+    status: response.status,
+    finalUrl: response.url,
+    resultText,
+    hiddenPageSize,
+    hiddenPageNum,
+    eventRows,
+    functions,
+  };
 }
 
 export async function GET() {
   try {
-    const [periscope, jaggaer] = await Promise.all([getHtml(PERISCOPE_URL), getHtml(JAGGAER_URL)]);
-    return NextResponse.json({
-      ok: true,
-      periscope: { finalUrl: periscope.finalUrl, ...periscopeDetails(periscope.html) },
-      jaggaer: { finalUrl: jaggaer.finalUrl, ...jaggaerDetails(jaggaer.html) },
-    });
+    const [periscope, jaggaer] = await Promise.all([initialGet(PERISCOPE_URL), initialGet(JAGGAER_URL)]);
+    const [periscopeExport, jaggaerPage200] = await Promise.all([
+      testPeriscopeExport(periscope),
+      testJaggaerPageSize(jaggaer),
+    ]);
+    return NextResponse.json({ ok: true, periscopeExport, jaggaerPage200 });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
