@@ -41,6 +41,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "partial",
     notes: "Reusable Periscope connector verified against anonymous Open Bids. Full pagination still required before complete coverage.",
   },
+  LA: {
+    connectorFamily: "direct_state_board",
+    platformLabel: "Louisiana LaPAC public network (SAP/LaGov downstream)",
+    officialUrl: "https://wwwcfprd.doa.louisiana.gov/OSP/LaPAC/pubMain.cfm",
+    status: "planned",
+    notes: "Direct LaPAC connector is staged against official public department listings. LaPAC exposes open bids, documents and addenda without vendor login; production validation is pending the deployment reset.",
+  },
   MA: {
     status: "partial",
     notes: "Reusable Periscope connector verified against anonymous Open Bids, including state, higher-ed, municipal, and K-12 buyers. Full pagination still required.",
@@ -52,6 +59,20 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
   MT: {
     status: "partial",
     notes: "Reusable JAGGAER connector verified against Montana eMACS public events. Full pagination still required.",
+  },
+  NE: {
+    connectorFamily: "direct_state_board",
+    platformLabel: "Nebraska DAS Materiel public bid board",
+    officialUrl: "https://das.nebraska.gov/materiel/bid-opportunities.html",
+    status: "planned",
+    notes: "Direct official connector is staged. The public board exposes solicitation number, agency, type, buyer, posted date, opening date and bid-detail links; production validation is pending the deployment reset.",
+  },
+  NM: {
+    connectorFamily: "custom",
+    platformLabel: "eProNM/JAGGAER transition to new procurement platform",
+    officialUrl: "https://generalservices.state.nm.us/state-purchasing/",
+    status: "planned",
+    notes: "New Mexico says eProNM/JAGGAER is being replaced in summer 2026. Pursuit will not promote the legacy JAGGAER route until the current replacement platform is identified and verified.",
   },
   NV: {
     status: "partial",
