@@ -14,11 +14,11 @@
     },
     {
       "path": "/api/cron/state-pages",
-      "schedule": "28 21 * * *"
+      "schedule": "15 */2 * * *"
     },
     {
       "path": "/api/cron/state-heavy",
-      "schedule": "30 21 * * *"
+      "schedule": "45 */4 * * *"
     }
   ]
 }
