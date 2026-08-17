@@ -12,6 +12,7 @@ export interface SamPersistenceContext {
   mode?: string;
   offset?: number;
   totalRecords?: number;
+  recordChanges?: boolean;
 }
 
 function agencyName(raw: SamOpportunityRaw) {
@@ -147,7 +148,7 @@ export async function persistSamOpportunities(
 
   if (!records.length) return { stored: 0, newRecords: 0, changedRecords: 0 };
 
-  const changed = records.flatMap(record => {
+  const changed = context.recordChanges === false ? [] : records.flatMap(record => {
     const previous = existing.get(record.external_id);
     if (!previous || previous.content_hash === record.content_hash) return [];
     const before = changeSnapshot(previous.raw_payload);
@@ -260,6 +261,7 @@ export async function persistSamOpportunities(
       mode: context.mode || "interactive",
       offset: context.offset ?? 0,
       totalRecords: context.totalRecords ?? null,
+      recordChanges: context.recordChanges !== false,
     })],
   );
 
