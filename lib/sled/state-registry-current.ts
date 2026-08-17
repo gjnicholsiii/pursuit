@@ -101,6 +101,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "partial",
     notes: "SCBO is the state's definitive public advertisement database and includes state, local, higher-ed and K-12 buyers. A direct full-category connector is staged; production validation is pending the next deliberate release.",
   },
+  TX: {
+    connectorFamily: "direct_state_board",
+    platformLabel: "Texas SmartBuy Electronic State Business Daily (ESBD)",
+    officialUrl: "https://www.txsmartbuy.gov/esbd",
+    status: "partial",
+    notes: "Public ESBD connector is staged with a bounded recent-active sweep. ESBD includes state and participating local public purchasers; deeper historical paging is intentionally excluded from frequent refreshes.",
+  },
   UT: {
     status: "live",
     notes: "Reusable JAGGAER connector verified against Utah public events. Current public result set fits on one page and is fully captured.",
