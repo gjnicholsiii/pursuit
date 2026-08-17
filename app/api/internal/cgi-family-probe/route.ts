@@ -10,16 +10,19 @@ function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function hits(source: string, needle: string, before = 2400, after = 7600, limit = 8) {
-  const result: Array<{ index: number; snippet: string }> = [];
-  let from = 0;
-  while (result.length < limit) {
-    const index = source.indexOf(needle, from);
+function excerpts(source: string, needle: string, before = 1800, after = 3600, limit = 5) {
+  const found: Array<{ index: number; snippet: string }> = [];
+  let cursor = 0;
+  while (found.length < limit) {
+    const index = source.indexOf(needle, cursor);
     if (index < 0) break;
-    result.push({ index, snippet: compact(source.slice(Math.max(0, index - before), index + after)) });
-    from = index + needle.length;
+    const snippet = source.slice(Math.max(0, index - before), Math.min(source.length, index + after));
+    if (!/EnterpriseSearch|getEnterpriseSearch/.test(snippet)) {
+      found.push({ index, snippet: compact(snippet) });
+    }
+    cursor = index + needle.length;
   }
-  return result;
+  return found;
 }
 
 export async function GET() {
@@ -35,20 +38,32 @@ export async function GET() {
     const src = $("script[src*='advjs/app.']").first().attr("src");
     if (!src) throw new Error("Advantage app bundle was not found");
     const scriptUrl = new globalThis.URL(src, base).toString();
-    const scriptResponse = await fetch(scriptUrl, { headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, cache: "no-store" });
+    const scriptResponse = await fetch(scriptUrl, {
+      headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
+      cache: "no-store",
+    });
     if (!scriptResponse.ok) throw new Error(`Advantage bundle returned ${scriptResponse.status}`);
     const source = await scriptResponse.text();
+
+    const patterns = [
+      "onPageActionClick:this.",
+      "onPageActionClick=",
+      "onPageActionClick:",
+      "GridPagination",
+      "pageActionCode",
+      "paginationAction",
+      'case"nextpage"',
+      'case "nextpage"',
+      'actionCode:"nextpage"',
+      'actionCode=t',
+      "rows_requested",
+      "start_data_window",
+    ];
+
     return NextResponse.json({
       ok: true,
       scriptUrl,
-      onPageActionClick: hits(source, "onPageActionClick", 3000, 9000, 12),
-      nextpageLiteral: hits(source, '"nextpage"', 3000, 9000, 12),
-      pageActionLiteral: hits(source, 'actionType="pageAction"', 3500, 9000, 12),
-      pageActionColon: hits(source, 'actionType:"pageAction"', 3500, 9000, 12),
-      gridPagination: hits(source, "gridPagination", 3000, 9000, 8),
-      paginationData: hits(source, "paginationData", 3000, 9000, 8),
-      rowsRequested: hits(source, "rows_requested", 3000, 9000, 8),
-      dataWindow: hits(source, "data_window", 3000, 9000, 8),
+      matches: Object.fromEntries(patterns.map(pattern => [pattern, excerpts(source, pattern)])),
     });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
