@@ -6,6 +6,7 @@ import { syncPublicPeopleSoft } from "@/lib/sled/peoplesoft";
 import { syncDelawareOpenBids } from "@/lib/sled/delaware";
 import { syncDirectStateBoards } from "@/lib/sled/direct-state-boards";
 import { syncSouthCarolinaScbo } from "@/lib/sled/south-carolina";
+import { syncTexasEsbd } from "@/lib/sled/texas";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const [official, periscope, jaggaer, peoplesoft, delaware, directBoards, southCarolina] = await Promise.all([
+  const [official, periscope, jaggaer, peoplesoft, delaware, directBoards, southCarolina, texas] = await Promise.all([
     syncOfficialStatePages(false),
     syncPeriscopeFirstPages(),
     syncJaggaerFirstPages(),
@@ -25,12 +26,13 @@ export async function GET(request: NextRequest) {
     syncDelawareOpenBids(false),
     syncDirectStateBoards(false),
     syncSouthCarolinaScbo(false),
+    syncTexasEsbd(false),
   ]);
 
-  const failures = [...official, ...periscope, ...jaggaer, ...peoplesoft, delaware, ...directBoards, southCarolina].filter(result => !result.ok);
+  const failures = [...official, ...periscope, ...jaggaer, ...peoplesoft, delaware, ...directBoards, southCarolina, texas].filter(result => !result.ok);
   return NextResponse.json({
     ok: failures.length === 0,
-    sync: { official, periscope, jaggaer, peoplesoft, delaware, directBoards, southCarolina },
+    sync: { official, periscope, jaggaer, peoplesoft, delaware, directBoards, southCarolina, texas },
     failures,
   }, { status: failures.length === 0 ? 200 : 207 });
 }
