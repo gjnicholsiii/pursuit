@@ -1,4 +1,5 @@
 import { Opportunity } from "./types";
+import { persistSamOpportunities, type SamPersistenceResult } from "./sam-persistence";
 
 const SAM_SEARCH_URL = "https://api.sam.gov/opportunities/v2/search";
 
@@ -10,7 +11,7 @@ interface SamPlace {
   zip?: string | null;
 }
 
-interface SamOpportunityRaw {
+export interface SamOpportunityRaw {
   noticeId?: string;
   title?: string;
   solicitationNumber?: string | null;
@@ -45,6 +46,8 @@ export interface SamLoadResult {
   opportunities: Opportunity[];
   totalRecords: number;
   error?: string;
+  persistence?: SamPersistenceResult;
+  persistenceError?: string;
 }
 
 function formatDateMMDDYYYY(date: Date) {
@@ -77,7 +80,7 @@ function locationName(place?: SamPlace | null) {
 }
 
 function confidenceFor(raw: SamOpportunityRaw) {
-  let score = 38; // Feed metadata alone is never treated as a fully read bid package.
+  let score = 38;
   if (raw.responseDeadLine) score += 8;
   if (raw.solicitationNumber) score += 6;
   if (raw.naicsCode) score += 6;
@@ -166,14 +169,27 @@ export async function loadSamOpportunities(limit = 20): Promise<SamLoadResult> {
     }
 
     const payload = (await response.json()) as SamSearchResponse;
-    const opportunities = (payload.opportunitiesData || [])
+    const rawOpportunities = payload.opportunitiesData || [];
+    const opportunities = rawOpportunities
       .map(mapOpportunity)
       .sort((a, b) => b.confidence - a.confidence);
+
+    let persistence: SamPersistenceResult | undefined;
+    let persistenceError: string | undefined;
+    if (process.env.DATABASE_URL && rawOpportunities.length) {
+      try {
+        persistence = await persistSamOpportunities(rawOpportunities);
+      } catch (error) {
+        persistenceError = error instanceof Error ? error.message : "Unable to persist SAM.gov records";
+      }
+    }
 
     return {
       configured: true,
       opportunities,
       totalRecords: payload.totalRecords || opportunities.length,
+      persistence,
+      persistenceError,
     };
   } catch (error) {
     return {
