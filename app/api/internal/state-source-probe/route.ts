@@ -30,23 +30,43 @@ function walk(value: unknown, path = "$", out: Array<{ path: string; value: Reco
   return out;
 }
 
+function extractBalancedJson(text: string, start: number) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
 function extractInitialResponse(html: string) {
   const marker = html.match(/var\s+moInitialResponse\s*=\s*/);
   if (!marker || marker.index === undefined) return { value: null, error: "marker not found" };
   const start = marker.index + marker[0].length;
-  const scriptEnd = html.indexOf("</script>", start);
-  if (scriptEnd < 0) return { value: null, error: "script end not found" };
-  let raw = html.slice(start, scriptEnd).trim();
-  raw = raw.replace(/;\s*(?:\/\/-->)?\s*$/, "");
+  const objectStart = html.indexOf("{", start);
+  if (objectStart < 0) return { value: null, error: "object start not found" };
+  const raw = extractBalancedJson(html, objectStart);
+  if (!raw) return { value: null, error: "object end not found" };
   try {
     return { value: JSON.parse(raw) as Record<string, unknown>, error: null };
   } catch (error) {
-    const terms = ["Business Opportunities", "Solicitation", "Bid", "Vendor"];
-    const snippets = terms.flatMap(term => {
-      const index = html.toLowerCase().indexOf(term.toLowerCase());
-      return index < 0 ? [] : [html.slice(Math.max(0, index - 350), Math.min(html.length, index + 900)).replace(/\s+/g, " ")];
-    });
-    return { value: null, error: error instanceof Error ? error.message : String(error), snippets };
+    return { value: null, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -74,7 +94,6 @@ export async function GET(request: NextRequest) {
       guest: html.includes('"GUEST_SESSION":"true"'),
       metadataFound: Boolean(initial.value),
       parseError: initial.error,
-      fallbackSnippets: "snippets" in initial ? initial.snippets : [],
       matches: initial.value ? walk(initial.value).slice(0, 100) : [],
     });
   }
