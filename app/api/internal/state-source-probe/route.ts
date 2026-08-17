@@ -13,19 +13,11 @@ function resolveScripts(html: string, pageUrl: string) {
   });
 }
 
-function snippets(text: string, terms: string[], max = 60) {
+function around(text: string, term: string, radius = 900) {
   const lower = text.toLowerCase();
-  const result: string[] = [];
-  for (const term of terms) {
-    let from = 0;
-    while (result.length < max) {
-      const index = lower.indexOf(term.toLowerCase(), from);
-      if (index < 0) break;
-      result.push(text.slice(Math.max(0, index - 1100), Math.min(text.length, index + 2200)).replace(/\s+/g, " "));
-      from = index + term.length;
-    }
-  }
-  return [...new Set(result)].slice(0, max);
+  const index = lower.indexOf(term.toLowerCase());
+  if (index < 0) return null;
+  return text.slice(Math.max(0, index - radius), Math.min(text.length, index + term.length + radius)).replace(/\s+/g, " ");
 }
 
 export async function GET(request: NextRequest) {
@@ -37,32 +29,11 @@ export async function GET(request: NextRequest) {
   if (!appUrl) return NextResponse.json({ ok: false, error: "Kentucky app bundle not found" }, { status: 500 });
   const app = await fetch(appUrl, { cache: "no-store", headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
   const body = await app.text();
+  const terms = ["dataFetchSvc", "start_data_window", "starting_data_window", "ending_data_window", "rows_per_page", "total_count_suffix", "fetchRows", "dataWindow"];
   return NextResponse.json({
     ok: true,
     appUrl,
     appStatus: app.status,
-    appSize: body.length,
-    findings: snippets(body, [
-      "rows_per_page",
-      "start_data_window",
-      "end_data_window",
-      "rows_sent",
-      "rows_total",
-      "total_count_suffix",
-      "dataFetchSvc",
-      "fetchNext",
-      "loadMore",
-      "nextPage",
-      "pageWindow",
-      "gridData",
-      "scrollEnd",
-      "virtualScroll",
-      "blockRowCount",
-      "fetchedBlockRowCount",
-      "startDataWindow",
-      "endDataWindow",
-      "fetchRows",
-      "dataWindow",
-    ], 55),
+    matches: Object.fromEntries(terms.map(term => [term, around(body, term)])),
   });
 }
