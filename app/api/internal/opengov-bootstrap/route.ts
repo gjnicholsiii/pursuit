@@ -7,9 +7,8 @@ export const maxDuration = 300;
 export async function GET(request: NextRequest) {
   const deploymentHost = process.env.VERCEL_URL;
   const requestHost = request.headers.get("host");
-  if (!deploymentHost || requestHost !== deploymentHost) {
-    return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
-  }
+  const allowed = Boolean(deploymentHost && requestHost === deploymentHost) || requestHost === "pursuit-neon.vercel.app";
+  if (!allowed) return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
 
   try {
     const sync = await syncOpenGovPublic(true);
