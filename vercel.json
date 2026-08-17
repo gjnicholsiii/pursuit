@@ -18,7 +18,7 @@
     },
     {
       "path": "/api/cron/state-heavy",
-      "schedule": "42 21 * * *"
+      "schedule": "45 */4 * * *"
     }
   ]
 }
