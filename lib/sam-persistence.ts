@@ -125,24 +125,30 @@ export async function persistSamOpportunities(
     const agencyId = agencyIds.get(agencyName(raw));
     if (!externalId || !agencyId) return [];
 
-    const stateCode = raw.placeOfPerformance?.state?.code;
+    const previous = existing.get(externalId);
+    const previousLinks = previous?.raw_payload?.resourceLinks;
+    const rawForStorage: SamOpportunityRaw = !raw.resourceLinks?.length && previousLinks?.length
+      ? { ...raw, resourceLinks: previousLinks }
+      : raw;
+
+    const stateCode = rawForStorage.placeOfPerformance?.state?.code;
     return [{
       external_id: externalId,
       agency_id: agencyId,
-      title: raw.title?.trim() || "Untitled federal opportunity",
-      description: raw.description || null,
-      solicitation_type: raw.type || raw.baseType || null,
-      procurement_mechanism: raw.type || raw.baseType || null,
-      status: raw.active === "No" ? "closed" : "open",
-      issue_date: safeDate(raw.postedDate),
-      due_at: safeTimestamp(raw.responseDeadLine),
+      title: rawForStorage.title?.trim() || "Untitled federal opportunity",
+      description: rawForStorage.description || null,
+      solicitation_type: rawForStorage.type || rawForStorage.baseType || null,
+      procurement_mechanism: rawForStorage.type || rawForStorage.baseType || null,
+      status: rawForStorage.active === "No" ? "closed" : "open",
+      issue_date: safeDate(rawForStorage.postedDate),
+      due_at: safeTimestamp(rawForStorage.responseDeadLine),
       state_code: stateCode && stateCode.length === 2 ? stateCode : null,
-      city: raw.placeOfPerformance?.city?.name || null,
-      naics_codes: raw.naicsCode ? [raw.naicsCode] : [],
-      set_aside: raw.typeOfSetAsideDescription || raw.typeOfSetAside || null,
-      source_url: sourceUrl(raw),
-      content_hash: hashPayload(raw),
-      raw_payload: raw,
+      city: rawForStorage.placeOfPerformance?.city?.name || null,
+      naics_codes: rawForStorage.naicsCode ? [rawForStorage.naicsCode] : [],
+      set_aside: rawForStorage.typeOfSetAsideDescription || rawForStorage.typeOfSetAside || null,
+      source_url: sourceUrl(rawForStorage),
+      content_hash: hashPayload(rawForStorage),
+      raw_payload: rawForStorage,
     }];
   });
 
