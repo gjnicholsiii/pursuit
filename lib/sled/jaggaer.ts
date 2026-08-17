@@ -25,12 +25,22 @@ export interface JaggaerProbeResult {
   rowsFound: number;
   pageCount: number | null;
   resultCount: number | null;
+  complete: boolean;
   sample: Array<{ externalId: string; title: string; dueAt: string | null; sourceUrl: string }>;
   error?: string;
 }
 
 function text(value: string) {
   return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function cookieHeader(setCookie: string | null) {
+  if (!setCookie) return "";
+  return setCookie
+    .split(/,(?=[^;,]+=)/)
+    .map(part => part.split(";")[0].trim())
+    .filter(Boolean)
+    .join("; ");
 }
 
 function publicUrl(config: JaggaerStateConfig) {
@@ -58,7 +68,7 @@ function classifyTitle(title: string) {
   return { agencyType: "state_agency", jurisdictionLevel: "state" };
 }
 
-function parseJaggaerEvents(html: string, config: JaggaerStateConfig): SledOpportunityRecord[] {
+function parseJaggaerEvents(html: string, config: JaggaerStateConfig, complete: boolean): SledOpportunityRecord[] {
   const $ = load(html);
   const base = publicUrl(config);
   const records: SledOpportunityRecord[] = [];
@@ -126,7 +136,7 @@ function parseJaggaerEvents(html: string, config: JaggaerStateConfig): SledOppor
         pdfDocumentKey: pdfKey,
         pdfAvailable: Boolean(pdfHref),
         sourcePage: base,
-        pageLimited: true,
+        pageLimited: !complete,
       },
     });
   });
@@ -135,18 +145,48 @@ function parseJaggaerEvents(html: string, config: JaggaerStateConfig): SledOppor
 }
 
 function parseCounts(html: string) {
-  const plain = text(load(html)("body").text());
-  const resultMatch = plain.match(/\d+\s*-\s*\d+\s*of\s*(\d+)\s*Results/i);
+  const $ = load(html);
+  const summary = text($(".readOnlyPageOf").first().text()) || text($("body").text());
+  const resultMatch = summary.match(/\d+\s*-\s*\d+\s*of\s*(\d+)\s*Results/i);
   const resultCount = resultMatch ? Number(resultMatch[1]) : null;
+  const pageSize = Number($('input[name="PageSize"]').first().attr("value") || 0) || null;
   return {
-    pageCount: resultCount ? Math.ceil(resultCount / 20) : null,
+    pageCount: resultCount && pageSize ? Math.ceil(resultCount / pageSize) : null,
     resultCount,
+    pageSize,
   };
+}
+
+function activeFormParams(html: string) {
+  const $ = load(html);
+  const form = $('form[name="ActiveForm"]').first();
+  if (!form.length) throw new Error("JAGGAER ActiveForm was not found");
+  const params = new URLSearchParams();
+
+  form.find("input[name]").each((_, node) => {
+    const input = $(node);
+    const name = input.attr("name");
+    if (!name) return;
+    const type = (input.attr("type") || "text").toLowerCase();
+    if ((type === "checkbox" || type === "radio") && !input.is(":checked")) return;
+    if (["submit", "button", "image", "file"].includes(type)) return;
+    params.append(name, input.attr("value") || "");
+  });
+
+  form.find("select[name]").each((_, node) => {
+    const select = $(node);
+    const name = select.attr("name");
+    if (!name) return;
+    const selected = select.find("option:selected").attr("value") || select.find("option").first().attr("value") || "";
+    params.set(name, selected);
+  });
+
+  return { action: form.attr("action") || "", params };
 }
 
 async function fetchJaggaer(config: JaggaerStateConfig) {
   const url = publicUrl(config);
-  const response = await fetch(url, {
+  const initial = await fetch(url, {
     headers: {
       accept: "text/html,application/xhtml+xml",
       "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
@@ -154,21 +194,75 @@ async function fetchJaggaer(config: JaggaerStateConfig) {
     redirect: "follow",
     cache: "no-store",
   });
-  if (!response.ok) throw new Error(`${config.sourceName} returned ${response.status}`);
+  if (!initial.ok) throw new Error(`${config.sourceName} returned ${initial.status}`);
+
+  const initialHtml = await initial.text();
+  const cookie = cookieHeader(initial.headers.get("set-cookie"));
+  const initialCounts = parseCounts(initialHtml);
+  const initialRecords = parseJaggaerEvents(initialHtml, config, initialCounts.resultCount === null || initialCounts.resultCount <= initialRecordsLength(initialHtml));
+
+  if (!initialCounts.resultCount || initialCounts.resultCount <= initialRecords.length) {
+    return {
+      records: parseJaggaerEvents(initialHtml, config, true),
+      pageCount: 1,
+      resultCount: initialCounts.resultCount ?? initialRecords.length,
+      complete: true,
+    };
+  }
+
+  if (initialCounts.resultCount > 200) {
+    return {
+      records: initialRecords,
+      pageCount: initialCounts.pageCount ?? Math.ceil(initialCounts.resultCount / 20),
+      resultCount: initialCounts.resultCount,
+      complete: false,
+    };
+  }
+
+  const built = activeFormParams(initialHtml);
+  built.params.set("PageSize", "200");
+  built.params.set("PageNum", "1");
+  built.params.set("ESSearchAfter", "");
+  const postUrl = new URL(built.action || initial.url, initial.url).toString();
+  const response = await fetch(postUrl, {
+    method: "POST",
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "content-type": "application/x-www-form-urlencoded",
+      referer: initial.url,
+      ...(cookie ? { cookie } : {}),
+      "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
+    },
+    body: built.params,
+    redirect: "follow",
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`${config.sourceName} full-result request returned ${response.status}`);
+
   const html = await response.text();
-  const records = parseJaggaerEvents(html, config);
   const counts = parseCounts(html);
+  const records = parseJaggaerEvents(html, config, true);
+  const expected = counts.resultCount ?? initialCounts.resultCount;
+  const complete = Boolean(expected !== null && records.length === expected);
   return {
-    records,
-    pageCount: counts.pageCount ?? (records.length ? 1 : null),
-    resultCount: counts.resultCount ?? (records.length || null),
+    records: complete ? records : parseJaggaerEvents(html, config, false),
+    pageCount: counts.pageCount ?? 1,
+    resultCount: expected,
+    complete,
   };
+}
+
+function initialRecordsLength(html: string) {
+  const $ = load(html);
+  return new Set(
+    $('a[href*="app01.jaggaer.com/apps/Router/ViewSourcingEvent"]').toArray().map(anchor => text($(anchor).text())).filter(Boolean),
+  ).size;
 }
 
 export async function probeJaggaerStates(): Promise<JaggaerProbeResult[]> {
   return Promise.all(JAGGAER_STATES.map(async config => {
     try {
-      const { records, pageCount, resultCount } = await fetchJaggaer(config);
+      const { records, pageCount, resultCount, complete } = await fetchJaggaer(config);
       return {
         stateCode: config.stateCode,
         sourceName: config.sourceName,
@@ -176,6 +270,7 @@ export async function probeJaggaerStates(): Promise<JaggaerProbeResult[]> {
         rowsFound: records.length,
         pageCount,
         resultCount,
+        complete,
         sample: records.slice(0, 3).map(record => ({
           externalId: record.externalId,
           title: record.title,
@@ -192,6 +287,7 @@ export async function probeJaggaerStates(): Promise<JaggaerProbeResult[]> {
         rowsFound: 0,
         pageCount: null,
         resultCount: null,
+        complete: false,
         sample: [],
         error: error instanceof Error ? error.message : String(error),
       };
@@ -199,11 +295,11 @@ export async function probeJaggaerStates(): Promise<JaggaerProbeResult[]> {
   }));
 }
 
-export async function syncJaggaerFirstPages() {
+export async function syncJaggaerFullSweeps() {
   const results = [];
   for (const config of JAGGAER_STATES) {
     try {
-      const { records, pageCount, resultCount } = await fetchJaggaer(config);
+      const { records, pageCount, resultCount, complete } = await fetchJaggaer(config);
       if (!records.length) throw new Error("No open JAGGAER events parsed");
       const source: SledSourceConfig = {
         adapterKey: `jaggaer_${config.stateCode.toLowerCase()}`,
@@ -213,12 +309,12 @@ export async function syncJaggaerFirstPages() {
         sourceType: "portal",
       };
       const persisted = await persistSledOpportunities(source, records, {
-        mode: "jaggaer_first_page",
+        mode: complete ? "jaggaer_full_sweep" : "jaggaer_partial_sweep",
         recordChanges: true,
       });
-      results.push({ stateCode: config.stateCode, ok: true, rowsFound: records.length, pageCount, resultCount, ...persisted, pageLimited: (pageCount || 1) > 1 });
+      results.push({ stateCode: config.stateCode, ok: true, rowsFound: records.length, pageCount, resultCount, complete, ...persisted, pageLimited: !complete });
     } catch (error) {
-      results.push({ stateCode: config.stateCode, ok: false, rowsFound: 0, stored: 0, newRecords: 0, changedRecords: 0, pageCount: null, resultCount: null, pageLimited: true, error: error instanceof Error ? error.message : String(error) });
+      results.push({ stateCode: config.stateCode, ok: false, rowsFound: 0, stored: 0, newRecords: 0, changedRecords: 0, pageCount: null, resultCount: null, complete: false, pageLimited: true, error: error instanceof Error ? error.message : String(error) });
     }
   }
   return results;
