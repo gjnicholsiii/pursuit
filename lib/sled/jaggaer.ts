@@ -11,6 +11,7 @@ interface JaggaerStateConfig {
 }
 
 const JAGGAER_STATES: JaggaerStateConfig[] = [
+  { stateCode: "GA", stateName: "Georgia", customerOrg: "Georgia", sourceName: "Georgia GA@WORK Marketplace Public Events", agencyName: "State of Georgia" },
   { stateCode: "IA", stateName: "Iowa", customerOrg: "DASIowa", sourceName: "Iowa IMPACS", agencyName: "State of Iowa" },
   { stateCode: "MT", stateName: "Montana", customerOrg: "StateOfMontana", sourceName: "Montana eMACS", agencyName: "State of Montana" },
   { stateCode: "UT", stateName: "Utah", customerOrg: "StateOfUtah", sourceName: "Utah Public Procurement Place", agencyName: "State of Utah" },
