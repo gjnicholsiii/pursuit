@@ -6,7 +6,6 @@ export const maxDuration = 120;
 const KY_URL = "https://vss.ky.gov/vssprod-ext/Advantage4";
 type Obj = Record<string, unknown>;
 type CookieJar = Map<string, string>;
-
 type Session = { session_id: string; csrf_token: string; page_id: string };
 
 function extractBalancedJson(text: string, start: number) {
@@ -57,12 +56,6 @@ function findSession(objects: Obj[]): Session | null {
 
 function findAction(objects: Obj[], target: string, name?: string) {
   return objects.find(item => str(item, "targetQualifiedName") === target || (name && str(item, "name") === name)) || null;
-}
-
-function compactAction(action: Obj | null) {
-  if (!action) return null;
-  const allowed = ["key", "name", "title", "actionType", "actionCode", "viewName", "targetLocation", "targetComponentType", "targetMode", "targetPage", "targetPageId", "targetQualifiedName", "applicationUrl"];
-  return Object.fromEntries(allowed.flatMap(key => action[key] !== undefined ? [[key, action[key]]] : []));
 }
 
 function buildPayload(action: Obj, session: Session) {
@@ -142,12 +135,29 @@ async function postAction(url: string, jar: CookieJar, action: Obj, session: Ses
   return { response, text, json };
 }
 
-function summarize(value: unknown) {
-  const objects = collectObjects(value);
-  return objects.filter(item => {
-    const joined = Object.values(item).filter(v => typeof v === "string").join(" ");
-    return /solicit|bid|closing|response|document|agency|buyer|commodity|vendor/i.test(joined);
-  }).slice(0, 80).map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))));
+function findSolicitationArrays(value: unknown, path = "$", out: Array<{ path: string; rows: Obj[] }> = []) {
+  if (Array.isArray(value)) {
+    const rows = value.filter(item => item && typeof item === "object" && !Array.isArray(item)) as Obj[];
+    if (rows.some(row => typeof row.DOC_REF === "string" && typeof row.DOC_DSCR === "string")) out.push({ path, rows });
+    value.forEach((item, index) => findSolicitationArrays(item, `${path}[${index}]`, out));
+    return out;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, child] of Object.entries(value as Obj)) findSolicitationArrays(child, `${path}.${key}`, out);
+  }
+  return out;
+}
+
+function findPagingScalars(value: unknown, path = "$", out: Array<{ path: string; value: string | number | boolean }> = []) {
+  if (!value || typeof value !== "object") return out;
+  if (Array.isArray(value)) { value.forEach((item, index) => findPagingScalars(item, `${path}[${index}]`, out)); return out; }
+  for (const [key, child] of Object.entries(value as Obj)) {
+    const nextPath = `${path}.${key}`;
+    if (["string", "number", "boolean"].includes(typeof child) && /count|rows|page|offset|limit|total|record|fetch/i.test(key)) {
+      out.push({ path: nextPath, value: child as string | number | boolean });
+    } else findPagingScalars(child, nextPath, out);
+  }
+  return out;
 }
 
 export async function GET(request: NextRequest) {
@@ -155,8 +165,7 @@ export async function GET(request: NextRequest) {
 
   const jar: CookieJar = new Map();
   const shell = await fetchWithJar(KY_URL, jar, { headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0", accept: "text/html,application/xhtml+xml" } });
-  const html = await shell.text();
-  const initial = extractInitialResponse(html);
+  const initial = extractInitialResponse(await shell.text());
   if (!initial) return NextResponse.json({ ok: false, error: "Initial guest response not found" }, { status: 500 });
   const initialObjects = collectObjects(initial);
   const initialSession = findSession(initialObjects);
@@ -165,26 +174,32 @@ export async function GET(request: NextRequest) {
 
   const applicationUrl = new URL(str(carouselAction, "applicationUrl"), shell.url).toString();
   const carousel = await postAction(applicationUrl, jar, carouselAction, initialSession, shell.url);
-  if (!carousel.json) return NextResponse.json({ ok: false, error: "Kentucky carousel did not return JSON", status: carousel.response.status }, { status: 502 });
-
+  if (!carousel.json) return NextResponse.json({ ok: false, error: "Kentucky carousel did not return JSON" }, { status: 502 });
   const carouselObjects = collectObjects(carousel.json);
   const solicitationAction = findAction(carouselObjects, "vss.page.VVSSX10019", "solicitations");
-  const currentSession = findSession(carouselObjects) || initialSession;
-  if (!solicitationAction) {
-    return NextResponse.json({ ok: false, error: "Published solicitations action not found", carousel: summarize(carousel.json) }, { status: 500 });
-  }
+  if (!solicitationAction) return NextResponse.json({ ok: false, error: "Published solicitations action not found" }, { status: 500 });
 
-  const solicitations = await postAction(applicationUrl, jar, solicitationAction, currentSession, applicationUrl);
+  const solicitations = await postAction(applicationUrl, jar, solicitationAction, findSession(carouselObjects) || initialSession, applicationUrl);
+  if (!solicitations.json) return NextResponse.json({ ok: false, error: "Published solicitations did not return JSON" }, { status: 502 });
+  const arrays = findSolicitationArrays(solicitations.json);
+  const best = arrays.sort((a, b) => b.rows.length - a.rows.length)[0];
+  const sample = (best?.rows || []).slice(0, 3).map(row => ({
+    DOC_REF: row.DOC_REF,
+    DOC_DSCR: row.DOC_DSCR,
+    DEPT_NM: row.DEPT_NM,
+    DOC_CD: row.DOC_CD,
+    SO_STA: row.SO_STA,
+    SO_CLSNG_DT_TM: row.SO_CLSNG_DT_TM,
+    PUB_DT: row.PUB_DT,
+  }));
+
   return NextResponse.json({
     ok: true,
     cookieCount: jar.size,
-    carouselAction: compactAction(carouselAction),
-    solicitationAction: compactAction(solicitationAction),
-    solicitationStatus: solicitations.response.status,
-    solicitationContentType: solicitations.response.headers.get("content-type"),
-    sessionInvalid: /SessionInvalidPage|Session Invalid/i.test(solicitations.text),
-    responseSize: solicitations.text.length,
-    responsePreview: solicitations.text.slice(0, 1500),
-    summary: solicitations.json ? summarize(solicitations.json) : [],
+    datasetPath: best?.path || null,
+    rowsReturned: best?.rows.length || 0,
+    arrayCandidates: arrays.map(item => ({ path: item.path, rows: item.rows.length })).slice(0, 10),
+    paging: findPagingScalars(solicitations.json).slice(0, 100),
+    sample,
   });
 }
