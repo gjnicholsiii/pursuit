@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 const PORTALS = [
   { state: "KY", name: "Kentucky VSS", url: "https://vss.ky.gov/vssprod-ext/Advantage4" },
   { state: "MI", name: "Michigan SIGMA VSS", url: "https://sigma.michigan.gov/PRDVSS1X1/Advantage4" },
 ];
 
+type JsonObject = Record<string, any>;
+
 function extractJsonObject(source: string, start: number) {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
+  let depth = 0, inString = false, escaped = false;
   for (let index = start; index < source.length; index += 1) {
     const char = source[index];
     if (inString) {
@@ -30,82 +30,45 @@ function extractJsonObject(source: string, start: number) {
   throw new Error("JSON object was not balanced");
 }
 
-function parseInitial(html: string) {
+function parseInitial(html: string): JsonObject {
   const marker = html.search(/var\s+moInitialResponse\s*=\s*/i);
   if (marker < 0) throw new Error("moInitialResponse was not found");
   const brace = html.indexOf("{", marker);
   if (brace < 0) throw new Error("moInitialResponse JSON start was not found");
-  return JSON.parse(extractJsonObject(html, brace)) as Record<string, any>;
+  return JSON.parse(extractJsonObject(html, brace));
 }
 
-function cookieHeader(setCookie: string | null) {
+function cookies(setCookie: string | null) {
   if (!setCookie) return "";
   return setCookie.split(/,(?=[^;,]+=)/).map(part => part.split(";")[0].trim()).filter(Boolean).join("; ");
 }
 
-function findByName(value: unknown, name: string): Record<string, any> | null {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findByName(item, name);
-      if (found) return found;
+function mergeCookies(left: string, setCookie: string | null) {
+  const values = new Map<string, string>();
+  for (const header of [left, cookies(setCookie)]) {
+    for (const item of header.split(";").map(value => value.trim()).filter(Boolean)) {
+      const split = item.indexOf("=");
+      if (split > 0) values.set(item.slice(0, split), item.slice(split + 1));
     }
+  }
+  return [...values.entries()].map(([key, value]) => `${key}=${value}`).join("; ");
+}
+
+function findByName(value: unknown, name: string): JsonObject | null {
+  if (Array.isArray(value)) {
+    for (const item of value) { const found = findByName(item, name); if (found) return found; }
     return null;
   }
   if (!value || typeof value !== "object") return null;
-  const object = value as Record<string, any>;
+  const object = value as JsonObject;
   if (object.name === name) return object;
-  for (const child of Object.values(object)) {
-    const found = findByName(child, name);
-    if (found) return found;
-  }
+  for (const child of Object.values(object)) { const found = findByName(child, name); if (found) return found; }
   return null;
 }
 
-function collectMatches(value: unknown, path = "$", out: Array<Record<string, unknown>> = []) {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => collectMatches(item, `${path}[${index}]`, out));
-    return out;
-  }
-  if (!value || typeof value !== "object") return out;
-  const object = value as Record<string, unknown>;
-  const searchable = Object.entries(object)
-    .filter(([, child]) => typeof child === "string")
-    .map(([key, child]) => `${key}:${child}`)
-    .join(" ");
-  if (/solicit|published|opportun|bid/i.test(searchable)) {
-    out.push({
-      path,
-      key: object.key ?? null,
-      name: object.name ?? null,
-      title: object.title ?? null,
-      label: object.label ?? null,
-      description: object.description ?? null,
-      actionType: object.actionType ?? null,
-      targetQualifiedName: object.targetQualifiedName ?? null,
-      targetComponentType: object.targetComponentType ?? null,
-      targetLocation: object.targetLocation ?? null,
-      applicationUrl: object.applicationUrl ?? null,
-      isCarouselNavigation: object.isCarouselNavigation ?? null,
-    });
-  }
-  for (const [key, child] of Object.entries(object)) collectMatches(child, `${path}.${key}`, out);
-  return out;
-}
-
-async function inspect(portal: (typeof PORTALS)[number]) {
-  const initialResponse = await fetch(portal.url, {
-    headers: { accept: "text/html,*/*", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
-    redirect: "follow",
-    cache: "no-store",
-  });
-  if (!initialResponse.ok) throw new Error(`${portal.name} returned ${initialResponse.status}`);
-  const initial = parseInitial(await initialResponse.text());
-  const nav = findByName(initial, "carousalAction");
-  if (!nav) throw new Error("carousalAction was not found");
-  const session = JSON.parse(JSON.stringify(initial.session_info || {}));
-  const pageId = session.page_id;
-  const csrf = session.csrf_token;
-  const payload = {
+function pageOpenPayload(state: JsonObject, nav: JsonObject) {
+  const session = JSON.parse(JSON.stringify(state.session_info || {}));
+  return {
     action: {
       key: nav.key,
       actionType: "pageOpen",
@@ -116,38 +79,87 @@ async function inspect(portal: (typeof PORTALS)[number]) {
       },
       isCarouselNavigation: nav.isCarouselNavigation,
       targetQualifiedName: nav.targetQualifiedName,
+      ...(nav.viewName ? { viewName: nav.viewName } : {}),
       suppressLeafing: Boolean(nav.suppressLeafing),
     },
-    session_info: { ...session, page_id: pageId },
-    data: initial.data,
+    session_info: session,
+    data: state.data,
   };
-  const response = await fetch(nav.applicationUrl || initialResponse.url, {
+}
+
+async function pageOpen(baseUrl: string, referer: string, state: JsonObject, nav: JsonObject, cookie: string) {
+  const csrf = state.session_info?.csrf_token;
+  const response = await fetch(nav.applicationUrl || baseUrl, {
     method: "POST",
     headers: {
       accept: "application/json,text/plain,*/*",
       "content-type": "application/json;charset=UTF-8",
-      referer: initialResponse.url,
-      origin: new URL(initialResponse.url).origin,
+      referer,
+      origin: new URL(referer).origin,
       ...(csrf ? { "x-csrf-token": String(csrf) } : {}),
-      ...(initialResponse.headers.get("set-cookie") ? { cookie: cookieHeader(initialResponse.headers.get("set-cookie")) } : {}),
+      ...(cookie ? { cookie } : {}),
       "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(pageOpenPayload(state, nav)),
     redirect: "follow",
     cache: "no-store",
   });
-  const body = await response.text();
-  let json: Record<string, unknown> | null = null;
-  try { json = JSON.parse(body) as Record<string, unknown>; } catch {}
+  const text = await response.text();
+  if (!response.ok) throw new Error(`pageOpen ${nav.name || nav.targetQualifiedName} returned ${response.status}: ${text.slice(0, 300)}`);
+  let json: JsonObject;
+  try { json = JSON.parse(text); } catch { throw new Error(`pageOpen returned non-JSON: ${text.slice(0, 300)}`); }
+  return { json, cookie: mergeCookies(cookie, response.headers.get("set-cookie")), status: response.status };
+}
+
+function datasetSummary(state: JsonObject) {
+  const datasets = state.data?.ds_data || {};
+  return Object.fromEntries(Object.entries(datasets).map(([name, value]) => {
+    const dataset = value as JsonObject;
+    const rows = Array.isArray(dataset.row_data) ? dataset.row_data : [];
+    return [name, {
+      rows: rows.length,
+      rowsSent: dataset.rows_sent ?? dataset.rowsSent ?? null,
+      rowsTotal: dataset.rows_total ?? dataset.rowsTotal ?? dataset.total_count ?? null,
+      rowsPerPage: dataset.rows_per_page ?? dataset.rowsPerPage ?? null,
+      totalCountSuffix: dataset.total_count_suffix ?? null,
+      firstRows: rows.slice(0, 3),
+      keys: Object.keys(dataset).filter(key => key !== "row_data").slice(0, 40),
+    }];
+  }));
+}
+
+async function inspect(portal: (typeof PORTALS)[number]) {
+  const initialResponse = await fetch(portal.url, {
+    headers: { accept: "text/html,*/*", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
+    redirect: "follow",
+    cache: "no-store",
+  });
+  if (!initialResponse.ok) throw new Error(`${portal.name} returned ${initialResponse.status}`);
+  const initial = parseInitial(await initialResponse.text());
+  let cookie = cookies(initialResponse.headers.get("set-cookie"));
+
+  const carouselAction = findByName(initial, "carousalAction");
+  if (!carouselAction) throw new Error("carousalAction was not found");
+  const carousel = await pageOpen(portal.url, initialResponse.url, initial, carouselAction, cookie);
+  cookie = carousel.cookie;
+
+  const solicitationsAction = findByName(carousel.json, "solicitations");
+  if (!solicitationsAction) throw new Error("solicitations action was not found");
+  const solicitations = await pageOpen(portal.url, initialResponse.url, carousel.json, solicitationsAction, cookie);
+
+  const datasets = datasetSummary(solicitations.json);
   return {
     state: portal.state,
-    status: response.status,
-    contentType: response.headers.get("content-type"),
-    bytes: body.length,
-    jsonKeys: json ? Object.keys(json) : [],
-    sessionReturned: Boolean((json as Record<string, any> | null)?.session_info),
-    matches: json ? collectMatches(json).slice(0, 50) : [],
-    bodyHead: json ? null : body.slice(0, 1200),
+    carouselStatus: carousel.status,
+    solicitationsStatus: solicitations.status,
+    action: {
+      key: solicitationsAction.key,
+      targetQualifiedName: solicitationsAction.targetQualifiedName,
+      targetComponentType: solicitationsAction.targetComponentType,
+    },
+    pageAction: solicitations.json.action ?? null,
+    datasets,
+    hasTargetDataset: Boolean((solicitations.json.data?.ds_data || {}).T1SO_SRCH_QRY),
   };
 }
 
