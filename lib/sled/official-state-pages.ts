@@ -151,8 +151,8 @@ function parseTennesseePage(html: string, pageUrl: string, defaultType: "RFP" | 
     const externalId = `${typeToken}:${number}`;
     const dates = dateText.match(/\d{1,2}\/\d{1,2}\/\d{4}/g) || [];
     if (dates.length < 2) return;
-    const issueDate = dateOnlyIso(dates[0]);
-    const dueAt = dateOnlyIso(dates[1], true);
+    const issueDate = dateOnlyIso(dates[0]!);
+    const dueAt = dateOnlyIso(dates[1]!, true);
     if (!dueAt || new Date(dueAt).getTime() < Date.now()) return;
 
     const documents = firstCell.find("a").toArray().map(anchor => ({
