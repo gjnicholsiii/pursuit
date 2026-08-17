@@ -41,4 +41,5 @@ export interface SledPersistenceResult {
   stored: number;
   newRecords: number;
   changedRecords: number;
+  closedRecords: number;
 }
