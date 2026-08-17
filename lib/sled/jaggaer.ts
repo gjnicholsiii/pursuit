@@ -311,10 +311,11 @@ export async function syncJaggaerFullSweeps() {
       const persisted = await persistSledOpportunities(source, records, {
         mode: complete ? "jaggaer_full_sweep" : "jaggaer_partial_sweep",
         recordChanges: true,
+        closeMissing: complete,
       });
       results.push({ stateCode: config.stateCode, ok: true, rowsFound: records.length, pageCount, resultCount, complete, ...persisted, pageLimited: !complete });
     } catch (error) {
-      results.push({ stateCode: config.stateCode, ok: false, rowsFound: 0, stored: 0, newRecords: 0, changedRecords: 0, pageCount: null, resultCount: null, complete: false, pageLimited: true, error: error instanceof Error ? error.message : String(error) });
+      results.push({ stateCode: config.stateCode, ok: false, rowsFound: 0, stored: 0, newRecords: 0, changedRecords: 0, closedRecords: 0, pageCount: null, resultCount: null, complete: false, pageLimited: true, error: error instanceof Error ? error.message : String(error) });
     }
   }
   return results;
