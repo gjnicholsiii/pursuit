@@ -23,12 +23,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
+  const isBootstrap = request.nextUrl.searchParams.get("bootstrap") === "1";
+  const requestedStart = Number(request.nextUrl.searchParams.get("start") || "0");
+  const startOffset = isBootstrap && Number.isFinite(requestedStart) ? Math.max(0, Math.floor(requestedStart)) : 0;
+
   try {
-    const sync = await syncSamInventory(1000);
+    const sync = await syncSamInventory(1000, startOffset);
     return NextResponse.json({ ok: true, sync });
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "SAM inventory sync failed" },
+      { ok: false, error: error instanceof Error ? error.message : "SAM inventory sync failed", startOffset },
       { status: 500 },
     );
   }
