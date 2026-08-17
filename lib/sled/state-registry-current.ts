@@ -23,12 +23,12 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     connectorFamily: "jaggaer",
     platformLabel: "GA@WORK Marketplace / JAGGAER",
     officialUrl: "https://doas.ga.gov/accessing-gawork-procurement-systems",
-    status: "partial",
-    notes: "GA@WORK went live July 1, 2026. The supplier sourcing marketplace uses JAGGAER with a public State of Georgia event feed; 46 open events were observed during verification. Full pagination still required.",
+    status: "live",
+    notes: "GA@WORK went live July 1, 2026. Pursuit verified the public JAGGAER event feed and a complete result sweep against the portal-reported total.",
   },
   IA: {
-    status: "partial",
-    notes: "Reusable JAGGAER connector verified against Iowa IMPACS public events. Full pagination still required.",
+    status: "live",
+    notes: "Reusable JAGGAER connector verified against Iowa IMPACS with a complete result sweep matching the portal-reported total.",
   },
   ID: {
     connectorFamily: "infor_luma",
@@ -38,8 +38,8 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     notes: "Idaho replaced its former JAGGAER eProcurement path with IPRO powered by Luma. Luma procurement uses Infor CloudSuite Public Sector and Infor Supplier Portal/Strategic Sourcing.",
   },
   IL: {
-    status: "partial",
-    notes: "Reusable Periscope connector verified against anonymous Open Bids. Full pagination still required before complete coverage.",
+    status: "live",
+    notes: "Reusable Periscope connector verified against anonymous Open Bids with complete PrimeFaces pagination and portal-total reconciliation.",
   },
   LA: {
     connectorFamily: "direct_state_board",
@@ -49,16 +49,16 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     notes: "Direct LaPAC connector is staged against official public department listings. LaPAC exposes open bids, documents and addenda without vendor login; production validation is pending the next deliberate release.",
   },
   MA: {
-    status: "partial",
-    notes: "Reusable Periscope connector verified against anonymous Open Bids, including state, higher-ed, municipal, and K-12 buyers. Full pagination still required.",
+    status: "live",
+    notes: "Reusable Periscope connector verified end-to-end with complete pagination across state, higher-ed, municipal, and K-12 buyers.",
   },
   MN: {
     status: "partial",
     notes: "Official Minnesota OSP public SWIFT solicitation postings verified. Goods/services feed is directly readable; professional/technical feed is additive when available.",
   },
   MT: {
-    status: "partial",
-    notes: "Reusable JAGGAER connector verified against Montana eMACS public events. Full pagination still required.",
+    status: "live",
+    notes: "Reusable JAGGAER connector verified against Montana eMACS with a complete result sweep matching the portal-reported total.",
   },
   NE: {
     connectorFamily: "direct_state_board",
@@ -75,24 +75,24 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     notes: "New Mexico says eProNM/JAGGAER is being replaced in summer 2026. Pursuit will not promote the legacy JAGGAER route until the current replacement platform is identified and verified.",
   },
   NV: {
-    status: "partial",
-    notes: "Reusable Periscope connector verified against anonymous Open Bids. Full pagination still required before complete coverage.",
+    status: "live",
+    notes: "Reusable Periscope connector verified against NevadaEPro with complete PrimeFaces pagination and portal-total reconciliation.",
   },
   NJ: {
-    status: "partial",
-    notes: "Reusable Periscope connector verified against anonymous Open Bids. Full pagination still required before complete coverage.",
+    status: "live",
+    notes: "Reusable Periscope connector verified against NJSTART with complete PrimeFaces pagination and portal-total reconciliation.",
   },
   OR: {
     officialUrl: "https://oregonbuys.gov/bso/",
-    status: "partial",
-    notes: "Reusable Periscope connector verified against anonymous Open Bids, including state, city, and county buyers. Full pagination still required.",
+    status: "live",
+    notes: "Reusable Periscope connector verified end-to-end with complete pagination across state, city, and county buyers.",
   },
   PA: {
     connectorFamily: "jaggaer",
     platformLabel: "JAGGAER + PA eMarketplace",
     officialUrl: "https://www.pa.gov/agencies/dgs/procurement-resources/supplier-service-center",
-    status: "partial",
-    notes: "Pennsylvania DGS directs suppliers to the CommonwealthPA JAGGAER public-event feed. Reusable JAGGAER connector is staged; full pagination must be verified before complete coverage.",
+    status: "live",
+    notes: "Pennsylvania DGS directs suppliers to the CommonwealthPA JAGGAER public-event feed. Pursuit verified a complete result sweep matching the portal-reported total.",
   },
   SC: {
     connectorFamily: "direct_state_board",
@@ -110,7 +110,7 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
   },
   UT: {
     status: "live",
-    notes: "Reusable JAGGAER connector verified against Utah public events. Current public result set fits on one page and is fully captured.",
+    notes: "Reusable JAGGAER connector verified against Utah public events with a complete result sweep matching the portal-reported total.",
   },
   WI: {
     status: "blocked",
