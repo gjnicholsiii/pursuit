@@ -1,25 +1,34 @@
-import { NextResponse } from "next/server";
-import { loadSamOpportunities } from "@/lib/sam";
+import { NextRequest, NextResponse } from "next/server";
+import { getStoredFederalCount, getStoredFederalOpportunities } from "@/lib/opportunity-store";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const result = await loadSamOpportunities(50);
+export async function GET(request: NextRequest) {
+  const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || "50");
+  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(Math.floor(requestedLimit), 500)) : 50;
 
-  if (!result.configured) {
+  try {
+    const [opportunities, totalRecords] = await Promise.all([
+      getStoredFederalOpportunities(limit),
+      getStoredFederalCount(),
+    ]);
+
+    return NextResponse.json({
+      configured: true,
+      source: "neon",
+      opportunities,
+      totalRecords,
+    });
+  } catch (error) {
     return NextResponse.json(
       {
-        configured: false,
-        message: "SAM_GOV_API_KEY is not configured.",
+        configured: true,
+        source: "neon",
         opportunities: [],
+        totalRecords: 0,
+        error: error instanceof Error ? error.message : "Unable to read federal inventory",
       },
-      { status: 503 },
+      { status: 500 },
     );
   }
-
-  if (result.error) {
-    return NextResponse.json(result, { status: 502 });
-  }
-
-  return NextResponse.json(result);
 }
