@@ -3,6 +3,7 @@ import { getSql } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
+// Lightweight production connectivity check for the configured Neon database.
 export async function GET() {
   try {
     const sql = getSql();
