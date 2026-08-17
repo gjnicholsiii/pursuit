@@ -12,9 +12,23 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "planned",
     notes: "Arkansas transitioned new procurement activity to SAP Ariba in July 2026. ARBuy remains for solicitations opened before the transition.",
   },
+  DE: {
+    connectorFamily: "socrata_open_data",
+    platformLabel: "Delaware MyMarketplace + Delaware Open Data",
+    officialUrl: "https://mmp.delaware.gov/Bids",
+    status: "partial",
+    notes: "Official statewide Open Bids dataset has a direct structured connector and authoritative live bid-detail links. The open-data mirror refreshes weekly, so Pursuit treats it as verified but not yet real-time complete.",
+  },
   IA: {
     status: "partial",
     notes: "Reusable JAGGAER connector verified against Iowa IMPACS public events. Full pagination still required.",
+  },
+  ID: {
+    connectorFamily: "infor_luma",
+    platformLabel: "IPRO powered by Luma / Infor CloudSuite Public Sector",
+    officialUrl: "https://purchasing.idaho.gov/",
+    status: "planned",
+    notes: "Idaho replaced its former JAGGAER eProcurement path with IPRO powered by Luma. Luma procurement uses Infor CloudSuite Public Sector and Infor Supplier Portal/Strategic Sourcing.",
   },
   IL: {
     status: "partial",
@@ -45,9 +59,16 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "partial",
     notes: "Reusable Periscope connector verified against anonymous Open Bids, including state, city, and county buyers. Full pagination still required.",
   },
-  UT: {
+  PA: {
+    connectorFamily: "jaggaer",
+    platformLabel: "JAGGAER + PA eMarketplace",
+    officialUrl: "https://www.pa.gov/agencies/dgs/procurement-resources/supplier-service-center",
     status: "partial",
-    notes: "Reusable JAGGAER connector verified against Utah public events. Current public list fits on one page.",
+    notes: "Pennsylvania DGS directs suppliers to the CommonwealthPA JAGGAER public-event feed. Reusable JAGGAER connector is staged; full pagination must be verified before complete coverage.",
+  },
+  UT: {
+    status: "live",
+    notes: "Reusable JAGGAER connector verified against Utah public events. Current public result set fits on one page and is fully captured.",
   },
   WI: {
     status: "blocked",
