@@ -114,7 +114,6 @@ function parseRows(html: string, config: PeriscopeStateConfig, fragment = false)
     sourceRowsSeen += 1;
 
     const dueAt = isoDate(dueText);
-    if (dueAt && new Date(dueAt).getTime() < Date.now()) return;
     const href = $(cells[0]).find("a").first().attr("href");
     const agencyClass = classifyAgency(agencyName);
 
@@ -362,10 +361,11 @@ export async function syncPeriscopeFullSweeps() {
       const persisted = await persistSledOpportunities(source, records, {
         mode: complete ? "periscope_full_sweep" : "periscope_partial_sweep",
         recordChanges: true,
+        closeMissing: complete,
       });
       results.push({ stateCode: config.stateCode, ok: true, rowsFound: records.length, sourceRowsSeen, resultCount, pageCount, complete, ...persisted, pageLimited: !complete });
     } catch (error) {
-      results.push({ stateCode: config.stateCode, ok: false, rowsFound: 0, sourceRowsSeen: 0, resultCount: null, pageCount: null, complete: false, stored: 0, newRecords: 0, changedRecords: 0, pageLimited: true, error: error instanceof Error ? error.message : String(error) });
+      results.push({ stateCode: config.stateCode, ok: false, rowsFound: 0, sourceRowsSeen: 0, resultCount: null, pageCount: null, complete: false, stored: 0, newRecords: 0, changedRecords: 0, closedRecords: 0, pageLimited: true, error: error instanceof Error ? error.message : String(error) });
     }
   }
   return results;
