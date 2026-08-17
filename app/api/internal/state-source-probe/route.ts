@@ -13,10 +13,18 @@ function resolveScripts(html: string, pageUrl: string) {
   });
 }
 
-function around(text: string, term: string, before = 2500, after = 6500) {
-  const index = text.toLowerCase().indexOf(term.toLowerCase());
-  if (index < 0) return null;
-  return text.slice(Math.max(0, index - before), Math.min(text.length, index + term.length + after)).replace(/\s+/g, " ");
+function occurrences(text: string, term: string, limit = 12) {
+  const lower = text.toLowerCase();
+  const needle = term.toLowerCase();
+  const found: string[] = [];
+  let from = 0;
+  while (found.length < limit) {
+    const index = lower.indexOf(needle, from);
+    if (index < 0) break;
+    found.push(text.slice(Math.max(0, index - 1300), Math.min(text.length, index + needle.length + 2300)).replace(/\s+/g, " "));
+    from = index + needle.length;
+  }
+  return found;
 }
 
 export async function GET(request: NextRequest) {
@@ -28,5 +36,10 @@ export async function GET(request: NextRequest) {
   if (!appUrl) return NextResponse.json({ ok: false, error: "Kentucky app bundle not found" }, { status: 500 });
   const app = await fetch(appUrl, { cache: "no-store", headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
   const body = await app.text();
-  return NextResponse.json({ ok: true, appUrl, implementation: around(body, "start_data_window") });
+  return NextResponse.json({
+    ok: true,
+    appUrl,
+    startCallers: occurrences(body, "getStartDataWindow()"),
+    endCallers: occurrences(body, "getEndDataWindow()"),
+  });
 }
