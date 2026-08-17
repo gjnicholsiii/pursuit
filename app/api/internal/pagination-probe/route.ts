@@ -11,6 +11,10 @@ function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function tagName(node: unknown) {
+  return (node as { tagName?: string } | null)?.tagName || null;
+}
+
 async function getHtml(url: string) {
   const response = await fetch(url, {
     headers: {
@@ -38,14 +42,14 @@ function periscopeDetails(html: string) {
     value: ($(input).attr("value") || "").slice(0, 500),
   })).filter(item => /viewstate|javax\.faces|pagination|page|first/i.test(`${item.id} ${item.name}`));
   const paginator = $("*[class*='paginator'], *[id*='paginator'], *[class*='pagination'], *[id*='pagination']").toArray().slice(0, 20).map(node => ({
-    tag: node.tagName,
+    tag: tagName(node),
     id: $(node).attr("id") || null,
     className: $(node).attr("class") || null,
     text: compact($(node).text()).slice(0, 500),
     html: compact($.html(node)).slice(0, 4000),
   }));
   const nextish = $("a,button,input").toArray().filter(node => /next|last|page|rows/i.test(compact($(node).text()) + " " + ($(node).attr("title") || "") + " " + ($(node).attr("aria-label") || "") + " " + ($(node).attr("id") || "") + " " + ($(node).attr("name") || ""))).slice(0, 30).map(node => ({
-    tag: node.tagName,
+    tag: tagName(node),
     id: $(node).attr("id") || null,
     name: $(node).attr("name") || null,
     href: $(node).attr("href") || null,
@@ -67,7 +71,7 @@ function jaggaerDetails(html: string) {
     method: $(form).attr("method") || null,
   }));
   const inputs = $("input,select,button").toArray().filter(node => /page|result|sort|search|nav/i.test(`${$(node).attr("id") || ""} ${$(node).attr("name") || ""} ${$(node).attr("aria-label") || ""} ${$(node).attr("title") || ""}`)).slice(0, 40).map(node => ({
-    tag: node.tagName,
+    tag: tagName(node),
     id: $(node).attr("id") || null,
     name: $(node).attr("name") || null,
     type: $(node).attr("type") || null,
@@ -76,14 +80,14 @@ function jaggaerDetails(html: string) {
     onchange: ($(node).attr("onchange") || "").slice(0, 2000) || null,
   }));
   const pageTextNodes = $("body *").toArray().filter(node => /\bPage\b|\bResults\b|Per Page/i.test(compact($(node).text()))).slice(-30).map(node => ({
-    tag: node.tagName,
+    tag: tagName(node),
     id: $(node).attr("id") || null,
     className: $(node).attr("class") || null,
     text: compact($(node).text()).slice(0, 500),
     html: compact($.html(node)).slice(0, 5000),
   }));
   const scripts = $("script").toArray().map(node => compact($(node).html() || "")).filter(script => /page|paging|pagination|results|sourcing/i.test(script)).slice(0, 15).map(script => script.slice(0, 6000));
-  const scriptSrc = $("script[src]").toArray().map(node => $(node).attr("src")).filter(Boolean).slice(0, 50);
+  const scriptSrc = $("script[src]").toArray().map(node => $(node).attr("src") || null).filter((value): value is string => Boolean(value)).slice(0, 50);
   return { forms, inputs, pageTextNodes, scripts, scriptSrc };
 }
 
