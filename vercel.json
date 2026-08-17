@@ -10,11 +10,11 @@
     },
     {
       "path": "/api/cron/opengov",
-      "schedule": "30 7 * * *"
+      "schedule": "30 */4 * * *"
     },
     {
       "path": "/api/cron/state-pages",
-      "schedule": "45 7 * * *"
+      "schedule": "15 */2 * * *"
     }
   ]
 }
