@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { load } from "cheerio";
-import { probeJaggaerStates } from "@/lib/sled/jaggaer";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -14,11 +13,19 @@ export async function GET(request: NextRequest) {
   const response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, cache: "no-store" });
   const html = await response.text();
   const $ = load(html);
-  const anchors = $("a").toArray().map(anchor => ({
-    text: $(anchor).text().replace(/\s+/g, " ").trim(),
-    href: $(anchor).attr("href") || "",
-  })).filter(item => item.text && /Router|SourcingEvent|Event|PDF|document/i.test(`${item.href} ${item.text}`)).slice(0, 40);
-
-  const states = await probeJaggaerStates();
-  return NextResponse.json({ ok: true, anchors, states });
+  const anchor = $('a[href*="app01.jaggaer.com/apps/Router/ViewSourcingEvent"]').first();
+  const ancestors = [];
+  let node = anchor;
+  for (let depth = 0; depth < 10; depth += 1) {
+    node = node.parent();
+    if (!node.length) break;
+    ancestors.push({
+      depth: depth + 1,
+      tag: node.get(0)?.tagName || "",
+      id: node.attr("id") || "",
+      className: node.attr("class") || "",
+      text: node.text().replace(/\s+/g, " ").trim().slice(0, 2000),
+    });
+  }
+  return NextResponse.json({ ok: true, title: anchor.text().replace(/\s+/g, " ").trim(), ancestors });
 }
