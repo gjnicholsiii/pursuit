@@ -131,6 +131,41 @@ function pursuitStatus(project: OpenGovProject): "open" | "closed" {
   return "open";
 }
 
+function compactPayload(entry: OpenGovDirectoryEntry, project: OpenGovProject, code: string) {
+  return {
+    platform: "OpenGov",
+    government: {
+      id: entry.id,
+      code,
+      name: entry.name,
+      website: entry.website || null,
+      city: entry.city || null,
+      state: entry.state || null,
+    },
+    project: {
+      id: project.id,
+      financialId: project.financialId || null,
+      title: project.title || null,
+      status: project.status || null,
+      type: project.type || null,
+      departmentName: project.departmentName || null,
+      createdAt: project.created_at || null,
+      updatedAt: project.updated_at || null,
+      postedAt: project.postedAt || null,
+      releaseProjectDate: project.releaseProjectDate || null,
+      proposalDeadline: project.proposalDeadline || null,
+      preProposalDate: project.preProposalDate || null,
+      qaDeadline: project.qaDeadline || null,
+      comingSoon: Boolean(project.comingSoon),
+      isPaused: Boolean(project.isPaused),
+      hasSealedBid: Boolean(project.hasSealedBid),
+      contact: project.contact || null,
+      procurementContact: project.procurementContact || null,
+      template: project.template || null,
+    },
+  };
+}
+
 function mapProject(entry: OpenGovDirectoryEntry, project: OpenGovProject): SledOpportunityRecord {
   const code = entry.government?.code || String(entry.id);
   const agency = toAgency(entry);
@@ -150,12 +185,7 @@ function mapProject(entry: OpenGovDirectoryEntry, project: OpenGovProject): Sled
     stateCode: entry.state || null,
     city: entry.city || null,
     sourceUrl: `https://procurement.opengov.com/portal/${code}/projects/${project.id}/document`,
-    rawPayload: {
-      platform: "OpenGov",
-      governmentCode: code,
-      government: entry,
-      project,
-    },
+    rawPayload: compactPayload(entry, project, code),
   };
 }
 
@@ -229,9 +259,10 @@ export async function syncOpenGovPublic(bootstrap = false): Promise<OpenGovSyncR
       const code = government.government?.code || String(government.id);
       try {
         const projects = await fetchPortalProjects(code);
-        const mapped = projects.filter(isProjectUsable).map(project => mapProject(government, project));
-        projectsSeen += mapped.length;
-        openRecords += mapped.filter(item => item.status === "open").length;
+        const usable = projects.filter(isProjectUsable);
+        projectsSeen += usable.length;
+        const mapped = usable.map(project => mapProject(government, project)).filter(item => item.status === "open");
+        openRecords += mapped.length;
         for (let offset = 0; offset < mapped.length; offset += 300) {
           const result = await persistSledOpportunities(SOURCE, mapped.slice(offset, offset + 300), {
             mode: bootstrap ? "opengov_bootstrap" : "opengov_daily",
