@@ -8,10 +8,34 @@ const PORTALS = [
   { state: "MI", name: "Michigan SIGMA VSS", url: "https://sigma.michigan.gov/PRDVSS1X1/Advantage4" },
 ];
 
+function extractJsonObject(source: string, start: number) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') { inString = true; continue; }
+    if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error("moInitialResponse JSON was not balanced");
+}
+
 function parseInitial(html: string) {
-  const raw = html.match(/var\s+moInitialResponse\s*=\s*([\s\S]*?);\s*(?:\/\/|<\/script>)/i)?.[1];
-  if (!raw) throw new Error("moInitialResponse was not found");
-  return JSON.parse(raw) as Record<string, unknown>;
+  const marker = html.search(/var\s+moInitialResponse\s*=\s*/i);
+  if (marker < 0) throw new Error("moInitialResponse was not found");
+  const brace = html.indexOf("{", marker);
+  if (brace < 0) throw new Error("moInitialResponse JSON start was not found");
+  return JSON.parse(extractJsonObject(html, brace)) as Record<string, unknown>;
 }
 
 function collectActions(value: unknown, path = "$", out: Array<Record<string, unknown>> = []) {
@@ -21,15 +45,8 @@ function collectActions(value: unknown, path = "$", out: Array<Record<string, un
   }
   if (!value || typeof value !== "object") return out;
   const object = value as Record<string, unknown>;
-  const searchable = [
-    object.title,
-    object.name,
-    object.key,
-    object.actionType,
-    object.actionCode,
-    object.targetComponentType,
-    object.targetQualifiedName,
-  ].filter(item => typeof item === "string").join(" ");
+  const searchable = [object.title, object.name, object.key, object.actionType, object.actionCode, object.targetComponentType, object.targetQualifiedName]
+    .filter(item => typeof item === "string").join(" ");
   if (/solicit|bid|opportun|published|procure|contract/i.test(searchable)) {
     out.push({
       path,
@@ -63,13 +80,11 @@ async function inspectPortal(portal: (typeof PORTALS)[number]) {
     cache: "no-store",
   });
   if (!response.ok) throw new Error(`${portal.name} returned ${response.status}`);
-  const html = await response.text();
-  const initial = parseInitial(html);
+  const initial = parseInitial(await response.text());
   const data = initial.data as Record<string, unknown> | undefined;
   const pageData = data?.page_data as Record<string, unknown> | undefined;
   const globalParams = pageData?.global_params as Record<string, unknown> | undefined;
   const session = initial.session_info as Record<string, unknown> | undefined;
-  const actions = collectActions(initial);
   return {
     state: portal.state,
     name: portal.name,
@@ -80,7 +95,7 @@ async function inspectPortal(portal: (typeof PORTALS)[number]) {
       hasPageId: Boolean(session?.page_id),
       hasCsrfToken: Boolean(session?.csrf_token),
     },
-    procurementActions: actions,
+    procurementActions: collectActions(initial),
   };
 }
 
