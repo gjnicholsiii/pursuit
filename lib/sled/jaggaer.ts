@@ -1,4 +1,4 @@
-import { load, type CheerioAPI } from "cheerio";
+import { load } from "cheerio";
 import { persistSledOpportunities } from "@/lib/sled/persistence";
 import type { SledOpportunityRecord, SledSourceConfig } from "@/lib/sled/types";
 
@@ -35,11 +35,6 @@ function publicUrl(config: JaggaerStateConfig) {
   return `https://bids.sciquest.com/apps/Router/PublicEvent?CustomerOrg=${encodeURIComponent(config.customerOrg)}`;
 }
 
-function absolute(base: string, href?: string) {
-  if (!href || href.startsWith("javascript:")) return base;
-  try { return new URL(href, base).toString(); } catch { return base; }
-}
-
 function parseDate(value: string) {
   const normalized = value
     .replace(/\bCDT\b/g, "GMT-0500")
@@ -54,23 +49,9 @@ function parseDate(value: string) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-function eventContainer($: CheerioAPI, anchor: Parameters<CheerioAPI>[0]) {
-  let node = $(anchor);
-  for (let depth = 0; depth < 9; depth += 1) {
-    const candidate = node.parent();
-    if (!candidate.length) break;
-    const candidateText = text(candidate.text());
-    if (/\bOpen\b/i.test(candidateText) && /\bClose\b/i.test(candidateText) && /\bType\b/i.test(candidateText) && /\bNumber\b/i.test(candidateText)) {
-      return candidate;
-    }
-    node = candidate;
-  }
-  return $(anchor).parent();
-}
-
 function classifyTitle(title: string) {
   const normalized = title.toLowerCase();
-  if (/university|college|campus|higher education/.test(normalized)) return { agencyType: "higher_ed", jurisdictionLevel: "state" };
+  if (/university|college|campus|\bmsu\b|higher education/.test(normalized)) return { agencyType: "higher_ed", jurisdictionLevel: "state" };
   if (/school|k-12|charter/.test(normalized)) return { agencyType: "k12", jurisdictionLevel: "state" };
   return { agencyType: "state_agency", jurisdictionLevel: "state" };
 }
@@ -81,27 +62,35 @@ function parseJaggaerEvents(html: string, config: JaggaerStateConfig): SledOppor
   const records: SledOpportunityRecord[] = [];
   const seen = new Set<string>();
 
-  $('a[href*="app01.jaggaer.com"]').each((_, anchor) => {
+  $('a[href*="app01.jaggaer.com/apps/Router/ViewSourcingEvent"]').each((_, anchor) => {
     const title = text($(anchor).text());
     if (!title) return;
-    const container = eventContainer($, anchor);
+
+    const container = $(anchor).closest("td");
+    if (!container.length) return;
     const block = text(container.text());
-    const numberMatch = block.match(/\bNumber\s+([^\s]+(?:\s+Cancellation Posting)?)/i);
-    const typeMatch = block.match(/\bType\s+(.+?)\s+Number\b/i);
-    const openMatch = block.match(/\bOpen\s+(.+?)\s+Close\s+/i);
-    const closeMatch = block.match(/\bClose\s+(.+?)\s+Type\s+/i);
+
+    const numberMatch = block.match(/\bNumber\s*([^\s]+)(?:\s+Cancellation Posting)?/i);
+    const typeMatch = block.match(/\bType\s*(.+?)\s*Number/i);
+    const openMatch = block.match(/\bOpen\s*(.+?)\s*Close/i);
+    const closeMatch = block.match(/\bClose\s*(.+?)\s*Type/i);
     const contacts = [...block.matchAll(/\bContact\s+(.+?)\s+([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/gi)].map(match => ({ name: text(match[1]), email: match[2] }));
-    const externalId = text(numberMatch?.[1] || "").replace(/\s+Cancellation Posting$/i, "");
+    const externalId = text(numberMatch?.[1] || "");
     if (!externalId || seen.has(externalId)) return;
     seen.add(externalId);
 
-    const detailUrl = absolute(base, $(anchor).attr("href"));
-    const pdfAnchor = container.find('a[href*="solutions-selectsite-documents.s3.amazonaws.com"]').first();
-    const pdfUrl = pdfAnchor.length ? absolute(base, pdfAnchor.attr("href")) : null;
+    const pdfHref = container.find('a[href*="solutions-selectsite-documents.s3.amazonaws.com"]').first().attr("href") || "";
+    const pdfKey = pdfHref.match(/\/Sourcingevent\/([^?]+)/i)?.[1] || null;
     const dueAt = closeMatch ? parseDate(text(closeMatch[1])) : null;
     const issueDate = openMatch ? parseDate(text(openMatch[1])) : null;
     const type = text(typeMatch?.[1] || "Jaggaer solicitation");
     const titleClass = classifyTitle(title);
+
+    const titleIndex = block.indexOf(title);
+    const openIndex = block.search(/\bOpen\s*\d/i);
+    const description = titleIndex >= 0 && openIndex > titleIndex
+      ? text(block.slice(titleIndex + title.length, openIndex)) || null
+      : null;
 
     records.push({
       externalId,
@@ -114,18 +103,14 @@ function parseJaggaerEvents(html: string, config: JaggaerStateConfig): SledOppor
         website: base,
       },
       title,
-      description: block
-        .replace(/^Open\s+/i, "")
-        .replace(new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), "")
-        .replace(/\bOpen\s+.+$/i, "")
-        .trim() || null,
+      description,
       solicitationType: type,
       procurementMechanism: "JAGGAER public solicitation",
       status: "open",
       issueDate,
       dueAt,
       stateCode: config.stateCode,
-      sourceUrl: pdfUrl || detailUrl,
+      sourceUrl: base,
       rawPayload: {
         platform: "JAGGAER ONE",
         state: config.stateName,
@@ -136,8 +121,8 @@ function parseJaggaerEvents(html: string, config: JaggaerStateConfig): SledOppor
         openDate: openMatch ? text(openMatch[1]) : null,
         closeDate: closeMatch ? text(closeMatch[1]) : null,
         contacts,
-        detailUrl,
-        pdfUrl,
+        pdfDocumentKey: pdfKey,
+        pdfAvailable: Boolean(pdfHref),
         sourcePage: base,
         pageLimited: true,
       },
@@ -149,11 +134,11 @@ function parseJaggaerEvents(html: string, config: JaggaerStateConfig): SledOppor
 
 function parseCounts(html: string) {
   const plain = text(load(html)("body").text());
-  const pageMatch = plain.match(/\bof\s+(\d+)\s+(?:\d+-\d+\s+of\s+\d+\s+Results)?/i);
-  const resultMatch = plain.match(/\b\d+-\d+\s+of\s+(\d+)\s+Results\b/i);
+  const resultMatch = plain.match(/\d+\s*-\s*\d+\s*of\s*(\d+)\s*Results/i);
+  const resultCount = resultMatch ? Number(resultMatch[1]) : null;
   return {
-    pageCount: pageMatch ? Number(pageMatch[1]) : null,
-    resultCount: resultMatch ? Number(resultMatch[1]) : null,
+    pageCount: resultCount ? Math.ceil(resultCount / 20) : null,
+    resultCount,
   };
 }
 
@@ -169,7 +154,13 @@ async function fetchJaggaer(config: JaggaerStateConfig) {
   });
   if (!response.ok) throw new Error(`${config.sourceName} returned ${response.status}`);
   const html = await response.text();
-  return { records: parseJaggaerEvents(html, config), ...parseCounts(html) };
+  const records = parseJaggaerEvents(html, config);
+  const counts = parseCounts(html);
+  return {
+    records,
+    pageCount: counts.pageCount ?? (records.length ? 1 : null),
+    resultCount: counts.resultCount ?? (records.length || null),
+  };
 }
 
 export async function probeJaggaerStates(): Promise<JaggaerProbeResult[]> {
