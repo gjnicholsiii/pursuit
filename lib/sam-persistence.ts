@@ -8,6 +8,12 @@ export interface SamPersistenceResult {
   changedRecords: number;
 }
 
+export interface SamPersistenceContext {
+  mode?: string;
+  offset?: number;
+  totalRecords?: number;
+}
+
 function agencyName(raw: SamOpportunityRaw) {
   if (raw.fullParentPathName) {
     const parts = raw.fullParentPathName.split(".").filter(Boolean);
@@ -40,7 +46,28 @@ function hashPayload(raw: SamOpportunityRaw) {
   return createHash("sha256").update(JSON.stringify(raw)).digest("hex");
 }
 
-export async function persistSamOpportunities(rawOpportunities: SamOpportunityRaw[]): Promise<SamPersistenceResult> {
+function changeSnapshot(raw: SamOpportunityRaw | null | undefined) {
+  if (!raw) return {};
+  return {
+    title: raw.title || null,
+    solicitationNumber: raw.solicitationNumber || null,
+    responseDeadLine: raw.responseDeadLine || null,
+    active: raw.active || null,
+    type: raw.type || raw.baseType || null,
+    typeOfSetAside: raw.typeOfSetAsideDescription || raw.typeOfSetAside || null,
+    naicsCode: raw.naicsCode || null,
+    resourceLinks: raw.resourceLinks || [],
+  };
+}
+
+function changedFields(before: Record<string, unknown>, after: Record<string, unknown>) {
+  return Object.keys(after).filter(key => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+}
+
+export async function persistSamOpportunities(
+  rawOpportunities: SamOpportunityRaw[],
+  context: SamPersistenceContext = {},
+): Promise<SamPersistenceResult> {
   const usable = rawOpportunities.filter(raw => raw.noticeId || raw.solicitationNumber);
   if (!usable.length) return { stored: 0, newRecords: 0, changedRecords: 0 };
 
@@ -85,12 +112,12 @@ export async function persistSamOpportunities(rawOpportunities: SamOpportunityRa
 
   const externalIds = usable.map(raw => raw.noticeId || raw.solicitationNumber).filter((id): id is string => Boolean(id));
   const existingRows = await sql.query(
-    `select external_id, content_hash
+    `select id, external_id, content_hash, raw_payload
      from opportunities
      where source_id = $1 and external_id = any($2::text[])`,
     [sourceId, externalIds],
-  ) as Array<{ external_id: string; content_hash: string | null }>;
-  const existing = new Map(existingRows.map(row => [row.external_id, row.content_hash]));
+  ) as Array<{ id: string; external_id: string; content_hash: string | null; raw_payload: SamOpportunityRaw }>;
+  const existing = new Map(existingRows.map(row => [row.external_id, row]));
 
   const records = usable.flatMap(raw => {
     const externalId = raw.noticeId || raw.solicitationNumber;
@@ -119,6 +146,15 @@ export async function persistSamOpportunities(rawOpportunities: SamOpportunityRa
   });
 
   if (!records.length) return { stored: 0, newRecords: 0, changedRecords: 0 };
+
+  const changed = records.flatMap(record => {
+    const previous = existing.get(record.external_id);
+    if (!previous || previous.content_hash === record.content_hash) return [];
+    const before = changeSnapshot(previous.raw_payload);
+    const after = changeSnapshot(record.raw_payload);
+    const fields = changedFields(before, after);
+    return [{ externalId: record.external_id, before, after, fields }];
+  });
 
   await sql.query(
     `with incoming as (
@@ -171,17 +207,60 @@ export async function persistSamOpportunities(rawOpportunities: SamOpportunityRa
     [JSON.stringify(records), sourceId],
   );
 
+  if (changed.length) {
+    const changedIds = changed.map(item => item.externalId);
+    const opportunityRows = await sql.query(
+      `select id, external_id from opportunities where source_id = $1 and external_id = any($2::text[])`,
+      [sourceId, changedIds],
+    ) as Array<{ id: string; external_id: string }>;
+    const opportunityIds = new Map(opportunityRows.map(row => [row.external_id, row.id]));
+
+    const changeRows = changed.flatMap(item => {
+      const opportunityId = opportunityIds.get(item.externalId);
+      if (!opportunityId) return [];
+      return [{
+        opportunity_id: opportunityId,
+        change_type: "source_update",
+        summary: item.fields.length ? `SAM.gov changed: ${item.fields.join(", ")}` : "SAM.gov record changed",
+        before_value: item.before,
+        after_value: item.after,
+        evidence: { source: "SAM.gov", externalId: item.externalId },
+      }];
+    });
+
+    if (changeRows.length) {
+      await sql.query(
+        `with incoming as (
+           select * from jsonb_to_recordset($1::jsonb) as x(
+             opportunity_id uuid,
+             change_type text,
+             summary text,
+             before_value jsonb,
+             after_value jsonb,
+             evidence jsonb
+           )
+         )
+         insert into opportunity_changes (opportunity_id, change_type, summary, before_value, after_value, evidence)
+         select opportunity_id, change_type, summary, before_value, after_value, evidence from incoming`,
+        [JSON.stringify(changeRows)],
+      );
+    }
+  }
+
   const newRecords = records.filter(record => !existing.has(record.external_id)).length;
-  const changedRecords = records.filter(record => {
-    const previousHash = existing.get(record.external_id);
-    return previousHash !== undefined && previousHash !== record.content_hash;
-  }).length;
+  const changedRecords = changed.length;
 
   await sql.query(
     `insert into source_runs
       (source_id, completed_at, status, records_seen, records_new, records_changed, diagnostics)
      values ($1, now(), 'success', $2, $3, $4, $5::jsonb)`,
-    [sourceId, records.length, newRecords, changedRecords, JSON.stringify({ adapter: "sam_gov", persisted: records.length })],
+    [sourceId, records.length, newRecords, changedRecords, JSON.stringify({
+      adapter: "sam_gov",
+      persisted: records.length,
+      mode: context.mode || "interactive",
+      offset: context.offset ?? 0,
+      totalRecords: context.totalRecords ?? null,
+    })],
   );
 
   await sql.query(
