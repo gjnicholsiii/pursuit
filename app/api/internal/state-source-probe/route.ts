@@ -4,14 +4,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 const KY_URL = "https://vss.ky.gov/vssprod-ext/Advantage4";
-
 type Obj = Record<string, unknown>;
 type CookieJar = Map<string, string>;
 
+type Session = { session_id: string; csrf_token: string; page_id: string };
+
 function extractBalancedJson(text: string, start: number) {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
+  let depth = 0, inString = false, escaped = false;
   for (let index = start; index < text.length; index += 1) {
     const char = text[index];
     if (inString) {
@@ -22,10 +21,7 @@ function extractBalancedJson(text: string, start: number) {
     }
     if (char === '"') { inString = true; continue; }
     if (char === "{") depth += 1;
-    else if (char === "}") {
-      depth -= 1;
-      if (depth === 0) return text.slice(start, index + 1);
-    }
+    else if (char === "}" && --depth === 0) return text.slice(start, index + 1);
   }
   return null;
 }
@@ -42,10 +38,7 @@ function extractInitialResponse(html: string): Obj | null {
 
 function collectObjects(value: unknown, out: Obj[] = []) {
   if (!value || typeof value !== "object") return out;
-  if (Array.isArray(value)) {
-    value.forEach(item => collectObjects(item, out));
-    return out;
-  }
+  if (Array.isArray(value)) { value.forEach(item => collectObjects(item, out)); return out; }
   const record = value as Obj;
   out.push(record);
   Object.values(record).forEach(child => collectObjects(child, out));
@@ -57,47 +50,35 @@ function str(record: Obj, key: string) {
   return typeof value === "string" ? value : "";
 }
 
-function findSession(objects: Obj[]) {
+function findSession(objects: Obj[]): Session | null {
   const record = objects.find(item => str(item, "session_id") && str(item, "csrf_token") && str(item, "page_id"));
-  return record ? {
-    session_id: str(record, "session_id"),
-    csrf_token: str(record, "csrf_token"),
-    page_id: str(record, "page_id"),
-  } : null;
+  return record ? { session_id: str(record, "session_id"), csrf_token: str(record, "csrf_token"), page_id: str(record, "page_id") } : null;
 }
 
-function findAction(objects: Obj[]) {
-  return objects.find(item =>
-    str(item, "targetQualifiedName") === "vss.page.VAXXX03153" ||
-    /what would you like to do/i.test(str(item, "title"))
-  ) || null;
-}
-
-function findApplicationUrl(objects: Obj[], action: Obj | null) {
-  const direct = action ? str(action, "applicationUrl") : "";
-  if (direct) return direct;
-  const match = objects.find(item => /^https?:\/\//i.test(str(item, "applicationUrl")) || str(item, "applicationUrl").startsWith("/"));
-  return match ? str(match, "applicationUrl") : "";
+function findAction(objects: Obj[], target: string, name?: string) {
+  return objects.find(item => str(item, "targetQualifiedName") === target || (name && str(item, "name") === name)) || null;
 }
 
 function compactAction(action: Obj | null) {
   if (!action) return null;
-  const allowed = ["key", "name", "title", "actionType", "actionCode", "viewName", "targetLocation", "targetComponentType", "targetPage", "targetPageId", "targetQualifiedName", "applicationUrl", "columnName", "columnValue"];
+  const allowed = ["key", "name", "title", "actionType", "actionCode", "viewName", "targetLocation", "targetComponentType", "targetMode", "targetPage", "targetPageId", "targetQualifiedName", "applicationUrl"];
   return Object.fromEntries(allowed.flatMap(key => action[key] !== undefined ? [[key, action[key]]] : []));
 }
 
-function buildPayload(action: Obj, session: { session_id: string; csrf_token: string; page_id: string }) {
-  const targetLocation = str(action, "targetLocation") || "display";
-  const targetComponentType = str(action, "targetComponentType");
+function buildPayload(action: Obj, session: Session) {
   return {
     action: {
       actionType: str(action, "actionType") || "navAction",
-      actionCode: str(action, "actionCode"),
+      actionCode: str(action, "actionCode") || "navAction",
       viewName: str(action, "viewName"),
       targetPage: str(action, "targetPage"),
       targetPageId: str(action, "targetPageId"),
       targetQualifiedName: str(action, "targetQualifiedName"),
-      params: { targetLocation, targetComponentType },
+      params: {
+        targetLocation: str(action, "targetLocation") || "display",
+        targetComponentType: str(action, "targetComponentType"),
+        targetMode: str(action, "targetMode") || "browse",
+      },
     },
     key: str(action, "key"),
     session_info: session,
@@ -105,11 +86,9 @@ function buildPayload(action: Obj, session: { session_id: string; csrf_token: st
 }
 
 function getSetCookies(headers: Headers) {
-  const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] };
-  const values = withGetSetCookie.getSetCookie?.();
-  if (values?.length) return values;
-  const fallback = headers.get("set-cookie");
-  return fallback ? [fallback] : [];
+  const special = headers as Headers & { getSetCookie?: () => string[] };
+  const values = special.getSetCookie?.();
+  return values?.length ? values : (headers.get("set-cookie") ? [headers.get("set-cookie")!] : []);
 }
 
 function rememberCookies(jar: CookieJar, headers: Headers) {
@@ -118,11 +97,8 @@ function rememberCookies(jar: CookieJar, headers: Headers) {
     if (!pair) continue;
     const separator = pair.indexOf("=");
     if (separator <= 0) continue;
-    const name = pair.slice(0, separator).trim();
-    const value = pair.slice(separator + 1).trim();
-    if (!name) continue;
-    if (!value) jar.delete(name);
-    else jar.set(name, value);
+    const name = pair.slice(0, separator).trim(), value = pair.slice(separator + 1).trim();
+    if (!value) jar.delete(name); else jar.set(name, value);
   }
 }
 
@@ -131,9 +107,7 @@ function cookieHeader(jar: CookieJar) {
 }
 
 async function fetchWithJar(url: string, jar: CookieJar, init: RequestInit = {}, redirects = 6): Promise<Response> {
-  let currentUrl = url;
-  let method = init.method || "GET";
-  let body = init.body;
+  let currentUrl = url, method = init.method || "GET", body = init.body;
   for (let attempt = 0; attempt <= redirects; attempt += 1) {
     const headers = new Headers(init.headers || {});
     const cookies = cookieHeader(jar);
@@ -144,76 +118,73 @@ async function fetchWithJar(url: string, jar: CookieJar, init: RequestInit = {},
     const location = response.headers.get("location");
     if (!location) return response;
     currentUrl = new URL(location, currentUrl).toString();
-    if ([301, 302, 303].includes(response.status) && method !== "GET" && method !== "HEAD") {
-      method = "GET";
-      body = undefined;
-    }
+    if ([301, 302, 303].includes(response.status) && method !== "GET" && method !== "HEAD") { method = "GET"; body = undefined; }
   }
   throw new Error("Kentucky guest flow exceeded redirect limit");
 }
 
-function summarizeResponse(body: string) {
-  const terms = ["Business Opportunities", "Solicitation", "Bid", "VAPUB", "VSS", "commodity", "closing", "response date", "document"];
-  const lower = body.toLowerCase();
-  const snippets: string[] = [];
-  for (const term of terms) {
-    let from = 0;
-    while (snippets.length < 25) {
-      const index = lower.indexOf(term.toLowerCase(), from);
-      if (index < 0) break;
-      snippets.push(body.slice(Math.max(0, index - 350), Math.min(body.length, index + 900)).replace(/\s+/g, " "));
-      from = index + term.length;
-    }
-  }
-  return [...new Set(snippets)].slice(0, 25);
-}
-
-export async function GET(request: NextRequest) {
-  if (request.headers.get("host") !== "pursuit-neon.vercel.app") {
-    return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
-  }
-
-  const jar: CookieJar = new Map();
-  const shell = await fetchWithJar(KY_URL, jar, {
-    headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0", accept: "text/html,application/xhtml+xml" },
-  });
-  const html = await shell.text();
-  const initial = extractInitialResponse(html);
-  if (!initial) return NextResponse.json({ ok: false, error: "Initial guest response not found" }, { status: 500 });
-  const objects = collectObjects(initial);
-  const session = findSession(objects);
-  const action = findAction(objects);
-  const applicationUrlRaw = findApplicationUrl(objects, action);
-  if (!session || !action || !applicationUrlRaw) {
-    return NextResponse.json({ ok: false, error: "Guest navigation prerequisites missing", hasSession: Boolean(session), action: compactAction(action), applicationUrlRaw });
-  }
-
-  const applicationUrl = new URL(applicationUrlRaw, shell.url).toString();
-  const payload = buildPayload(action, session);
-  const response = await fetchWithJar(applicationUrl, jar, {
+async function postAction(url: string, jar: CookieJar, action: Obj, session: Session, referer: string) {
+  const response = await fetchWithJar(url, jar, {
     method: "POST",
     headers: {
       accept: "application/json,text/plain,*/*",
       "content-type": "application/json",
       "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
       "x-csrf-token": session.csrf_token,
-      origin: new URL(applicationUrl).origin,
-      referer: shell.url,
+      origin: new URL(url).origin,
+      referer,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(buildPayload(action, session)),
   });
-  const body = await response.text();
+  const text = await response.text();
+  let json: Obj | null = null;
+  try { json = JSON.parse(text) as Obj; } catch { /* diagnostic */ }
+  return { response, text, json };
+}
 
+function summarize(value: unknown) {
+  const objects = collectObjects(value);
+  return objects.filter(item => {
+    const joined = Object.values(item).filter(v => typeof v === "string").join(" ");
+    return /solicit|bid|closing|response|document|agency|buyer|commodity|vendor/i.test(joined);
+  }).slice(0, 80).map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))));
+}
+
+export async function GET(request: NextRequest) {
+  if (request.headers.get("host") !== "pursuit-neon.vercel.app") return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+
+  const jar: CookieJar = new Map();
+  const shell = await fetchWithJar(KY_URL, jar, { headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0", accept: "text/html,application/xhtml+xml" } });
+  const html = await shell.text();
+  const initial = extractInitialResponse(html);
+  if (!initial) return NextResponse.json({ ok: false, error: "Initial guest response not found" }, { status: 500 });
+  const initialObjects = collectObjects(initial);
+  const initialSession = findSession(initialObjects);
+  const carouselAction = findAction(initialObjects, "vss.page.VAXXX03153");
+  if (!initialSession || !carouselAction) return NextResponse.json({ ok: false, error: "Kentucky guest carousel prerequisites missing" }, { status: 500 });
+
+  const applicationUrl = new URL(str(carouselAction, "applicationUrl"), shell.url).toString();
+  const carousel = await postAction(applicationUrl, jar, carouselAction, initialSession, shell.url);
+  if (!carousel.json) return NextResponse.json({ ok: false, error: "Kentucky carousel did not return JSON", status: carousel.response.status }, { status: 502 });
+
+  const carouselObjects = collectObjects(carousel.json);
+  const solicitationAction = findAction(carouselObjects, "vss.page.VVSSX10019", "solicitations");
+  const currentSession = findSession(carouselObjects) || initialSession;
+  if (!solicitationAction) {
+    return NextResponse.json({ ok: false, error: "Published solicitations action not found", carousel: summarize(carousel.json) }, { status: 500 });
+  }
+
+  const solicitations = await postAction(applicationUrl, jar, solicitationAction, currentSession, applicationUrl);
   return NextResponse.json({
     ok: true,
-    action: compactAction(action),
-    applicationUrl,
     cookieCount: jar.size,
-    postStatus: response.status,
-    postContentType: response.headers.get("content-type"),
-    responseSize: body.length,
-    sessionInvalid: /SessionInvalidPage|Session Invalid/i.test(body),
-    responsePreview: body.slice(0, 1200),
-    findings: summarizeResponse(body),
+    carouselAction: compactAction(carouselAction),
+    solicitationAction: compactAction(solicitationAction),
+    solicitationStatus: solicitations.response.status,
+    solicitationContentType: solicitations.response.headers.get("content-type"),
+    sessionInvalid: /SessionInvalidPage|Session Invalid/i.test(solicitations.text),
+    responseSize: solicitations.text.length,
+    responsePreview: solicitations.text.slice(0, 1500),
+    summary: solicitations.json ? summarize(solicitations.json) : [],
   });
 }
