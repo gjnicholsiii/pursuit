@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
-    "deploymentEnabled": false
+    "deploymentEnabled": true
   },
   "crons": [
     {
@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/state-pages",
-      "schedule": "15 */2 * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/state-heavy",
