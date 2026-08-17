@@ -2,12 +2,12 @@ import { load } from "cheerio";
 import { persistSledOpportunities } from "@/lib/sled/persistence";
 import type { SledOpportunityRecord, SledSourceConfig } from "@/lib/sled/types";
 
-const URL = "https://das.nebraska.gov/materiel/bid-opportunities.html";
+const NEBRASKA_URL = "https://das.nebraska.gov/materiel/bid-opportunities.html";
 
 const SOURCE: SledSourceConfig = {
   adapterKey: "nebraska_das_ne",
   sourceName: "Nebraska DAS Current Bid Opportunities",
-  baseUrl: URL,
+  baseUrl: NEBRASKA_URL,
   jurisdiction: "Nebraska",
   sourceType: "website",
 };
@@ -55,7 +55,7 @@ function classifyAgency(name: string) {
 }
 
 async function fetchRecords(): Promise<SledOpportunityRecord[]> {
-  const response = await fetch(URL, {
+  const response = await fetch(NEBRASKA_URL, {
     headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
     cache: "no-store",
   });
@@ -91,7 +91,7 @@ async function fetchRecords(): Promise<SledOpportunityRecord[]> {
         agencyType: agencyClass.agencyType,
         jurisdictionLevel: agencyClass.jurisdictionLevel,
         stateCode: "NE",
-        website: URL,
+        website: NEBRASKA_URL,
       },
       title,
       description: category || null,
@@ -101,7 +101,7 @@ async function fetchRecords(): Promise<SledOpportunityRecord[]> {
       issueDate: parseDate(posted),
       dueAt,
       stateCode: "NE",
-      sourceUrl: absolute(URL, href),
+      sourceUrl: absolute(NEBRASKA_URL, href),
       rawPayload: {
         platform: "Nebraska DAS Materiel public bid board",
         posted: posted || null,
@@ -112,7 +112,7 @@ async function fetchRecords(): Promise<SledOpportunityRecord[]> {
         buyer: buyer || null,
         solicitationNumber: externalId,
         agency: agencyName,
-        sourcePage: URL,
+        sourcePage: NEBRASKA_URL,
       },
     });
   });
