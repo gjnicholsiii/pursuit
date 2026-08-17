@@ -3,12 +3,26 @@ import { MetricCard } from "@/components/metric-card";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
 import { opportunities as demoOpportunities, pathToAward, readiness } from "@/lib/mock-data";
-import { loadSamOpportunities } from "@/lib/sam";
+import { getStoredFederalCount, getStoredFederalOpportunities } from "@/lib/opportunity-store";
+
+export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const sam = await loadSamOpportunities(12);
-  const isLive = sam.configured && !sam.error && sam.opportunities.length > 0;
-  const opportunities = isLive ? sam.opportunities : demoOpportunities;
+  let storedOpportunities = [];
+  let storedCount = 0;
+  let dataError: string | undefined;
+
+  try {
+    [storedOpportunities, storedCount] = await Promise.all([
+      getStoredFederalOpportunities(12),
+      getStoredFederalCount(),
+    ]);
+  } catch (error) {
+    dataError = error instanceof Error ? error.message : "Unable to read stored federal opportunities";
+  }
+
+  const isLive = storedOpportunities.length > 0;
+  const opportunities = isLive ? storedOpportunities : demoOpportunities;
   const averageConfidence = Math.round(opportunities.reduce((sum, item) => sum + item.confidence, 0) / Math.max(opportunities.length, 1));
 
   return (
@@ -31,18 +45,18 @@ export default async function Home() {
           </div>
 
           <div className="metrics">
-            <MetricCard label={isLive ? "Federal records" : "Federal feed"} value={isLive ? sam.totalRecords.toLocaleString() : "Waiting"} detail={isLive ? "Solicitations posted in the last 14 days" : "Add SAM_GOV_API_KEY to Vercel"} accent />
-            <MetricCard label={isLive ? "Loaded now" : "Preview records"} value={String(opportunities.length)} detail={isLive ? "Current live SAM.gov sample" : "Demo data until the federal feed is connected"} />
+            <MetricCard label={isLive ? "Federal records" : "Federal feed"} value={isLive ? storedCount.toLocaleString() : "Waiting"} detail={isLive ? "Stored in Pursuit and ready to search" : "Federal inventory is not available"} accent />
+            <MetricCard label={isLive ? "Loaded now" : "Preview records"} value={String(opportunities.length)} detail={isLive ? "Current records served from Neon" : "Demo data until federal inventory is available"} />
             <MetricCard label="Brief confidence" value={`${averageConfidence}%`} detail={isLive ? "Metadata confidence; package analysis comes next" : "Prototype scoring"} />
             <MetricCard label="SLED coverage" value="Next" detail="National SLED feed follows the federal vertical slice" />
           </div>
 
-          {sam.error && (
+          {dataError && (
             <section className="readiness-panel">
               <div className="readiness-copy">
-                <span className="eyebrow">FEDERAL FEED</span>
-                <h2>SAM.gov is configured but did not return data.</h2>
-                <p>{sam.error}. Pursuit is showing demo records so the product remains usable while the connection is fixed.</p>
+                <span className="eyebrow">FEDERAL DATA</span>
+                <h2>Pursuit could not read the stored federal inventory.</h2>
+                <p>{dataError}. Demo records are being shown while the database connection is checked.</p>
               </div>
             </section>
           )}
@@ -64,7 +78,7 @@ export default async function Home() {
           </section>
 
           <section className="section-block">
-            <div className="section-heading"><div><span>{isLive ? "LIVE FEDERAL" : "FIVE-MINUTE BRIEF"}</span><h2>{isLive ? "Recent SAM.gov opportunities" : "Opportunities worth reviewing"}</h2></div><button>View all opportunities</button></div>
+            <div className="section-heading"><div><span>{isLive ? "FEDERAL INVENTORY" : "FIVE-MINUTE BRIEF"}</span><h2>{isLive ? "Recent SAM.gov opportunities" : "Opportunities worth reviewing"}</h2></div><button>View all opportunities</button></div>
             <div className="opportunity-list">{opportunities.map(o => <OpportunityCard key={o.id} opportunity={o} />)}</div>
           </section>
 
