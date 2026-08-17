@@ -89,7 +89,7 @@ async function pageOpen(referer: string, state: Obj, nav: Obj, cookie: string) {
       accept: "application/json,text/plain,*/*",
       "content-type": "application/json;charset=UTF-8",
       referer,
-      origin: new URL(referer).origin,
+      origin: new globalThis.URL(referer).origin,
       ...(state.session_info?.csrf_token ? { "x-csrf-token": String(state.session_info.csrf_token) } : {}),
       ...(cookie ? { cookie } : {}),
       "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
