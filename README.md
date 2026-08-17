@@ -33,7 +33,7 @@ Federal + SLED: state, county, municipal, K-12, higher education, authorities an
 
 ## Current state
 
-This repository contains the first product shell, canonical data model, ingestion connector contract and working mock UI. Mock data is intentionally marked as product-development data until live feeds are connected.
+The production app is deployed on Vercel, the core schema is live in Neon Postgres, and the app is wired to use `DATABASE_URL`. Federal opportunity ingestion is ready for the SAM.gov API key.
 
 ## Run locally
 
