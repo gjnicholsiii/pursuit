@@ -12,6 +12,10 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "planned",
     notes: "Arkansas transitioned new procurement activity to SAP Ariba in July 2026. ARBuy remains for solicitations opened before the transition.",
   },
+  IA: {
+    status: "partial",
+    notes: "Reusable JAGGAER connector verified against Iowa IMPACS public events. 41 open events observed; full pagination still required.",
+  },
   IL: {
     status: "partial",
     notes: "Reusable Periscope connector verified against anonymous Open Bids. Full pagination still required before complete coverage.",
@@ -19,6 +23,10 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
   MA: {
     status: "partial",
     notes: "Reusable Periscope connector verified against anonymous Open Bids, including state, higher-ed, municipal, and K-12 buyers. Full pagination still required.",
+  },
+  MT: {
+    status: "partial",
+    notes: "Reusable JAGGAER connector verified against Montana eMACS public events. 40 open events observed; full pagination still required.",
   },
   NV: {
     status: "partial",
@@ -32,6 +40,10 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     officialUrl: "https://oregonbuys.gov/bso/",
     status: "partial",
     notes: "Reusable Periscope connector verified against anonymous Open Bids, including state, city, and county buyers. Full pagination still required.",
+  },
+  UT: {
+    status: "partial",
+    notes: "Reusable JAGGAER connector verified against Utah public events. Current public list contained 3 open events at verification.",
   },
 };
 
