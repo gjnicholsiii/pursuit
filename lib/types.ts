@@ -6,13 +6,17 @@ export interface Opportunity {
   agency: string;
   title: string;
   location: string;
-  value: number;
+  value: number | null;
   due: string;
   confidence: number;
   eligibility: EligibilityStatus;
   procurementPath: string;
   stage: OpportunityStage;
   source: string;
+  sourceUrl?: string;
+  solicitationNumber?: string;
+  naicsCode?: string;
+  setAside?: string;
   tags: string[];
   verified: string[];
   uncertainty?: string[];
