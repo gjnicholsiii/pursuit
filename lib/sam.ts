@@ -45,9 +45,21 @@ export interface SamLoadResult {
   configured: boolean;
   opportunities: Opportunity[];
   totalRecords: number;
+  pageOffset?: number;
+  pageSize?: number;
+  rawCount?: number;
   error?: string;
   persistence?: SamPersistenceResult;
   persistenceError?: string;
+}
+
+export interface SamInventorySyncResult {
+  totalRecords: number;
+  pagesProcessed: number;
+  recordsSeen: number;
+  stored: number;
+  newRecords: number;
+  changedRecords: number;
 }
 
 function formatDateMMDDYYYY(date: Date) {
@@ -135,7 +147,13 @@ function mapOpportunity(raw: SamOpportunityRaw): Opportunity {
   };
 }
 
-export async function loadSamOpportunities(limit = 20): Promise<SamLoadResult> {
+export async function loadSamOpportunities(
+  limit = 20,
+  offset = 0,
+  shouldPersist = true,
+  fresh = false,
+  mode = "interactive",
+): Promise<SamLoadResult> {
   const apiKey = process.env.SAM_GOV_API_KEY;
   if (!apiKey) return { configured: false, opportunities: [], totalRecords: 0 };
 
@@ -143,27 +161,30 @@ export async function loadSamOpportunities(limit = 20): Promise<SamLoadResult> {
   const from = new Date(today);
   from.setUTCDate(from.getUTCDate() - 14);
 
+  const pageSize = Math.max(1, Math.min(Math.floor(limit), 1000));
+  const pageOffset = Math.max(0, Math.floor(offset));
   const params = new URLSearchParams({
     api_key: apiKey,
     postedFrom: formatDateMMDDYYYY(from),
     postedTo: formatDateMMDDYYYY(today),
-    limit: String(Math.min(limit, 100)),
-    offset: "0",
+    limit: String(pageSize),
+    offset: String(pageOffset),
   });
   params.append("ptype", "o");
   params.append("ptype", "k");
 
   try {
-    const response = await fetch(`${SAM_SEARCH_URL}?${params.toString()}`, {
-      next: { revalidate: 900 },
-      headers: { Accept: "application/json" },
-    });
+    const response = await fetch(`${SAM_SEARCH_URL}?${params.toString()}`, fresh
+      ? { cache: "no-store", headers: { Accept: "application/json" } }
+      : { next: { revalidate: 900 }, headers: { Accept: "application/json" } });
 
     if (!response.ok) {
       return {
         configured: true,
         opportunities: [],
         totalRecords: 0,
+        pageOffset,
+        pageSize,
         error: `SAM.gov returned ${response.status}`,
       };
     }
@@ -176,9 +197,13 @@ export async function loadSamOpportunities(limit = 20): Promise<SamLoadResult> {
 
     let persistence: SamPersistenceResult | undefined;
     let persistenceError: string | undefined;
-    if (process.env.DATABASE_URL && rawOpportunities.length) {
+    if (shouldPersist && process.env.DATABASE_URL && rawOpportunities.length) {
       try {
-        persistence = await persistSamOpportunities(rawOpportunities);
+        persistence = await persistSamOpportunities(rawOpportunities, {
+          mode,
+          offset: pageOffset,
+          totalRecords: payload.totalRecords || rawOpportunities.length,
+        });
       } catch (error) {
         persistenceError = error instanceof Error ? error.message : "Unable to persist SAM.gov records";
       }
@@ -188,6 +213,9 @@ export async function loadSamOpportunities(limit = 20): Promise<SamLoadResult> {
       configured: true,
       opportunities,
       totalRecords: payload.totalRecords || opportunities.length,
+      pageOffset,
+      pageSize,
+      rawCount: rawOpportunities.length,
       persistence,
       persistenceError,
     };
@@ -196,7 +224,37 @@ export async function loadSamOpportunities(limit = 20): Promise<SamLoadResult> {
       configured: true,
       opportunities: [],
       totalRecords: 0,
+      pageOffset,
+      pageSize,
       error: error instanceof Error ? error.message : "Unable to reach SAM.gov",
     };
   }
+}
+
+export async function syncSamInventory(pageSize = 1000): Promise<SamInventorySyncResult> {
+  const safePageSize = Math.max(1, Math.min(Math.floor(pageSize), 1000));
+  let totalRecords = 0;
+  let pagesProcessed = 0;
+  let recordsSeen = 0;
+  let stored = 0;
+  let newRecords = 0;
+  let changedRecords = 0;
+
+  for (let offset = 0; offset < 100; offset += 1) {
+    const page = await loadSamOpportunities(safePageSize, offset, true, true, "scheduled_full_sync");
+    if (!page.configured) throw new Error("SAM_GOV_API_KEY is not configured");
+    if (page.error) throw new Error(page.error);
+    if (page.persistenceError) throw new Error(page.persistenceError);
+
+    totalRecords = page.totalRecords;
+    pagesProcessed += 1;
+    recordsSeen += page.rawCount || 0;
+    stored += page.persistence?.stored || 0;
+    newRecords += page.persistence?.newRecords || 0;
+    changedRecords += page.persistence?.changedRecords || 0;
+
+    if (!page.rawCount || pagesProcessed * safePageSize >= totalRecords) break;
+  }
+
+  return { totalRecords, pagesProcessed, recordsSeen, stored, newRecords, changedRecords };
 }
