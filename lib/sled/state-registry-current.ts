@@ -19,6 +19,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "partial",
     notes: "Official statewide Open Bids dataset has a direct structured connector and authoritative live bid-detail links. The open-data mirror refreshes weekly, so Pursuit treats it as verified but not yet real-time complete.",
   },
+  GA: {
+    connectorFamily: "jaggaer",
+    platformLabel: "GA@WORK Marketplace / JAGGAER",
+    officialUrl: "https://doas.ga.gov/accessing-gawork-procurement-systems",
+    status: "partial",
+    notes: "GA@WORK went live July 1, 2026. The supplier sourcing marketplace uses JAGGAER with a public State of Georgia event feed; 46 open events were observed during verification. Full pagination still required.",
+  },
   IA: {
     status: "partial",
     notes: "Reusable JAGGAER connector verified against Iowa IMPACS public events. Full pagination still required.",
