@@ -84,6 +84,12 @@ function mapStoredOpportunity(row: StoredOpportunityRow): Opportunity {
   };
 }
 
+const CURRENT_FEDERAL_FILTER = `
+  s.adapter_key = 'sam_gov'
+  and o.status = 'open'
+  and (o.due_at is null or o.due_at >= now())
+`;
+
 export async function getStoredFederalOpportunities(limit = 50): Promise<Opportunity[]> {
   const sql = getSql();
   const safeLimit = Math.max(1, Math.min(Math.floor(limit), 500));
@@ -106,7 +112,7 @@ export async function getStoredFederalOpportunities(limit = 50): Promise<Opportu
      from opportunities o
      join agencies a on a.id = o.agency_id
      join sources s on s.id = o.source_id
-     where s.adapter_key = 'sam_gov'
+     where ${CURRENT_FEDERAL_FILTER}
      order by o.due_at asc nulls last, o.last_seen_at desc
      limit $1`,
     [safeLimit],
@@ -121,7 +127,7 @@ export async function getStoredFederalCount(): Promise<number> {
     `select count(*)::int as count
      from opportunities o
      join sources s on s.id = o.source_id
-     where s.adapter_key = 'sam_gov'`,
+     where ${CURRENT_FEDERAL_FILTER}`,
   ) as Array<{ count: number }>;
   return rows[0]?.count || 0;
 }
