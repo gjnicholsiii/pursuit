@@ -10,13 +10,13 @@ function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function hits(source: string, needle: string, before = 1600, after = 4200) {
-  const result: string[] = [];
+function hits(source: string, needle: string, before = 2400, after = 7600, limit = 8) {
+  const result: Array<{ index: number; snippet: string }> = [];
   let from = 0;
-  while (result.length < 4) {
+  while (result.length < limit) {
     const index = source.indexOf(needle, from);
     if (index < 0) break;
-    result.push(compact(source.slice(Math.max(0, index - before), index + after)));
+    result.push({ index, snippet: compact(source.slice(Math.max(0, index - before), index + after)) });
     from = index + needle.length;
   }
   return result;
@@ -41,12 +41,14 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       scriptUrl,
-      startDataWindow: hits(source, "start_data_window"),
-      endDataWindow: hits(source, "end_data_window"),
-      totalCountSuffix: hits(source, "total_count_suffix"),
-      rowsPerPage: hits(source, "rows_per_page"),
-      getNextPage: hits(source, "getNextPage"),
-      nextPage: hits(source, "nextPage"),
+      onPageActionClick: hits(source, "onPageActionClick", 3000, 9000, 12),
+      nextpageLiteral: hits(source, '"nextpage"', 3000, 9000, 12),
+      pageActionLiteral: hits(source, 'actionType="pageAction"', 3500, 9000, 12),
+      pageActionColon: hits(source, 'actionType:"pageAction"', 3500, 9000, 12),
+      gridPagination: hits(source, "gridPagination", 3000, 9000, 8),
+      paginationData: hits(source, "paginationData", 3000, 9000, 8),
+      rowsRequested: hits(source, "rows_requested", 3000, 9000, 8),
+      dataWindow: hits(source, "data_window", 3000, 9000, 8),
     });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
