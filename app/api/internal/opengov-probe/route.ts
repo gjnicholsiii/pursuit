@@ -3,8 +3,18 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function absolute(base: string, src: string) {
-  return new URL(src, base).toString();
+const API_BASES = [
+  "https://api.procurement.opengov.com/api/v1",
+  "https://api.procurement.opengov.com",
+];
+
+async function preview(response: Response) {
+  const text = await response.text();
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    body: text.slice(0, 3000),
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -14,39 +24,43 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
 
-  const pageUrl = "https://procurement.opengov.com/portal/embed/psusd/project-list?departmentId=all&status=all";
-  const page = await fetch(pageUrl, { cache: "no-store" });
-  const html = await page.text();
-  const scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m => absolute(pageUrl, m[1]));
-  const matches: Array<{ script: string; snippets: string[] }> = [];
+  const projectBodies = [
+    { governmentCode: "psusd", publicView: true },
+    { governmentCode: "psusd", publicView: true, limit: 10, offset: 0 },
+    { governmentCode: "psusd", publicView: true, page: 1, pageSize: 10 },
+    { code: "psusd", publicView: true, limit: 10, offset: 0 },
+    { government: "psusd", publicView: true, limit: 10, offset: 0 },
+  ];
 
-  for (const script of scripts.slice(0, 40)) {
-    try {
-      const response = await fetch(script, { cache: "no-store" });
-      if (!response.ok) continue;
-      const text = await response.text();
-      const needles = ["/project/list", "publicView", "government/list", "governmentCode"];
-      const snippets: string[] = [];
-      for (const needle of needles) {
-        let from = 0;
-        while (snippets.length < 12) {
-          const index = text.indexOf(needle, from);
-          if (index < 0) break;
-          snippets.push(text.slice(Math.max(0, index - 350), Math.min(text.length, index + 700)));
-          from = index + needle.length;
-        }
+  const projectResults: unknown[] = [];
+  for (const base of API_BASES) {
+    for (const body of projectBodies) {
+      try {
+        const response = await fetch(`${base}/project/list`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify(body),
+          cache: "no-store",
+        });
+        projectResults.push({ base, request: body, ...(await preview(response)) });
+      } catch (error) {
+        projectResults.push({ base, request: body, error: error instanceof Error ? error.message : String(error) });
       }
-      if (snippets.length) matches.push({ script, snippets });
-    } catch {
-      // Best-effort diagnostics only.
     }
   }
 
-  return NextResponse.json({
-    ok: true,
-    pageStatus: page.status,
-    scriptCount: scripts.length,
-    scripts,
-    matches,
-  });
+  const governmentPaths = ["/government/list", "/governments", "/government", "/portal/list", "/organization/list"];
+  const governmentResults: unknown[] = [];
+  for (const base of API_BASES) {
+    for (const path of governmentPaths) {
+      try {
+        const response = await fetch(`${base}${path}`, { headers: { accept: "application/json" }, cache: "no-store" });
+        governmentResults.push({ base, path, ...(await preview(response)) });
+      } catch (error) {
+        governmentResults.push({ base, path, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true, projectResults, governmentResults });
 }
