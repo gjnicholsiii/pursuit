@@ -38,34 +38,37 @@ function parseInitial(html: string) {
   return JSON.parse(extractJsonObject(html, brace)) as Record<string, unknown>;
 }
 
-function collectActions(value: unknown, path = "$", out: Array<Record<string, unknown>> = []) {
+function summarizeAction(object: Record<string, unknown>, path: string) {
+  return {
+    path,
+    key: object.key ?? null,
+    name: object.name ?? null,
+    title: object.title ?? null,
+    actionType: object.actionType ?? null,
+    actionCode: object.actionCode ?? null,
+    targetComponentType: object.targetComponentType ?? null,
+    targetQualifiedName: object.targetQualifiedName ?? null,
+    targetLocation: object.targetLocation ?? object.targetLocationOther ?? null,
+    applicationUrl: object.applicationUrl ?? null,
+    isCarouselNavigation: object.isCarouselNavigation ?? null,
+    dsNameList: object.dsNameList ?? null,
+    protected: object.protected ?? null,
+    bypassTxnCatalog: object.bypassTxnCatalog ?? null,
+    params: object.params ?? null,
+  };
+}
+
+function collectNavActions(value: unknown, path = "$", out: Array<Record<string, unknown>> = []) {
   if (Array.isArray(value)) {
-    value.forEach((item, index) => collectActions(item, `${path}[${index}]`, out));
+    value.forEach((item, index) => collectNavActions(item, `${path}[${index}]`, out));
     return out;
   }
   if (!value || typeof value !== "object") return out;
   const object = value as Record<string, unknown>;
-  const searchable = [object.title, object.name, object.key, object.actionType, object.actionCode, object.targetComponentType, object.targetQualifiedName]
-    .filter(item => typeof item === "string").join(" ");
-  if (/solicit|bid|opportun|published|procure|contract/i.test(searchable)) {
-    out.push({
-      path,
-      key: object.key ?? null,
-      name: object.name ?? null,
-      title: object.title ?? null,
-      actionType: object.actionType ?? null,
-      actionCode: object.actionCode ?? null,
-      targetComponentType: object.targetComponentType ?? null,
-      targetQualifiedName: object.targetQualifiedName ?? null,
-      targetLocation: object.targetLocation ?? object.targetLocationOther ?? null,
-      applicationUrl: object.applicationUrl ?? null,
-      isCarouselNavigation: object.isCarouselNavigation ?? null,
-      dsNameList: object.dsNameList ?? null,
-      protected: object.protected ?? null,
-      params: object.params ?? null,
-    });
-  }
-  for (const [key, child] of Object.entries(object)) collectActions(child, `${path}.${key}`, out);
+  const looksLikeNav = object.actionType === "navAction" ||
+    (typeof object.targetQualifiedName === "string" && typeof object.applicationUrl === "string");
+  if (looksLikeNav) out.push(summarizeAction(object, path));
+  for (const [key, child] of Object.entries(object)) collectNavActions(child, `${path}.${key}`, out);
   return out;
 }
 
@@ -90,12 +93,13 @@ async function inspectPortal(portal: (typeof PORTALS)[number]) {
     name: portal.name,
     finalUrl: response.url,
     guest: globalParams?.GUEST_SESSION ?? null,
+    initialAction: initial.action ?? null,
     sessionFields: {
       hasSessionId: Boolean(session?.session_id),
       hasPageId: Boolean(session?.page_id),
       hasCsrfToken: Boolean(session?.csrf_token),
     },
-    procurementActions: collectActions(initial),
+    navActions: collectNavActions(initial).slice(0, 100),
   };
 }
 
