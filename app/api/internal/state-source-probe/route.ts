@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const KY_URL = "https://vss.ky.gov/vssprod-ext/Advantage4";
+const KY_SERVICE = "https://vss.ky.gov/vssprod-ext/sofia/sofiaService.js";
 const MO_URL = "https://ewqg.fa.us8.oraclecloud.com/fscmUI/redwood/negotiation-abstracts/view/abstractlisting?prcBuId=300000005255687&ojSpLang=en";
 
 function walk(value: unknown, path = "$", out: Array<{ path: string; value: Record<string, unknown> }> = []) {
@@ -42,10 +43,7 @@ function extractBalancedJson(text: string, start: number) {
       else if (char === '"') inString = false;
       continue;
     }
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
+    if (char === '"') { inString = true; continue; }
     if (char === "{") depth += 1;
     else if (char === "}") {
       depth -= 1;
@@ -63,19 +61,27 @@ function extractInitialResponse(html: string) {
   if (objectStart < 0) return { value: null, error: "object start not found" };
   const raw = extractBalancedJson(html, objectStart);
   if (!raw) return { value: null, error: "object end not found" };
-  try {
-    return { value: JSON.parse(raw) as Record<string, unknown>, error: null };
-  } catch (error) {
-    return { value: null, error: error instanceof Error ? error.message : String(error) };
+  try { return { value: JSON.parse(raw) as Record<string, unknown>, error: null }; }
+  catch (error) { return { value: null, error: error instanceof Error ? error.message : String(error) }; }
+}
+
+function snippets(text: string, terms: string[]) {
+  const lower = text.toLowerCase();
+  const result: string[] = [];
+  for (const term of terms) {
+    let from = 0;
+    while (result.length < 30) {
+      const index = lower.indexOf(term.toLowerCase(), from);
+      if (index < 0) break;
+      result.push(text.slice(Math.max(0, index - 450), Math.min(text.length, index + 1000)).replace(/\s+/g, " "));
+      from = index + term.length;
+    }
   }
+  return [...new Set(result)].slice(0, 30);
 }
 
 function extractMissouriConfig(html: string) {
-  const keys = ["APP_NAME", "APP_ID", "APP_VERSION", "BASE_URL", "vbInitConfig", "serviceConnections", "negotiation-abstracts"];
-  return keys.map(key => {
-    const index = html.indexOf(key);
-    return index < 0 ? null : html.slice(Math.max(0, index - 300), Math.min(html.length, index + 900)).replace(/\s+/g, " ");
-  }).filter(Boolean);
+  return snippets(html, ["APP_NAME", "APP_ID", "APP_VERSION", "serviceConnections", "negotiation-abstracts"]);
 }
 
 export async function GET(request: NextRequest) {
@@ -87,15 +93,25 @@ export async function GET(request: NextRequest) {
     const response = await fetch(KY_URL, { cache: "no-store", headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
     const html = await response.text();
     const initial = extractInitialResponse(html);
-    return NextResponse.json({
-      ok: true,
-      source,
-      status: response.status,
-      guest: html.includes('"GUEST_SESSION":"true"'),
-      metadataFound: Boolean(initial.value),
-      parseError: initial.error,
-      matches: initial.value ? walk(initial.value).slice(0, 100) : [],
-    });
+    const allNav: Array<{ path: string; value: Record<string, unknown> }> = [];
+    if (initial.value) {
+      const collect = (value: unknown, path = "$") => {
+        if (!value || typeof value !== "object") return;
+        if (Array.isArray(value)) return value.forEach((item, index) => collect(item, `${path}[${index}]`));
+        const record = value as Record<string, unknown>;
+        if (record.actionType === "navAction") {
+          allNav.push({ path, value: Object.fromEntries(Object.entries(record).filter(([key]) => ["name", "title", "actionType", "applicationUrl", "targetComponentType", "targetQualifiedName", "targetLocation", "protected"].includes(key))) });
+        }
+        Object.entries(record).forEach(([key, child]) => collect(child, `${path}.${key}`));
+      };
+      collect(initial.value);
+    }
+    return NextResponse.json({ ok: true, source, status: response.status, guest: html.includes('"GUEST_SESSION":"true"'), allNav: allNav.slice(0, 50), matches: initial.value ? walk(initial.value).slice(0, 100) : [] });
+  }
+  if (source === "kentucky-service") {
+    const response = await fetch(KY_SERVICE, { cache: "no-store", headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
+    const body = await response.text();
+    return NextResponse.json({ ok: true, source, status: response.status, size: body.length, findings: snippets(body, ["XMLHttpRequest", "fetch(", "$.ajax", "POST", "service", "action", "Advantage4", "sofia"]) });
   }
   if (source === "missouri") {
     const response = await fetch(MO_URL, { cache: "no-store", headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
