@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncOfficialStatePages } from "@/lib/sled/official-state-pages";
-import { syncPeriscopeFirstPages } from "@/lib/sled/periscope";
+import { syncPeriscopeFullSweeps } from "@/lib/sled/periscope";
 import { syncJaggaerFullSweeps } from "@/lib/sled/jaggaer";
 import { syncPublicPeopleSoft } from "@/lib/sled/peoplesoft";
 import { syncDelawareOpenBids } from "@/lib/sled/delaware";
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
   const [official, periscope, jaggaer, peoplesoft, delaware] = await Promise.all([
     syncOfficialStatePages(false),
-    syncPeriscopeFirstPages(),
+    syncPeriscopeFullSweeps(),
     syncJaggaerFullSweeps(),
     syncPublicPeopleSoft(),
     syncDelawareOpenBids(false),
