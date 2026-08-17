@@ -18,8 +18,8 @@ export default function Home() {
           <div className="hero-row">
             <div>
               <span className="eyebrow">REVENUE TODAY</span>
-              <h1>Government opportunities you can understand before you spend a day on them.</h1>
-              <p>Federal, state, local, K-12 and higher education. The decision stays yours.</p>
+              <h1>WIN MORE / WORK LESS</h1>
+              <p>Federal + SLED.</p>
             </div>
             <button className="secondary-button"><SlidersHorizontal size={16} />Selling profile</button>
           </div>
