@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const KY_URL = "https://vss.ky.gov/vssprod-ext/Advantage4";
-const KY_SERVICE = "https://vss.ky.gov/vssprod-ext/sofia/sofiaService.js";
+const KY_SERVICE = "https://vss.ky.gov/vssprod-ext/advantage/Advantage4/sofia/sofiaService.js";
 const MO_URL = "https://ewqg.fa.us8.oraclecloud.com/fscmUI/redwood/negotiation-abstracts/view/abstractlisting?prcBuId=300000005255687&ojSpLang=en";
 
 function walk(value: unknown, path = "$", out: Array<{ path: string; value: Record<string, unknown> }> = []) {
