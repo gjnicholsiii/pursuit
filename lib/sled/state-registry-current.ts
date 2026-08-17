@@ -14,7 +14,7 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
   },
   IA: {
     status: "partial",
-    notes: "Reusable JAGGAER connector verified against Iowa IMPACS public events. 41 open events observed; full pagination still required.",
+    notes: "Reusable JAGGAER connector verified against Iowa IMPACS public events. Full pagination still required.",
   },
   IL: {
     status: "partial",
@@ -24,9 +24,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "partial",
     notes: "Reusable Periscope connector verified against anonymous Open Bids, including state, higher-ed, municipal, and K-12 buyers. Full pagination still required.",
   },
+  MN: {
+    status: "partial",
+    notes: "Official Minnesota OSP public SWIFT solicitation postings verified. Goods/services feed is directly readable; professional/technical feed is additive when available.",
+  },
   MT: {
     status: "partial",
-    notes: "Reusable JAGGAER connector verified against Montana eMACS public events. 40 open events observed; full pagination still required.",
+    notes: "Reusable JAGGAER connector verified against Montana eMACS public events. Full pagination still required.",
   },
   NV: {
     status: "partial",
@@ -43,7 +47,11 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
   },
   UT: {
     status: "partial",
-    notes: "Reusable JAGGAER connector verified against Utah public events. Current public list contained 3 open events at verification.",
+    notes: "Reusable JAGGAER connector verified against Utah public events. Current public list fits on one page.",
+  },
+  WI: {
+    status: "blocked",
+    notes: "Wisconsin eSupplier public solicitation route currently redirects server-side requests to PeopleSoft login; alternate official public source required.",
   },
 };
 
