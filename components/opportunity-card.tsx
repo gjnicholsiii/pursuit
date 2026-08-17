@@ -20,7 +20,7 @@ export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
         <h3>{opportunity.title}</h3>
         <div className="opp-meta">
           <span><MapPin size={14} />{opportunity.location}</span>
-          <span><DollarSign size={14} />{money(opportunity.value)}</span>
+          <span><DollarSign size={14} />{opportunity.value == null ? "Value not stated" : money(opportunity.value)}</span>
           <span><Clock3 size={14} />Due {opportunity.due}</span>
         </div>
         <div className="tags"><span className="path-tag">{opportunity.procurementPath}</span>{opportunity.tags.map(tag => <span key={tag}>{tag}</span>)}</div>
@@ -41,7 +41,11 @@ export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
       <div className="opp-score">
         <span>Confidence</span>
         <strong>{opportunity.confidence}%</strong>
-        <button aria-label="Open opportunity"><ArrowUpRight size={18} /></button>
+        {opportunity.sourceUrl ? (
+          <a href={opportunity.sourceUrl} target="_blank" rel="noreferrer" aria-label="Open source opportunity"><ArrowUpRight size={18} /></a>
+        ) : (
+          <button aria-label="Open opportunity"><ArrowUpRight size={18} /></button>
+        )}
       </div>
     </article>
   );
