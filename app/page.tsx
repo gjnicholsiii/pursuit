@@ -4,11 +4,12 @@ import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
 import { opportunities as demoOpportunities, pathToAward, readiness } from "@/lib/mock-data";
 import { getStoredFederalCount, getStoredFederalOpportunities } from "@/lib/opportunity-store";
+import type { Opportunity } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  let storedOpportunities = [];
+  let storedOpportunities: Opportunity[] = [];
   let storedCount = 0;
   let dataError: string | undefined;
 
