@@ -4,7 +4,8 @@ import { persistSledOpportunities } from "@/lib/sled/persistence";
 import type { SledOpportunityRecord, SledSourceConfig } from "@/lib/sled/types";
 
 const INDIANA_URL = "https://www.in.gov/idoa/procurement/current-business-opportunities/index.html";
-const TENNESSEE_URL = "https://hub.edison.tn.gov/psc/fsprd/SUPPLIER/ERP/c/SCP_PUBLIC_MENU_FL.SCP_PUB_BID_CMP_FL.GBL";
+const TENNESSEE_RFP_URL = "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information/request-for-proposals--rfp--opportunities1.html";
+const TENNESSEE_ITB_URL = "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information/invitations-to-bid--itb-.html";
 
 const INDIANA_SOURCE: SledSourceConfig = {
   adapterKey: "indiana_idoa",
@@ -15,9 +16,9 @@ const INDIANA_SOURCE: SledSourceConfig = {
 };
 
 const TENNESSEE_SOURCE: SledSourceConfig = {
-  adapterKey: "tennessee_edison",
-  sourceName: "Tennessee Edison Public Bid Board",
-  baseUrl: TENNESSEE_URL,
+  adapterKey: "tennessee_cpo_public",
+  sourceName: "Tennessee Central Procurement Office Public Solicitations",
+  baseUrl: "https://www.tn.gov/generalservices/procurement.html",
   jurisdiction: "Tennessee",
   sourceType: "website",
 };
@@ -46,6 +47,17 @@ function isoDate(value: string) {
   const normalized = value.replace(/\bEST\b/g, "GMT-0500").replace(/\bEDT\b/g, "GMT-0400").replace(/\bCST\b/g, "GMT-0600").replace(/\bCDT\b/g, "GMT-0500");
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function dateOnlyIso(value: string, endOfDay = false) {
+  const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return isoDate(value);
+  const [, month, day, year] = match;
+  const hour = endOfDay ? 23 : 0;
+  const minute = endOfDay ? 59 : 0;
+  const second = endOfDay ? 59 : 0;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), hour, minute, second));
+  return date.toISOString();
 }
 
 async function fetchHtml(url: string) {
@@ -119,62 +131,73 @@ function parseIndiana(html: string): SledOpportunityRecord[] {
   return [...new Map(records.map(record => [record.externalId, record])).values()];
 }
 
-function parseTennessee(html: string): SledOpportunityRecord[] {
+function parseTennesseePage(html: string, pageUrl: string, defaultType: "RFP" | "ITB"): SledOpportunityRecord[] {
   const $ = load(html);
   const records: SledOpportunityRecord[] = [];
 
   $("table tr").each((_, row) => {
     const cells = $(row).find("td");
-    if (cells.length < 8) return;
-    const cell = (index: number) => text($(cells[index]).text());
-    const title = cell(0);
-    const businessUnit = cell(1);
-    const eventId = cell(2);
-    const eventFormat = cell(3);
-    const eventType = cell(4);
-    const startText = cell(6);
-    const endText = cell(7);
-    if (!title || !businessUnit || !eventId || !/^\d{6,}$/.test(eventId.replace(/\s/g, ""))) return;
+    if (cells.length < 3) return;
+    const firstCell = $(cells[0]);
+    const firstText = text(firstCell.text());
+    const dateText = text($(cells[1]).text());
+    const title = text($(cells[2]).text());
+    if (!firstText || !title || /event name|document id/i.test(firstText)) return;
 
-    const dueAt = isoDate(endText);
-    if (dueAt && new Date(dueAt).getTime() < Date.now()) return;
-    const href = $(cells[8] || cells[0]).find("a").first().attr("href") || $(cells[0]).find("a").first().attr("href");
+    const idMatch = firstText.match(/\b(RFP|RFQ|RFI|Event|Solicitation)[\s_:-]*([A-Z0-9-]+)/i);
+    if (!idMatch) return;
+    const typeToken = idMatch[1].toUpperCase();
+    const number = idMatch[2].replace(/[^A-Z0-9-]/gi, "");
+    const externalId = `${typeToken}:${number}`;
+    const dates = dateText.match(/\d{1,2}\/\d{1,2}\/\d{4}/g) || [];
+    if (dates.length < 2) return;
+    const issueDate = dateOnlyIso(dates[0]);
+    const dueAt = dateOnlyIso(dates[1], true);
+    if (!dueAt || new Date(dueAt).getTime() < Date.now()) return;
+
+    const documents = firstCell.find("a").toArray().map(anchor => ({
+      label: text($(anchor).text()),
+      url: absolute(pageUrl, $(anchor).attr("href")),
+    })).filter(item => item.label && item.url !== pageUrl).slice(0, 30);
+    const primary = documents[0]?.url || pageUrl;
+    const lastUpdated = cells.length > 3 ? text($(cells[3]).text()) : "";
+    const solicitationType = typeToken === "EVENT" ? defaultType : typeToken;
 
     records.push({
-      externalId: eventId,
+      externalId,
       agency: {
-        key: `tennessee:${businessUnit}`,
-        name: `State of Tennessee - ${businessUnit}`,
+        key: "tennessee:cpo",
+        name: "State of Tennessee - Central Procurement Office",
         agencyType: "state_agency",
         jurisdictionLevel: "state",
         stateCode: "TN",
         city: "Nashville",
-        website: "https://www.tn.gov/",
+        website: "https://www.tn.gov/generalservices/procurement.html",
       },
       title,
-      solicitationType: eventType || "RFx",
-      procurementMechanism: eventFormat || "Tennessee state solicitation",
+      solicitationType,
+      procurementMechanism: defaultType === "ITB" ? "Tennessee Invitation to Bid" : "Tennessee professional services solicitation",
       status: "open",
-      issueDate: isoDate(startText),
+      issueDate,
       dueAt,
       stateCode: "TN",
       city: "Nashville",
-      sourceUrl: absolute(TENNESSEE_URL, href),
+      sourceUrl: primary,
       rawPayload: {
-        platform: "Tennessee Edison",
-        eventName: title,
-        businessUnit,
-        eventId,
-        eventFormat,
-        eventType,
-        starts: startText,
-        ends: endText,
-        sourcePage: TENNESSEE_URL,
+        platform: "Tennessee CPO",
+        solicitationId: `${idMatch[1]} ${number}`,
+        solicitationType,
+        title,
+        startDate: dates[0],
+        responseDue: dates[1],
+        lastUpdated: lastUpdated || null,
+        documents,
+        sourcePage: pageUrl,
       },
     });
   });
 
-  return [...new Map(records.map(record => [record.externalId, record])).values()];
+  return records;
 }
 
 async function closeMissing(adapterKey: string, startedAt: string) {
@@ -197,7 +220,7 @@ async function syncOne(
   try {
     const { html, finalUrl } = await fetchHtml(url);
     if (/identity\.oraclecloud\.com|\/oauth2\/v1\/authorize/i.test(finalUrl)) {
-      throw new Error(`Public source redirected to authentication: ${finalUrl}`);
+      throw new Error(`Public source redirected to authentication: ${new URL(finalUrl).hostname}`);
     }
     const records = parser(html);
     if (!records.length) throw new Error("No current solicitation rows were parsed from the public page");
@@ -221,9 +244,39 @@ async function syncOne(
   }
 }
 
+async function syncTennessee(bootstrap: boolean): Promise<StatePageSyncResult> {
+  const startedAt = new Date().toISOString();
+  try {
+    const [rfp, itb] = await Promise.all([fetchHtml(TENNESSEE_RFP_URL), fetchHtml(TENNESSEE_ITB_URL)]);
+    const records = [
+      ...parseTennesseePage(rfp.html, TENNESSEE_RFP_URL, "RFP"),
+      ...parseTennesseePage(itb.html, TENNESSEE_ITB_URL, "ITB"),
+    ];
+    const deduped = [...new Map(records.map(record => [record.externalId, record])).values()];
+    if (!deduped.length) throw new Error("No current Tennessee CPO solicitations were parsed");
+    const result = await persistSledOpportunities(TENNESSEE_SOURCE, deduped, {
+      mode: bootstrap ? "tennessee_cpo_bootstrap" : "tennessee_cpo_daily",
+      recordChanges: !bootstrap,
+    });
+    await closeMissing(TENNESSEE_SOURCE.adapterKey, startedAt);
+    return { source: TENNESSEE_SOURCE.sourceName, adapterKey: TENNESSEE_SOURCE.adapterKey, rowsFound: deduped.length, ...result, ok: true };
+  } catch (error) {
+    return {
+      source: TENNESSEE_SOURCE.sourceName,
+      adapterKey: TENNESSEE_SOURCE.adapterKey,
+      rowsFound: 0,
+      stored: 0,
+      newRecords: 0,
+      changedRecords: 0,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function syncOfficialStatePages(bootstrap = false) {
   return Promise.all([
     syncOne(INDIANA_SOURCE, INDIANA_URL, parseIndiana, bootstrap),
-    syncOne(TENNESSEE_SOURCE, TENNESSEE_URL, parseTennessee, bootstrap),
+    syncTennessee(bootstrap),
   ]);
 }
