@@ -6,6 +6,7 @@ export const maxDuration = 120;
 const KY_URL = "https://vss.ky.gov/vssprod-ext/Advantage4";
 
 type Obj = Record<string, unknown>;
+type CookieJar = Map<string, string>;
 
 function extractBalancedJson(text: string, start: number) {
   let depth = 0;
@@ -88,7 +89,7 @@ function compactAction(action: Obj | null) {
 function buildPayload(action: Obj, session: { session_id: string; csrf_token: string; page_id: string }) {
   const targetLocation = str(action, "targetLocation") || "display";
   const targetComponentType = str(action, "targetComponentType");
-  const result: Obj = {
+  return {
     action: {
       actionType: str(action, "actionType") || "navAction",
       actionCode: str(action, "actionCode"),
@@ -101,7 +102,54 @@ function buildPayload(action: Obj, session: { session_id: string; csrf_token: st
     key: str(action, "key"),
     session_info: session,
   };
-  return result;
+}
+
+function getSetCookies(headers: Headers) {
+  const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] };
+  const values = withGetSetCookie.getSetCookie?.();
+  if (values?.length) return values;
+  const fallback = headers.get("set-cookie");
+  return fallback ? [fallback] : [];
+}
+
+function rememberCookies(jar: CookieJar, headers: Headers) {
+  for (const setCookie of getSetCookies(headers)) {
+    const pair = setCookie.split(";", 1)[0]?.trim();
+    if (!pair) continue;
+    const separator = pair.indexOf("=");
+    if (separator <= 0) continue;
+    const name = pair.slice(0, separator).trim();
+    const value = pair.slice(separator + 1).trim();
+    if (!name) continue;
+    if (!value) jar.delete(name);
+    else jar.set(name, value);
+  }
+}
+
+function cookieHeader(jar: CookieJar) {
+  return [...jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+async function fetchWithJar(url: string, jar: CookieJar, init: RequestInit = {}, redirects = 6): Promise<Response> {
+  let currentUrl = url;
+  let method = init.method || "GET";
+  let body = init.body;
+  for (let attempt = 0; attempt <= redirects; attempt += 1) {
+    const headers = new Headers(init.headers || {});
+    const cookies = cookieHeader(jar);
+    if (cookies) headers.set("cookie", cookies);
+    const response = await fetch(currentUrl, { ...init, method, body, headers, redirect: "manual", cache: "no-store" });
+    rememberCookies(jar, response.headers);
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get("location");
+    if (!location) return response;
+    currentUrl = new URL(location, currentUrl).toString();
+    if ([301, 302, 303].includes(response.status) && method !== "GET" && method !== "HEAD") {
+      method = "GET";
+      body = undefined;
+    }
+  }
+  throw new Error("Kentucky guest flow exceeded redirect limit");
 }
 
 function summarizeResponse(body: string) {
@@ -125,9 +173,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
 
-  const shell = await fetch(KY_URL, {
-    cache: "no-store",
-    headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
+  const jar: CookieJar = new Map();
+  const shell = await fetchWithJar(KY_URL, jar, {
+    headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0", accept: "text/html,application/xhtml+xml" },
   });
   const html = await shell.text();
   const initial = extractInitialResponse(html);
@@ -141,19 +189,18 @@ export async function GET(request: NextRequest) {
   }
 
   const applicationUrl = new URL(applicationUrlRaw, shell.url).toString();
-  const cookie = shell.headers.get("set-cookie") || "";
   const payload = buildPayload(action, session);
-  const response = await fetch(applicationUrl, {
+  const response = await fetchWithJar(applicationUrl, jar, {
     method: "POST",
-    redirect: "manual",
     headers: {
       accept: "application/json,text/plain,*/*",
       "content-type": "application/json",
       "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
-      ...(cookie ? { cookie } : {}),
+      "x-csrf-token": session.csrf_token,
+      origin: new URL(applicationUrl).origin,
+      referer: shell.url,
     },
     body: JSON.stringify(payload),
-    cache: "no-store",
   });
   const body = await response.text();
 
@@ -161,9 +208,11 @@ export async function GET(request: NextRequest) {
     ok: true,
     action: compactAction(action),
     applicationUrl,
+    cookieCount: jar.size,
     postStatus: response.status,
     postContentType: response.headers.get("content-type"),
     responseSize: body.length,
+    sessionInvalid: /SessionInvalidPage|Session Invalid/i.test(body),
     responsePreview: body.slice(0, 1200),
     findings: summarizeResponse(body),
   });
