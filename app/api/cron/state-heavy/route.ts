@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncDirectStateBoards } from "@/lib/sled/direct-state-boards";
+import { syncNebraskaBoard } from "@/lib/sled/nebraska";
+import { syncLouisianaLapac } from "@/lib/sled/louisiana";
 import { syncSouthCarolinaScbo } from "@/lib/sled/south-carolina";
 import { syncTexasEsbd } from "@/lib/sled/texas";
 
@@ -13,16 +14,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const [directBoards, southCarolina, texas] = await Promise.all([
-    syncDirectStateBoards(false),
+  const [nebraska, louisiana, southCarolina, texas] = await Promise.all([
+    syncNebraskaBoard(false),
+    syncLouisianaLapac(false),
     syncSouthCarolinaScbo(false),
     syncTexasEsbd(false),
   ]);
 
-  const failures = [...directBoards, southCarolina, texas].filter(result => !result.ok);
+  const results = [nebraska, louisiana, southCarolina, texas];
+  const failures = results.filter(result => !result.ok);
   return NextResponse.json({
     ok: failures.length === 0,
-    sync: { directBoards, southCarolina, texas },
+    sync: { nebraska, louisiana, southCarolina, texas },
     failures,
   }, { status: failures.length === 0 ? 200 : 207 });
 }
