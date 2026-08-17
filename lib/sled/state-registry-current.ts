@@ -46,7 +46,7 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     platformLabel: "Louisiana LaPAC public network (SAP/LaGov downstream)",
     officialUrl: "https://wwwcfprd.doa.louisiana.gov/OSP/LaPAC/pubMain.cfm",
     status: "planned",
-    notes: "Direct LaPAC connector is staged against official public department listings. LaPAC exposes open bids, documents and addenda without vendor login; production validation is pending the deployment reset.",
+    notes: "Direct LaPAC connector is staged against official public department listings. LaPAC exposes open bids, documents and addenda without vendor login; production validation is pending the next deliberate release.",
   },
   MA: {
     status: "partial",
@@ -65,7 +65,7 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     platformLabel: "Nebraska DAS Materiel public bid board",
     officialUrl: "https://das.nebraska.gov/materiel/bid-opportunities.html",
     status: "planned",
-    notes: "Direct official connector is staged. The public board exposes solicitation number, agency, type, buyer, posted date, opening date and bid-detail links; production validation is pending the deployment reset.",
+    notes: "Direct official connector is staged. The public board exposes solicitation number, agency, type, buyer, posted date, opening date and bid-detail links; production validation is pending the next deliberate release.",
   },
   NM: {
     connectorFamily: "custom",
@@ -93,6 +93,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     officialUrl: "https://www.pa.gov/agencies/dgs/procurement-resources/supplier-service-center",
     status: "partial",
     notes: "Pennsylvania DGS directs suppliers to the CommonwealthPA JAGGAER public-event feed. Reusable JAGGAER connector is staged; full pagination must be verified before complete coverage.",
+  },
+  SC: {
+    connectorFamily: "direct_state_board",
+    platformLabel: "South Carolina Business Opportunities (SCBO)",
+    officialUrl: "https://scbo.sc.gov/online-edition",
+    status: "partial",
+    notes: "SCBO is the state's definitive public advertisement database and includes state, local, higher-ed and K-12 buyers. A direct full-category connector is staged; production validation is pending the next deliberate release.",
   },
   UT: {
     status: "live",
