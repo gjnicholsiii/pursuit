@@ -2,6 +2,7 @@ import { Opportunity } from "./types";
 import { persistSamOpportunities, type SamPersistenceResult } from "./sam-persistence";
 
 const SAM_SEARCH_URL = "https://api.sam.gov/opportunities/v2/search";
+const SAM_PAGE_THROTTLE_MS = 16000;
 
 interface SamPlacePart { code?: string | null; name?: string | null }
 interface SamPlace {
@@ -56,10 +57,16 @@ export interface SamLoadResult {
 export interface SamInventorySyncResult {
   totalRecords: number;
   pagesProcessed: number;
+  startOffset: number;
+  lastOffset: number;
   recordsSeen: number;
   stored: number;
   newRecords: number;
   changedRecords: number;
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function formatDateMMDDYYYY(date: Date) {
@@ -231,30 +238,49 @@ export async function loadSamOpportunities(
   }
 }
 
-export async function syncSamInventory(pageSize = 1000): Promise<SamInventorySyncResult> {
+export async function syncSamInventory(pageSize = 1000, startOffset = 0): Promise<SamInventorySyncResult> {
   const safePageSize = Math.max(1, Math.min(Math.floor(pageSize), 1000));
+  const safeStartOffset = Math.max(0, Math.floor(startOffset));
   let totalRecords = 0;
   let pagesProcessed = 0;
   let recordsSeen = 0;
   let stored = 0;
   let newRecords = 0;
   let changedRecords = 0;
+  let lastOffset = safeStartOffset - 1;
 
-  for (let offset = 0; offset < 100; offset += 1) {
-    const page = await loadSamOpportunities(safePageSize, offset, true, true, "scheduled_full_sync");
+  for (let offset = safeStartOffset; offset < 100; offset += 1) {
+    if (pagesProcessed > 0) await sleep(SAM_PAGE_THROTTLE_MS);
+
+    let page = await loadSamOpportunities(safePageSize, offset, true, true, "scheduled_full_sync");
+    if (page.error === "SAM.gov returned 429") {
+      await sleep(30000);
+      page = await loadSamOpportunities(safePageSize, offset, true, true, "scheduled_full_sync");
+    }
+
     if (!page.configured) throw new Error("SAM_GOV_API_KEY is not configured");
     if (page.error) throw new Error(page.error);
     if (page.persistenceError) throw new Error(page.persistenceError);
 
     totalRecords = page.totalRecords;
     pagesProcessed += 1;
+    lastOffset = offset;
     recordsSeen += page.rawCount || 0;
     stored += page.persistence?.stored || 0;
     newRecords += page.persistence?.newRecords || 0;
     changedRecords += page.persistence?.changedRecords || 0;
 
-    if (!page.rawCount || pagesProcessed * safePageSize >= totalRecords) break;
+    if (!page.rawCount || (offset + 1) * safePageSize >= totalRecords) break;
   }
 
-  return { totalRecords, pagesProcessed, recordsSeen, stored, newRecords, changedRecords };
+  return {
+    totalRecords,
+    pagesProcessed,
+    startOffset: safeStartOffset,
+    lastOffset,
+    recordsSeen,
+    stored,
+    newRecords,
+    changedRecords,
+  };
 }
