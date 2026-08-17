@@ -13,6 +13,9 @@ export type StateConnectorFamily =
   | "sap"
   | "proactis_webprocure"
   | "infor"
+  | "infor_luma"
+  | "socrata_open_data"
+  | "direct_state_board"
   | "esm_solutions"
   | "public_purchase"
   | "eva_custom"
@@ -92,7 +95,10 @@ export const STATE_CONNECTOR_PRIORITY: StateConnectorFamily[] = [
   "sap_ariba",
   "sap",
   "proactis_webprocure",
+  "direct_state_board",
+  "socrata_open_data",
   "public_purchase",
+  "infor_luma",
   "infor",
   "esm_solutions",
   "eva_custom",
