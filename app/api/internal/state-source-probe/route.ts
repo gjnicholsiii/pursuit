@@ -148,16 +148,24 @@ function findSolicitationArrays(value: unknown, path = "$", out: Array<{ path: s
   return out;
 }
 
-function findPagingScalars(value: unknown, path = "$", out: Array<{ path: string; value: string | number | boolean }> = []) {
-  if (!value || typeof value !== "object") return out;
-  if (Array.isArray(value)) { value.forEach((item, index) => findPagingScalars(item, `${path}[${index}]`, out)); return out; }
-  for (const [key, child] of Object.entries(value as Obj)) {
-    const nextPath = `${path}.${key}`;
-    if (["string", "number", "boolean"].includes(typeof child) && /count|rows|page|offset|limit|total|record|fetch/i.test(key)) {
-      out.push({ path: nextPath, value: child as string | number | boolean });
-    } else findPagingScalars(child, nextPath, out);
+function compactPrimitiveObject(record: Obj) {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)));
+}
+
+function findPagingActions(value: unknown) {
+  return collectObjects(value).filter(record => {
+    const name = str(record, "name"), key = str(record, "key"), actionType = str(record, "actionType"), title = str(record, "title");
+    return Boolean(actionType) && /next|prev|page|scroll|fetch|grid|search|filter|more|block/i.test(`${name} ${key} ${title} ${actionType}`);
+  }).slice(0, 80).map(compactPrimitiveObject);
+}
+
+function nestedObject(root: Obj, path: string[]): Obj | null {
+  let current: unknown = root;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return null;
+    current = (current as Obj)[key];
   }
-  return out;
+  return current && typeof current === "object" && !Array.isArray(current) ? current as Obj : null;
 }
 
 export async function GET(request: NextRequest) {
@@ -183,23 +191,17 @@ export async function GET(request: NextRequest) {
   if (!solicitations.json) return NextResponse.json({ ok: false, error: "Published solicitations did not return JSON" }, { status: 502 });
   const arrays = findSolicitationArrays(solicitations.json);
   const best = arrays.sort((a, b) => b.rows.length - a.rows.length)[0];
-  const sample = (best?.rows || []).slice(0, 3).map(row => ({
-    DOC_REF: row.DOC_REF,
-    DOC_DSCR: row.DOC_DSCR,
-    DEPT_NM: row.DEPT_NM,
-    DOC_CD: row.DOC_CD,
-    SO_STA: row.SO_STA,
-    SO_CLSNG_DT_TM: row.SO_CLSNG_DT_TM,
-    PUB_DT: row.PUB_DT,
-  }));
+  const dsMeta = nestedObject(solicitations.json, ["page_metadata", "datasources", "T1SO_SRCH_QRY"]);
+  const dsData = nestedObject(solicitations.json, ["data", "ds_data", "T1SO_SRCH_QRY"]);
 
   return NextResponse.json({
     ok: true,
-    cookieCount: jar.size,
-    datasetPath: best?.path || null,
     rowsReturned: best?.rows.length || 0,
-    arrayCandidates: arrays.map(item => ({ path: item.path, rows: item.rows.length })).slice(0, 10),
-    paging: findPagingScalars(solicitations.json).slice(0, 100),
-    sample,
+    datasetPath: best?.path || null,
+    dsMetadata: dsMeta ? compactPrimitiveObject(dsMeta) : null,
+    dsDataMeta: dsData ? Object.fromEntries(Object.entries(dsData).filter(([key, value]) => key !== "row_data" && ["string", "number", "boolean"].includes(typeof value))) : null,
+    pagingActions: findPagingActions(solicitations.json),
+    firstRef: best?.rows[0]?.DOC_REF || null,
+    lastRef: best?.rows.at(-1)?.DOC_REF || null,
   });
 }
