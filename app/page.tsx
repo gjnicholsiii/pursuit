@@ -3,28 +3,39 @@ import { MetricCard } from "@/components/metric-card";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
 import { opportunities as demoOpportunities } from "@/lib/mock-data";
-import { getStoredFederalCount, getStoredFederalOpportunities } from "@/lib/opportunity-store";
+import {
+  getStoredFederalCount,
+  getStoredFederalOpportunities,
+  getStoredSledCount,
+  getStoredSledOpportunities,
+} from "@/lib/opportunity-store";
 import type { Opportunity } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  let storedOpportunities: Opportunity[] = [];
-  let storedCount = 0;
+  let federalOpportunities: Opportunity[] = [];
+  let sledOpportunities: Opportunity[] = [];
+  let federalCount = 0;
+  let sledCount = 0;
   let dataError: string | undefined;
 
   try {
-    [storedOpportunities, storedCount] = await Promise.all([
-      getStoredFederalOpportunities(12),
+    [federalOpportunities, sledOpportunities, federalCount, sledCount] = await Promise.all([
+      getStoredFederalOpportunities(6),
+      getStoredSledOpportunities(6),
       getStoredFederalCount(),
+      getStoredSledCount(),
     ]);
   } catch (error) {
-    dataError = error instanceof Error ? error.message : "Unable to read stored federal opportunities";
+    dataError = error instanceof Error ? error.message : "Unable to read the live opportunity inventory";
   }
 
-  const isLive = storedOpportunities.length > 0;
-  const opportunities = isLive ? storedOpportunities : demoOpportunities;
+  const liveOpportunities = [...federalOpportunities, ...sledOpportunities];
+  const isLive = liveOpportunities.length > 0;
+  const opportunities = isLive ? liveOpportunities : demoOpportunities;
   const averageConfidence = Math.round(opportunities.reduce((sum, item) => sum + item.confidence, 0) / Math.max(opportunities.length, 1));
+  const totalCount = federalCount + sledCount;
 
   return (
     <main className="shell">
@@ -46,17 +57,17 @@ export default async function Home() {
           </div>
 
           <div className="metrics">
-            <MetricCard label={isLive ? "Federal opportunities" : "Federal feed"} value={isLive ? storedCount.toLocaleString() : "Waiting"} detail={isLive ? "Open notices with a future or unstated response deadline" : "Federal inventory is unavailable"} accent />
-            <MetricCard label={isLive ? "Loaded now" : "Preview records"} value={String(opportunities.length)} detail={isLive ? "Current records served from Neon" : "Demo records while the federal feed is unavailable"} />
-            <MetricCard label="Brief confidence" value={`${averageConfidence}%`} detail={isLive ? "Metadata confidence; package analysis comes next" : "Prototype scoring"} />
-            <MetricCard label="SLED coverage" value="Next" detail="National SLED feed follows the federal vertical slice" />
+            <MetricCard label="Live opportunities" value={isLive ? totalCount.toLocaleString() : "Waiting"} detail={isLive ? "Current federal + SLED inventory in Pursuit" : "Opportunity inventory is unavailable"} accent />
+            <MetricCard label="Federal" value={federalCount.toLocaleString()} detail="Current SAM.gov opportunities" />
+            <MetricCard label="SLED" value={sledCount.toLocaleString()} detail="Current public state and local opportunities" />
+            <MetricCard label="Brief confidence" value={`${averageConfidence}%`} detail="Metadata confidence; package analysis comes next" />
           </div>
 
           {dataError && (
             <section className="readiness-panel">
               <div className="readiness-copy">
-                <span className="eyebrow">FEDERAL DATA</span>
-                <h2>Federal inventory connection needs attention.</h2>
+                <span className="eyebrow">LIVE DATA</span>
+                <h2>Opportunity inventory connection needs attention.</h2>
                 <p>{dataError}. Pursuit is showing clearly marked preview records while the connection is checked.</p>
               </div>
             </section>
@@ -72,7 +83,7 @@ export default async function Home() {
           </section>
 
           <section className="section-block">
-            <div className="section-heading"><div><span>{isLive ? "FEDERAL INVENTORY" : "FIVE-MINUTE BRIEF"}</span><h2>{isLive ? "Current SAM.gov opportunities" : "Preview opportunities"}</h2></div><button>View all opportunities</button></div>
+            <div className="section-heading"><div><span>{isLive ? "LIVE INVENTORY" : "FIVE-MINUTE BRIEF"}</span><h2>{isLive ? "Federal + SLED opportunities" : "Preview opportunities"}</h2></div><button>View all opportunities</button></div>
             <div className="opportunity-list">{opportunities.map(o => <OpportunityCard key={o.id} opportunity={o} />)}</div>
           </section>
 
