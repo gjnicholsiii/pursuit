@@ -31,14 +31,23 @@ function walk(value: unknown, path = "$", out: Array<{ path: string; value: Reco
 }
 
 function extractInitialResponse(html: string) {
-  const marker = "var moInitialResponse = ";
-  const start = html.indexOf(marker);
-  if (start < 0) return null;
-  const after = html.slice(start + marker.length);
-  const end = after.indexOf("</script>");
-  if (end < 0) return null;
-  const raw = after.slice(0, end).trim().replace(/;\s*$/, "");
-  try { return JSON.parse(raw) as Record<string, unknown>; } catch { return null; }
+  const marker = html.match(/var\s+moInitialResponse\s*=\s*/);
+  if (!marker || marker.index === undefined) return { value: null, error: "marker not found" };
+  const start = marker.index + marker[0].length;
+  const scriptEnd = html.indexOf("</script>", start);
+  if (scriptEnd < 0) return { value: null, error: "script end not found" };
+  let raw = html.slice(start, scriptEnd).trim();
+  raw = raw.replace(/;\s*(?:\/\/-->)?\s*$/, "");
+  try {
+    return { value: JSON.parse(raw) as Record<string, unknown>, error: null };
+  } catch (error) {
+    const terms = ["Business Opportunities", "Solicitation", "Bid", "Vendor"];
+    const snippets = terms.flatMap(term => {
+      const index = html.toLowerCase().indexOf(term.toLowerCase());
+      return index < 0 ? [] : [html.slice(Math.max(0, index - 350), Math.min(html.length, index + 900)).replace(/\s+/g, " ")];
+    });
+    return { value: null, error: error instanceof Error ? error.message : String(error), snippets };
+  }
 }
 
 function extractMissouriConfig(html: string) {
@@ -63,8 +72,10 @@ export async function GET(request: NextRequest) {
       source,
       status: response.status,
       guest: html.includes('"GUEST_SESSION":"true"'),
-      metadataFound: Boolean(initial),
-      matches: initial ? walk(initial).slice(0, 100) : [],
+      metadataFound: Boolean(initial.value),
+      parseError: initial.error,
+      fallbackSnippets: "snippets" in initial ? initial.snippets : [],
+      matches: initial.value ? walk(initial.value).slice(0, 100) : [],
     });
   }
   if (source === "missouri") {
