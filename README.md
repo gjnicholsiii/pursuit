@@ -33,7 +33,7 @@ Federal + SLED: state, county, municipal, K-12, higher education, authorities an
 
 ## Current state
 
-The production app is deployed on Vercel, the core schema is live in Neon Postgres, and the app is wired to use `DATABASE_URL`. Federal opportunity ingestion is wired for `SAM_GOV_API_KEY`.
+The production app is deployed on Vercel with Neon Postgres persistence. Federal opportunities ingest from SAM.gov. SLED ingestion includes OpenGov plus reusable direct-state connector families for Periscope, JAGGAER and public PeopleSoft procurement surfaces as they are verified.
 
 ## Run locally
 
