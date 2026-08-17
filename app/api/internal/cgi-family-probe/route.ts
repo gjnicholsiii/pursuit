@@ -10,16 +10,14 @@ function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function excerpts(source: string, needle: string, before = 1800, after = 3600, limit = 5) {
+function excerpts(source: string, needle: string, before = 3200, after = 6200, limit = 4) {
   const found: Array<{ index: number; snippet: string }> = [];
   let cursor = 0;
   while (found.length < limit) {
     const index = source.indexOf(needle, cursor);
     if (index < 0) break;
     const snippet = source.slice(Math.max(0, index - before), Math.min(source.length, index + after));
-    if (!/EnterpriseSearch|getEnterpriseSearch/.test(snippet)) {
-      found.push({ index, snippet: compact(snippet) });
-    }
+    if (!/EnterpriseSearch|getEnterpriseSearch/.test(snippet)) found.push({ index, snippet: compact(snippet) });
     cursor = index + needle.length;
   }
   return found;
@@ -44,22 +42,14 @@ export async function GET() {
     });
     if (!scriptResponse.ok) throw new Error(`Advantage bundle returned ${scriptResponse.status}`);
     const source = await scriptResponse.text();
-
     const patterns = [
-      "onPageActionClick:this.",
-      "onPageActionClick=",
-      "onPageActionClick:",
-      "GridPagination",
-      "pageActionCode",
-      "paginationAction",
-      'case"nextpage"',
-      'case "nextpage"',
-      'actionCode:"nextpage"',
-      'actionCode=t',
-      "rows_requested",
-      "start_data_window",
+      "handlePageNavClick(",
+      "handlePageNavClick=",
+      "viewPerPagination(",
+      "viewPerPagination=",
+      "StandardPagination",
+      "getPaginationActionsProps(){",
     ];
-
     return NextResponse.json({
       ok: true,
       scriptUrl,
