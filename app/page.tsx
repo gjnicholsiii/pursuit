@@ -2,9 +2,15 @@ import { Bell, CheckCircle2, ChevronDown, CircleAlert, Search, ShieldCheck, Slid
 import { MetricCard } from "@/components/metric-card";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
-import { opportunities, pathToAward, readiness } from "@/lib/mock-data";
+import { opportunities as demoOpportunities, pathToAward, readiness } from "@/lib/mock-data";
+import { loadSamOpportunities } from "@/lib/sam";
 
-export default function Home() {
+export default async function Home() {
+  const sam = await loadSamOpportunities(12);
+  const isLive = sam.configured && !sam.error && sam.opportunities.length > 0;
+  const opportunities = isLive ? sam.opportunities : demoOpportunities;
+  const averageConfidence = Math.round(opportunities.reduce((sum, item) => sum + item.confidence, 0) / Math.max(opportunities.length, 1));
+
   return (
     <main className="shell">
       <Sidebar />
@@ -25,11 +31,21 @@ export default function Home() {
           </div>
 
           <div className="metrics">
-            <MetricCard label="Eligible now" value="27" detail="Based on current selling profile" accent />
-            <MetricCard label="Live opportunity value" value="$6.4M" detail="Across reviewed matches" />
-            <MetricCard label="Brief confidence" value="91%" detail="Average document coverage" />
-            <MetricCard label="Eligibility blockers" value="8" detail="We tell you exactly why" />
+            <MetricCard label={isLive ? "Federal records" : "Federal feed"} value={isLive ? sam.totalRecords.toLocaleString() : "Waiting"} detail={isLive ? "Solicitations posted in the last 14 days" : "Add SAM_GOV_API_KEY to Vercel"} accent />
+            <MetricCard label={isLive ? "Loaded now" : "Preview records"} value={String(opportunities.length)} detail={isLive ? "Current live SAM.gov sample" : "Demo data until the federal feed is connected"} />
+            <MetricCard label="Brief confidence" value={`${averageConfidence}%`} detail={isLive ? "Metadata confidence; package analysis comes next" : "Prototype scoring"} />
+            <MetricCard label="SLED coverage" value="Next" detail="National SLED feed follows the federal vertical slice" />
           </div>
+
+          {sam.error && (
+            <section className="readiness-panel">
+              <div className="readiness-copy">
+                <span className="eyebrow">FEDERAL FEED</span>
+                <h2>SAM.gov is configured but did not return data.</h2>
+                <p>{sam.error}. Pursuit is showing demo records so the product remains usable while the connection is fixed.</p>
+              </div>
+            </section>
+          )}
 
           <section className="readiness-panel">
             <div className="readiness-copy">
@@ -48,7 +64,7 @@ export default function Home() {
           </section>
 
           <section className="section-block">
-            <div className="section-heading"><div><span>FIVE-MINUTE BRIEF</span><h2>Opportunities worth reviewing</h2></div><button>View all opportunities</button></div>
+            <div className="section-heading"><div><span>{isLive ? "LIVE FEDERAL" : "FIVE-MINUTE BRIEF"}</span><h2>{isLive ? "Recent SAM.gov opportunities" : "Opportunities worth reviewing"}</h2></div><button>View all opportunities</button></div>
             <div className="opportunity-list">{opportunities.map(o => <OpportunityCard key={o.id} opportunity={o} />)}</div>
           </section>
 
