@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/opengov",
       "schedule": "30 7 * * *"
+    },
+    {
+      "path": "/api/cron/state-pages",
+      "schedule": "45 7 * * *"
     }
   ]
 }
