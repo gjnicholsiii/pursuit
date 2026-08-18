@@ -51,7 +51,7 @@ export async function GET() {
       await sql.query(
         `update opportunity_documents
          set extraction_status = 'text_empty'
-         where id = $1`,
+         where id = $1::uuid`,
         [document.id],
       );
       return NextResponse.json(
@@ -79,8 +79,8 @@ export async function GET() {
          extraction_confidence
        )
        values (
-         $1,
-         $2,
+         $1::uuid,
+         $2::uuid,
          'document_text_extract',
          jsonb_build_object(
            'text_storage_key', $3::text,
@@ -97,7 +97,7 @@ export async function GET() {
     await sql.query(
       `update opportunity_documents
        set extraction_status = 'text_extracted'
-       where id = $1`,
+       where id = $1::uuid`,
       [document.id],
     );
 
