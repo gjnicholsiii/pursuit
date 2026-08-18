@@ -43,7 +43,7 @@ function decodeLayouts(value: string) {
   return null;
 }
 
-async function attempt(label: string, token: string, secure: string, cookies: string[], extraBody: Record<string, unknown> = {}) {
+async function postGrid(token: string, secure: string, cookies: string[], extraBody: Record<string, unknown> = {}) {
   const response = await fetch(GRID, {
     method: "POST",
     headers: {
@@ -73,14 +73,11 @@ async function attempt(label: string, token: string, secure: string, cookies: st
   let parsed: any = null;
   try { parsed = JSON.parse(text); } catch {}
   return {
-    label,
     status: response.status,
-    contentType: response.headers.get("content-type"),
-    itemCount: parsed?.ItemCount ?? parsed?.itemCount ?? null,
-    pageCount: parsed?.PageCount ?? parsed?.pageCount ?? null,
+    itemCount: parsed?.ItemCount ?? null,
+    pageCount: parsed?.PageCount ?? null,
     records: Array.isArray(parsed?.Records) ? parsed.Records.length : null,
-    keys: parsed && typeof parsed === "object" ? Object.keys(parsed).slice(0, 20) : [],
-    excerpt: text.slice(0, 700),
+    excerpt: text.slice(0, 400),
   };
 }
 
@@ -88,7 +85,6 @@ export async function GET() {
   const pageResponse = await fetch(PAGE, { headers: { accept: "text/html", "user-agent": USER_AGENT }, redirect: "follow", cache: "no-store" });
   const pageHtml = await pageResponse.text();
   const pageCookies = cookiePairs(pageResponse);
-
   const tokenResponse = await fetch(TOKEN, {
     headers: { accept: "text/html,*/*", "user-agent": USER_AGENT, referer: PAGE, ...(pageCookies.length ? { cookie: pageCookies.join("; ") } : {}) },
     redirect: "follow",
@@ -106,23 +102,35 @@ export async function GET() {
   const active = list.find((entry: any) => String(entry?.Id || "").toLowerCase() === selectedView.toLowerCase()) || list[0] || null;
   const secure = active?.Base64SecureConfiguration || "";
 
-  const attempts = [];
-  if (token && secure) {
-    attempts.push(await attempt("header-token", token, secure, cookies));
-    attempts.push(await attempt("header-plus-body-token", token, secure, cookies, { __RequestVerificationToken: token }));
-  }
+  const groups = $(".entitylist-filter-option-group").toArray().map(group => {
+    const el = $(group);
+    const label = el.find(".entitylist-filter-option-group-label").first();
+    return {
+      label: label.text().replace(/\s+/g, " ").trim(),
+      groupAttrs: el.attr(),
+      labelAttrs: label.attr(),
+      inputs: el.find("input,select,option").toArray().map(input => ({
+        tag: input.tagName,
+        type: $(input).attr("type") || null,
+        name: $(input).attr("name") || null,
+        value: $(input).attr("value") || null,
+        checked: $(input).is(":checked"),
+        selected: $(input).is(":selected"),
+        text: $(input).text().replace(/\s+/g, " ").trim(),
+        attrs: $(input).attr(),
+      })),
+    };
+  });
+  const statusFilter = groups.find(group => /Solicitation Status/i.test(group.label)) || null;
+
+  const unfiltered = token && secure ? await postGrid(token, secure, cookies) : null;
 
   return NextResponse.json({
-    pageStatus: pageResponse.status,
-    tokenStatus: tokenResponse.status,
     tokenFound: Boolean(token),
-    tokenLength: token.length,
-    cookieCount: cookies.length,
     selectedView,
-    layoutCount: list.length,
     secureFound: Boolean(secure),
-    secureLength: secure.length,
-    activeKeys: active ? Object.keys(active) : [],
-    attempts,
+    sortExpression: active?.SortExpression || active?.Configuration?.SortExpression || null,
+    statusFilter,
+    unfiltered,
   });
 }
