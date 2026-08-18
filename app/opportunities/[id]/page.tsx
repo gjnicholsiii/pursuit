@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowUpRight, BadgeCheck, CircleAlert, Clock3, DollarSign, FileSearch, MapPin, Route, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BadgeCheck, CircleAlert, Clock3, DollarSign, FileCheck2, FileSearch, Files, MapPin, Route, ShieldCheck } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { getStoredOpportunityById } from "@/lib/opportunity-store";
+import { getOpportunityDocumentSummary } from "@/lib/document-store";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,10 @@ const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency",
 
 export default async function OpportunityBriefPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const opportunity = await getStoredOpportunityById(id);
+  const [opportunity, documents] = await Promise.all([
+    getStoredOpportunityById(id),
+    getOpportunityDocumentSummary(id),
+  ]);
   if (!opportunity) notFound();
 
   return (
@@ -58,6 +62,30 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
                 {(opportunity.uncertainty || []).map(item => <div key={item}><CircleAlert size={15} /><p>{item}</p></div>)}
               </div>
             </article>
+          </section>
+
+          <section className="brief-panel package-panel">
+            <div className="brief-panel-heading"><Files size={18} /><div><span>BID PACKAGE</span><h2>Document acquisition status</h2></div></div>
+            <div className="package-stats">
+              <div><span>IDENTIFIED</span><strong>{documents.identified}</strong></div>
+              <div><span>FETCHED</span><strong>{documents.fetched}</strong></div>
+              <div><span>ANALYZED</span><strong>{documents.analyzed}</strong></div>
+              <div><span>MISSING</span><strong>{documents.missing}</strong></div>
+            </div>
+            {documents.documents.length > 0 ? (
+              <div className="package-list">
+                {documents.documents.map(document => (
+                  <a key={document.id} href={document.sourceUrl} target="_blank" rel="noreferrer">
+                    <FileCheck2 size={15} />
+                    <span>{document.filename}</span>
+                    <small>{document.fetchedAt ? document.extractionStatus : "identified · awaiting fetch"}</small>
+                    <ArrowUpRight size={14} />
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p className="brief-explainer">No package links have been identified in the source record yet.</p>
+            )}
           </section>
 
           <section className="brief-grid lower-grid">
