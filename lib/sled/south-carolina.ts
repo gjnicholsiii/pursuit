@@ -22,6 +22,7 @@ export interface SouthCarolinaSyncResult {
   stored: number;
   newRecords: number;
   changedRecords: number;
+  closedRecords?: number;
   pageLimited: boolean;
   error?: string;
 }
@@ -217,6 +218,7 @@ export async function syncSouthCarolinaScbo(bootstrap = false): Promise<SouthCar
     const persisted = await persistSledOpportunities(SCBO_SOURCE, records, {
       mode: bootstrap ? "scbo_bootstrap" : "scbo_refresh",
       recordChanges: !bootstrap,
+      closeMissing: true,
     });
     return {
       stateCode: "SC",
@@ -237,6 +239,7 @@ export async function syncSouthCarolinaScbo(bootstrap = false): Promise<SouthCar
       stored: 0,
       newRecords: 0,
       changedRecords: 0,
+      closedRecords: 0,
       pageLimited: false,
       error: error instanceof Error ? error.message : String(error),
     };
