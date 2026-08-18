@@ -29,9 +29,14 @@ export async function GET(request: NextRequest) {
   // interface handled by the reusable connector. Keep reporting it in sync results,
   // but do not turn every otherwise-healthy state refresh into a 207 until its
   // dedicated parser is implemented.
-  const actionableCgiFailures = cgiAdvantage.filter(result => !result.ok && result.stateCode !== "ME");
-  const failures = [...official, ...periscope, ...jaggaer, ...peoplesoft, delaware].filter(result => !result.ok);
-  failures.push(...actionableCgiFailures);
+  const failures = [
+    ...official,
+    ...periscope,
+    ...jaggaer,
+    ...cgiAdvantage.filter(result => result.stateCode !== "ME"),
+    ...peoplesoft,
+    delaware,
+  ].filter(result => !result.ok);
 
   return NextResponse.json({
     ok: failures.length === 0,
