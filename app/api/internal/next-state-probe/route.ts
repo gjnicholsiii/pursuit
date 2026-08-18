@@ -1,56 +1,43 @@
 import { NextResponse } from "next/server";
-import { load } from "cheerio";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 90;
 
-const ROOT = "https://evp.nc.gov";
-const PAGE = `${ROOT}/solicitations/?status=0`;
+const PAGE = "https://evp.nc.gov/solicitations/?status=0";
+const PCF = "https://gov.content.powerapps.us/resource/powerappsportal/dist/pcf.bundle-60440c37cb.js";
+const APP = "https://gov.content.powerapps.us/resource/powerappsportal/dist/app.bundle-6a4b9a2a34.js";
+
+function excerpts(source: string, patterns: string[]) {
+  const output: Array<{ pattern: string; text: string }> = [];
+  for (const pattern of patterns) {
+    let from = 0;
+    while (output.length < 20) {
+      const index = source.indexOf(pattern, from);
+      if (index < 0) break;
+      output.push({ pattern, text: source.slice(Math.max(0, index - 2500), Math.min(source.length, index + 6500)).replace(/\s+/g, " ") });
+      from = index + pattern.length;
+    }
+  }
+  return output;
+}
 
 export async function GET() {
-  const page = await fetch(PAGE, {
-    headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
-    redirect: "follow",
-    cache: "no-store",
-  });
-  const html = await page.text();
-  const $ = load(html);
-  const scriptUrls = [...new Set($("script[src]").toArray().map(node => $(node).attr("src") || "").filter(Boolean).map(src => {
-    try { return new URL(src, ROOT).toString(); } catch { return ""; }
-  }).filter(Boolean))];
-
-  const candidates = scriptUrls.filter(url => /powerapps|portal|entity|grid|bootstrap/i.test(url)).slice(0, 40);
-  const hits: Array<{ url: string; length: number; excerpts: string[] }> = [];
-
-  const results = await Promise.allSettled(candidates.map(async url => {
-    const response = await fetch(url, {
-      headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0", referer: PAGE },
-      cache: "no-store",
-    });
-    if (!response.ok) return null;
-    const source = await response.text();
-    const patterns = ["entity-grid-data.json", "data-get-url", "download-as-excel", "entity-grid", "selected-view"];
-    const excerpts: string[] = [];
-    for (const pattern of patterns) {
-      let from = 0;
-      while (excerpts.length < 12) {
-        const index = source.indexOf(pattern, from);
-        if (index < 0) break;
-        excerpts.push(source.slice(Math.max(0, index - 900), Math.min(source.length, index + 1800)).replace(/\s+/g, " "));
-        from = index + pattern.length;
-      }
-    }
-    return excerpts.length ? { url, length: source.length, excerpts } : null;
-  }));
-
-  for (const result of results) {
-    if (result.status === "fulfilled" && result.value) hits.push(result.value);
-  }
-
+  const [pcfResponse, appResponse] = await Promise.all([
+    fetch(PCF, { headers: { accept: "application/javascript", referer: PAGE }, cache: "no-store" }),
+    fetch(APP, { headers: { accept: "application/javascript", referer: PAGE }, cache: "no-store" }),
+  ]);
+  const [pcf, app] = await Promise.all([pcfResponse.text(), appResponse.text()]);
   return NextResponse.json({
-    pageStatus: page.status,
-    scriptCount: scriptUrls.length,
-    candidates,
-    hits,
+    pcf: excerpts(pcf, [
+      "t={base64SecureConfiguration:n.Base64SecureConfiguration",
+      "base64SecureConfiguration:n.Base64SecureConfiguration",
+      "serviceUrlForGet",
+    ]),
+    app: excerpts(app, [
+      "Base64SecureConfiguration",
+      "base64SecureConfiguration",
+      "_serviceUrl",
+      "ajaxSafePost",
+    ]),
   });
 }
