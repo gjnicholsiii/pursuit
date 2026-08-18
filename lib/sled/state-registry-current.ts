@@ -72,11 +72,11 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     notes: "Pursuit verified the complete set of non-empty LaPAC department bid boards, including public documents and addenda, and closes opportunities that disappear from the live board.",
   },
   ME: {
-    connectorFamily: "cgi_advantage",
+    connectorFamily: "cgi_advantage_legacy",
     platformLabel: "CGI Advantage Vendor Self Service (AltSelfService)",
     officialUrl: "https://mevss.hostams.com/PRDVSS1X1/AltSelfService",
-    status: "planned",
-    notes: "Maine moved all solicitations into VSS effective October 1, 2025. Public guest access is verified, but Maine uses the legacy AltSelfService interface and requires a dedicated parser rather than the reusable Advantage4 connector.",
+    status: "live",
+    notes: "Pursuit reproduces Maine VSS public guest navigation through the legacy AltSelfService interface, paginates the complete Open solicitation board, and closes records that leave the live set. Production validation reconciled all 24 open solicitations across 3 pages.",
   },
   MA: {
     status: "live",
