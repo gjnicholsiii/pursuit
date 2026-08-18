@@ -16,7 +16,6 @@ function cookiePairs(response: Response) {
   const fallback = response.headers.get("set-cookie");
   return (values.length ? values : fallback ? [fallback] : []).map(v => v.split(";", 1)[0]).filter(Boolean);
 }
-
 function mergeCookies(...sets: string[][]) {
   const map = new Map<string, string>();
   for (const set of sets) for (const pair of set) {
@@ -25,7 +24,6 @@ function mergeCookies(...sets: string[][]) {
   }
   return [...map.values()];
 }
-
 function extractToken(html: string) {
   const $ = load(html);
   const value = $("input[name='__RequestVerificationToken']").attr("value") || $("input[id='__RequestVerificationToken']").attr("value");
@@ -33,7 +31,6 @@ function extractToken(html: string) {
   const match = html.match(/value=["']([^"']+)["'][^>]*(?:name|id)=["']__RequestVerificationToken["']|(?:name|id)=["']__RequestVerificationToken["'][^>]*value=["']([^"']+)/i);
   return (match?.[1] || match?.[2] || "").trim();
 }
-
 function decodeLayouts(value: string) {
   for (const candidate of [value, (() => { try { return decodeURIComponent(value); } catch { return ""; } })()]) {
     if (!candidate) continue;
@@ -42,7 +39,22 @@ function decodeLayouts(value: string) {
   }
   return null;
 }
-
+function conciseRecord(record: any) {
+  const attrs = Array.isArray(record?.Attributes) ? record.Attributes : [];
+  const pick = (name: string) => {
+    const attr = attrs.find((item: any) => item?.Name === name);
+    return attr?.DisplayValue ?? attr?.FormattedValue ?? attr?.Value ?? null;
+  };
+  return {
+    id: record?.Id || null,
+    title: pick("evp_name"),
+    number: pick("evp_solicitationnumber"),
+    statusReason: pick("statuscode"),
+    posted: pick("evp_posteddate"),
+    opening: pick("evp_openingdate"),
+    fieldNames: attrs.map((item: any) => item?.Name).filter(Boolean).slice(0, 30),
+  };
+}
 async function postGrid(token: string, secure: string, cookies: string[], extraBody: Record<string, unknown> = {}) {
   const response = await fetch(GRID, {
     method: "POST",
@@ -57,7 +69,7 @@ async function postGrid(token: string, secure: string, cookies: string[], extraB
     },
     body: JSON.stringify({
       base64SecureConfiguration: secure,
-      sortExpression: "",
+      sortExpression: "evp_posteddate DESC,evp_solicitationnumber DESC",
       search: null,
       filter: null,
       metaFilter: null,
@@ -77,7 +89,8 @@ async function postGrid(token: string, secure: string, cookies: string[], extraB
     itemCount: parsed?.ItemCount ?? null,
     pageCount: parsed?.PageCount ?? null,
     records: Array.isArray(parsed?.Records) ? parsed.Records.length : null,
-    excerpt: text.slice(0, 400),
+    samples: Array.isArray(parsed?.Records) ? parsed.Records.slice(0, 2).map(conciseRecord) : [],
+    error: response.ok ? null : text.slice(0, 500),
   };
 }
 
@@ -90,8 +103,7 @@ export async function GET() {
     redirect: "follow",
     cache: "no-store",
   });
-  const tokenHtml = await tokenResponse.text();
-  const token = extractToken(tokenHtml);
+  const token = extractToken(await tokenResponse.text());
   const cookies = mergeCookies(pageCookies, cookiePairs(tokenResponse));
 
   const $ = load(pageHtml);
@@ -102,35 +114,12 @@ export async function GET() {
   const active = list.find((entry: any) => String(entry?.Id || "").toLowerCase() === selectedView.toLowerCase()) || list[0] || null;
   const secure = active?.Base64SecureConfiguration || "";
 
-  const groups = $(".entitylist-filter-option-group").toArray().map(group => {
-    const el = $(group);
-    const label = el.find(".entitylist-filter-option-group-label").first();
-    return {
-      label: label.text().replace(/\s+/g, " ").trim(),
-      groupAttrs: el.attr(),
-      labelAttrs: label.attr(),
-      inputs: el.find("input,select,option").toArray().map(input => ({
-        tag: input.tagName,
-        type: $(input).attr("type") || null,
-        name: $(input).attr("name") || null,
-        value: $(input).attr("value") || null,
-        checked: $(input).is(":checked"),
-        selected: $(input).is(":selected"),
-        text: $(input).text().replace(/\s+/g, " ").trim(),
-        attrs: $(input).attr(),
-      })),
-    };
-  });
-  const statusFilter = groups.find(group => /Solicitation Status/i.test(group.label)) || null;
-
-  const unfiltered = token && secure ? await postGrid(token, secure, cookies) : null;
-
-  return NextResponse.json({
-    tokenFound: Boolean(token),
-    selectedView,
-    secureFound: Boolean(secure),
-    sortExpression: active?.SortExpression || active?.Configuration?.SortExpression || null,
-    statusFilter,
-    unfiltered,
-  });
+  const tests: Record<string, unknown> = {};
+  if (token && secure) {
+    tests.unfiltered = await postGrid(token, secure, cookies);
+    tests.meta3eq0 = await postGrid(token, secure, cookies, { metaFilter: "3=0" });
+    tests.filter3eq0 = await postGrid(token, secure, cookies, { filter: "3=0" });
+    tests.metaStatusEq0 = await postGrid(token, secure, cookies, { metaFilter: "status=0" });
+  }
+  return NextResponse.json({ tokenFound: Boolean(token), secureFound: Boolean(secure), selectedView, tests });
 }
