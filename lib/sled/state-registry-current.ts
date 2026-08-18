@@ -61,8 +61,8 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     connectorFamily: "direct_state_board",
     platformLabel: "Louisiana LaPAC public network (SAP/LaGov downstream)",
     officialUrl: "https://wwwcfprd.doa.louisiana.gov/OSP/LaPAC/pubMain.cfm",
-    status: "planned",
-    notes: "Direct LaPAC connector is staged against official public department listings. LaPAC exposes open bids, documents and addenda without vendor login; production validation is pending the next deliberate release.",
+    status: "live",
+    notes: "Pursuit verified the complete set of non-empty LaPAC department bid boards, including public documents and addenda, and closes opportunities that disappear from the live board.",
   },
   ME: {
     connectorFamily: "cgi_advantage",
@@ -91,8 +91,8 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     connectorFamily: "direct_state_board",
     platformLabel: "Nebraska DAS Materiel public bid board",
     officialUrl: "https://das.nebraska.gov/materiel/bid-opportunities.html",
-    status: "planned",
-    notes: "Direct official connector is staged. The public board exposes solicitation number, agency, type, buyer, posted date, opening date and bid-detail links; production validation is pending the next deliberate release.",
+    status: "live",
+    notes: "Pursuit verified the complete current Nebraska DAS bid table end-to-end and closes opportunities that disappear from the public board.",
   },
   NM: {
     connectorFamily: "custom",
@@ -132,8 +132,8 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     connectorFamily: "direct_state_board",
     platformLabel: "South Carolina Business Opportunities (SCBO)",
     officialUrl: "https://scbo.sc.gov/online-edition",
-    status: "partial",
-    notes: "SCBO is the state's definitive public advertisement database and includes state, local, higher-ed and K-12 buyers. A direct full-category connector is staged; production validation is pending the next deliberate release.",
+    status: "live",
+    notes: "Pursuit verifies every active SCBO category in each refresh, covering state, local, higher-ed and K-12 buyers, and closes ads that disappear from the current edition.",
   },
   TX: {
     connectorFamily: "direct_state_board",
