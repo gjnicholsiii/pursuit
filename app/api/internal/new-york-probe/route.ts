@@ -17,24 +17,26 @@ export async function GET() {
   });
   const html = await response.text();
   const $ = load(html);
-  const crNodes = $("body *").filter((_, node) => /^\s*CR#:\s*$/i.test($(node).text())).slice(0, 5).toArray();
+  const crNodes = $("body *").filter((_, node) => /^\s*CR#:\s*$/i.test($(node).text())).slice(0, 3).toArray();
   const samples = crNodes.map(node => {
     const element = $(node);
-    const parent = element.parent();
-    const grandparent = parent.parent();
+    const fieldRow = element.parent();
+    const detailColumn = fieldRow.parent();
+    const cardBody = detailColumn.parent();
+    const card = cardBody.parent();
     return {
-      tag: (node as any).tagName || (node as any).name || null,
-      className: element.attr("class") || null,
-      parentTag: (parent.get(0) as any)?.tagName || (parent.get(0) as any)?.name || null,
-      parentClass: parent.attr("class") || null,
-      parentText: parent.text().replace(/\s+/g, " ").trim().slice(0, 1800),
-      grandparentTag: (grandparent.get(0) as any)?.tagName || (grandparent.get(0) as any)?.name || null,
-      grandparentClass: grandparent.attr("class") || null,
-      grandparentText: grandparent.text().replace(/\s+/g, " ").trim().slice(0, 3000),
-      parentHtml: parent.html()?.slice(0, 5000) || null,
+      fieldRowClass: fieldRow.attr("class") || null,
+      detailColumnClass: detailColumn.attr("class") || null,
+      cardBodyTag: (cardBody.get(0) as any)?.tagName || (cardBody.get(0) as any)?.name || null,
+      cardBodyClass: cardBody.attr("class") || null,
+      cardBodyText: cardBody.text().replace(/\s+/g, " ").trim().slice(0, 5000),
+      cardTag: (card.get(0) as any)?.tagName || (card.get(0) as any)?.name || null,
+      cardClass: card.attr("class") || null,
+      cardText: card.text().replace(/\s+/g, " ").trim().slice(0, 7000),
+      cardHtml: card.html()?.slice(0, 12000) || null,
+      links: card.find("a").toArray().slice(0, 10).map(anchor => ({ text: $(anchor).text().replace(/\s+/g, " ").trim(), href: $(anchor).attr("href") || null })),
     };
   });
-  const body = $("body").text().replace(/\s+/g, " ").trim();
   return NextResponse.json({
     status: response.status,
     finalUrl: response.url,
@@ -42,6 +44,5 @@ export async function GET() {
     title: $("title").text().trim(),
     crNodeCount: $("body *").filter((_, node) => /^\s*CR#:\s*$/i.test($(node).text())).length,
     samples,
-    bodyStart: body.slice(0, 3000),
   });
 }
