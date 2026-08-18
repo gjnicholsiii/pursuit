@@ -21,12 +21,16 @@ export async function GET() {
     cache: "no-store",
   });
   const body = await response.text();
-  const needles = ["solrconnect.jsp", "solr-faceted-search", "searchFields:[", "sortFields", "rows:", "idField", "pageStrategy", "cursorMark"];
+  const needles = ["solrconnect.jsp", "searchUrl", "cursorMark", "resultsPerPage", "Opportunity Created Date", "Advertise Detail Url", "OrgName_s", "SmallBusSetAside", "Description"];
   const snippets: Record<string,string[]> = {};
   for (const needle of needles) {
     const values:string[]=[]; let pos=0;
-    while ((pos=body.indexOf(needle,pos))>=0 && values.length<12) { values.push(body.slice(Math.max(0,pos-4500),Math.min(body.length,pos+9000))); pos+=needle.length; }
+    while ((pos=body.indexOf(needle,pos))>=0 && values.length<8) {
+      values.push(body.slice(Math.max(0,pos-2200),Math.min(body.length,pos+4200)));
+      pos+=needle.length;
+    }
     snippets[needle]=values;
   }
-  return NextResponse.json({ pageStatus:page.status, scriptStatus:response.status, length:body.length, snippets });
+  const requestLike = [...body.matchAll(/.{0,600}(?:fetch\(|XMLHttpRequest|\.ajax\(|axios|searchUrl|solrconnect\.jsp).{0,1400}/gis)].slice(0,20).map(m=>m[0]);
+  return NextResponse.json({ pageStatus:page.status, scriptStatus:response.status, length:body.length, snippets, requestLike });
 }
