@@ -20,6 +20,7 @@ export interface LouisianaSyncResult {
   stored: number;
   newRecords: number;
   changedRecords: number;
+  closedRecords?: number;
   pageLimited: false;
   error?: string;
 }
@@ -229,6 +230,7 @@ export async function syncLouisianaLapac(bootstrap = false): Promise<LouisianaSy
     const persisted = await persistSledOpportunities(SOURCE, records, {
       mode: bootstrap ? "louisiana_lapac_bootstrap" : "louisiana_lapac_refresh",
       recordChanges: !bootstrap,
+      closeMissing: true,
     });
     return {
       stateCode: "LA",
@@ -247,6 +249,7 @@ export async function syncLouisianaLapac(bootstrap = false): Promise<LouisianaSy
       stored: 0,
       newRecords: 0,
       changedRecords: 0,
+      closedRecords: 0,
       pageLimited: false,
       error: error instanceof Error ? error.message : String(error),
     };
