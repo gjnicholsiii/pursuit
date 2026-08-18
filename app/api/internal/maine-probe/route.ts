@@ -15,9 +15,12 @@ function hiddenParams(html: string, formName?: string) { const $ = load(html); c
 async function post(params: URLSearchParams, cookies: string[], referer: string) { return fetch(ENTRY,{method:"POST",headers:{accept:"text/html,application/xhtml+xml","content-type":"application/x-www-form-urlencoded","user-agent":UA,referer,origin:ROOT,...(cookies.length?{cookie:cookies.join("; ")}:{})},body:params.toString(),redirect:"follow",cache:"no-store"}); }
 function refs(html:string){ const m=html.match(/var\s+lsDocReference\s*=\s*\[([^\]]*)\]/i); return m?[...m[1].matchAll(/['"]([^'"]+)['"]/g)].map(x=>x[1]).filter(v=>v.trim()):[]; }
 function nav(html:string){ const $=load(html); const next=$("input[name='T1SO_SRCH_QRYnextpage']").first(); return {exists:next.length>0,disabled:next.is(":disabled")||next.attr("disabled")!==undefined||/disabled/i.test(next.attr("class")||""),class:next.attr("class")||null}; }
-function firstRowFields(html:string){
-  const $=load(html); const detail=$("input[name*='T1SO_SRCH_QRYpagenav']").first(); const name=detail.attr("name")||""; const prefix=name.match(/^(TE1_\d+_)/)?.[1]||""; if(!prefix)return [];
-  return $(`[name^='${prefix}'],[id^='${prefix}']`).toArray().map(el=>({tag:el.tagName,name:$(el).attr("name")||null,id:$(el).attr("id")||null,vsdf:$(el).attr("vsdf")||null,value:$(el).attr("value")||null,text:text($(el).text())})).filter((v,i,a)=>a.findIndex(x=>`${x.tag}|${x.name}|${x.id}|${x.vsdf}|${x.value}|${x.text}`===`${v.tag}|${v.name}|${v.id}|${v.vsdf}|${v.value}|${v.text}`)===i).slice(0,100);
+function rows(html:string){
+  const $=load(html);
+  return $("input[name*='T1SO_SRCH_QRYpagenav']").toArray().map(input=>{
+    const row=$(input).closest("tr"); const parent=row.parent().closest("tr");
+    return {name:$(input).attr("name")||null,rowText:text(row.text()),parentRowText:text(parent.text()).slice(0,2500)};
+  });
 }
 
 export async function GET(){
@@ -30,12 +33,12 @@ export async function GET(){
   const openParams=hiddenParams(searchHtml,"pCombSolicitation_Search"); openParams.set("frame_name","Display"); openParams.set("query_string","AMSBrowseOpenSolicit=AMSBrowseOpenSolicit");
   const open=await post(openParams,cookies,search.url); let html=await open.text(); cookies=mergeCookies(cookies,cookiePairs(open));
 
-  const firstFields=firstRowFields(html); const pages: Array<{page:number;refs:string[];nav:ReturnType<typeof nav>}> = []; const all:string[]=[];
+  const sampleRows=rows(html); const pages: Array<{page:number;refs:string[];nav:ReturnType<typeof nav>}> = []; const all:string[]=[];
   for(let page=1;page<=100;page++){
     const r=refs(html); const n=nav(html); pages.push({page,refs:r,nav:n}); all.push(...r);
     if(!n.exists||n.disabled||r.length===0)break;
     const p=hiddenParams(html,"pCombSolicitation_Search"); p.set("T1SO_SRCH_QRYnextpage","Next"); const next=await post(p,cookies,ENTRY); html=await next.text(); cookies=mergeCookies(cookies,cookiePairs(next));
   }
   const unique=[...new Set(all)];
-  return NextResponse.json({pagesFetched:pages.length,totalRefs:all.length,uniqueRefs:unique.length,duplicates:all.length-unique.length,firstFields,lastPage:pages.at(-1),pageCounts:pages.map(p=>p.refs.length),firstRefs:pages[0]?.refs||[],lastRefs:pages.at(-1)?.refs||[]});
+  return NextResponse.json({pagesFetched:pages.length,totalRefs:all.length,uniqueRefs:unique.length,duplicates:all.length-unique.length,sampleRows,lastPage:pages.at(-1),pageCounts:pages.map(p=>p.refs.length),firstRefs:pages[0]?.refs||[],lastRefs:pages.at(-1)?.refs||[]});
 }
