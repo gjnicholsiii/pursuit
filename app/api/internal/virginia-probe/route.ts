@@ -14,28 +14,26 @@ function cookies(response: Response) {
   return (values.length ? values : fallback ? [fallback] : []).map(v => v.split(";", 1)[0]).join("; ");
 }
 
-async function query(params: Record<string,string>, cookie: string) {
+async function query(q: string, rows: number, cookie: string) {
   const url = new URL(SOLR);
-  for (const [key,value] of Object.entries(params)) url.searchParams.append(key,value);
+  url.searchParams.set("q", q);
+  url.searchParams.set("rows", String(rows));
+  url.searchParams.set("start", "0");
+  url.searchParams.set("facet", "off");
+  url.searchParams.set("wt", "json");
   const r = await fetch(url, { headers: { accept: "application/json,text/plain,*/*", "user-agent": UA, referer: PAGE, ...(cookie ? { cookie } : {}) }, cache: "no-store" });
   const text = await r.text();
   let json: any = null;
   try { json = JSON.parse(text); } catch {}
-  return {
-    status: r.status,
-    numFound: json?.response?.numFound ?? null,
-    docs: Array.isArray(json?.response?.docs) ? json.response.docs : [],
-    facets: json?.facet_counts?.facet_fields ?? null,
-    error: json?.error ?? (json ? null : text.slice(0,1000)),
-  };
+  return { status:r.status, numFound:json?.response?.numFound ?? null, docs:Array.isArray(json?.response?.docs)?json.response.docs:[], error:json?.error ?? (json?null:text.slice(0,1000)) };
 }
 
 export async function GET() {
   const page = await fetch(PAGE, { headers: { accept: "text/html", "user-agent": UA, referer: "https://eva.virginia.gov/" }, redirect: "follow", cache: "no-store" });
   const cookie = cookies(page);
-  const statusFacets = await query({ q:"*:*", rows:"0", facet:"on", "facet.field":"status", "facet.limit":"100", "facet.mincount":"1", wt:"json" }, cookie);
-  const open = await query({ q:"*:*", fq:'status:"Open"', rows:"5", start:"0", sort:"closedate asc,id asc", facet:"off", wt:"json" }, cookie);
-  const future = await query({ q:"*:*", fq:"closedate:[NOW TO *]", rows:"5", start:"0", sort:"closedate asc,id asc", facet:"on", "facet.field":"status", "facet.limit":"100", "facet.mincount":"1", wt:"json" }, cookie);
-  const openFuture = await query({ q:"*:*", fq:'status:"Open"', fq2:"closedate:[NOW TO *]", rows:"0", facet:"off", wt:"json" }, cookie);
-  return NextResponse.json({ pageStatus:page.status, cookie:!!cookie, statusFacets, open, future, openFuture });
+  const open = await query("status:Open", 10, cookie);
+  const future = await query("closedate:[NOW TO *]", 10, cookie);
+  const openAndFuture = await query("status:Open AND closedate:[NOW TO *]", 10, cookie);
+  const openPastDue = await query("status:Open AND closedate:[* TO NOW]", 10, cookie);
+  return NextResponse.json({ pageStatus:page.status, cookie:!!cookie, open, future, openAndFuture, openPastDue });
 }
