@@ -17,16 +17,40 @@ interface CgiAdvantageConfig {
 
 const CGI_ADVANTAGE_STATES: CgiAdvantageConfig[] = [
   {
+    stateCode: "AK",
+    stateName: "Alaska",
+    sourceName: "Alaska IRIS Vendor Self Service",
+    portalUrl: "https://iris-vss.alaska.gov/PRDVSS1X1/Advantage4",
+  },
+  {
+    stateCode: "CO",
+    stateName: "Colorado",
+    sourceName: "Colorado Vendor Self Service",
+    portalUrl: "https://prd.co.cgiadvantage.com/PRDVSS1X1/Advantage4",
+  },
+  {
     stateCode: "KY",
     stateName: "Kentucky",
     sourceName: "Kentucky Vendor Self Service",
     portalUrl: "https://vss.ky.gov/vssprod-ext/Advantage4",
   },
   {
+    stateCode: "ME",
+    stateName: "Maine",
+    sourceName: "Maine Vendor Self Service",
+    portalUrl: "https://mevss.hostams.com/PRDVSS1X1/AltSelfService",
+  },
+  {
     stateCode: "MI",
     stateName: "Michigan",
     sourceName: "Michigan SIGMA Vendor Self Service",
     portalUrl: "https://sigma.michigan.gov/PRDVSS1X1/Advantage4",
+  },
+  {
+    stateCode: "WV",
+    stateName: "West Virginia",
+    sourceName: "West Virginia wvOASIS Vendor Self Service",
+    portalUrl: "https://prd311.wvoasis.gov/PRDVSS1X1ERP/Advantage4",
   },
 ];
 
