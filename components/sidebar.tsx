@@ -1,17 +1,18 @@
+import Link from "next/link";
 import { Activity, BadgeCheck, Building2, FileSearch, Landmark, Route, Search, Settings2, Target } from "lucide-react";
 
 const items = [
-  { label: "Revenue Today", icon: Activity, active: true },
-  { label: "Opportunities", icon: Target },
-  { label: "Ready for Government", icon: BadgeCheck },
-  { label: "Path to Award", icon: Route },
-  { label: "Pipeline", icon: FileSearch },
-  { label: "Agencies", icon: Building2 },
-  { label: "Contracts", icon: Landmark },
-  { label: "Search", icon: Search },
+  { label: "Revenue Today", icon: Activity, href: "/" },
+  { label: "Opportunities", icon: Target, href: "/opportunities" },
+  { label: "Ready for Government", icon: BadgeCheck, href: "#" },
+  { label: "Path to Award", icon: Route, href: "#" },
+  { label: "Pipeline", icon: FileSearch, href: "#" },
+  { label: "Agencies", icon: Building2, href: "#" },
+  { label: "Contracts", icon: Landmark, href: "#" },
+  { label: "Search", icon: Search, href: "/opportunities" },
 ];
 
-export function Sidebar() {
+export function Sidebar({ active = "Revenue Today" }: { active?: string }) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -22,17 +23,17 @@ export function Sidebar() {
         </div>
       </div>
       <nav>
-        {items.map(({ label, icon: Icon, active }) => (
-          <button key={label} className={active ? "nav-item active" : "nav-item"}>
+        {items.map(({ label, icon: Icon, href }) => (
+          <Link key={label} href={href} className={active === label ? "nav-item active" : "nav-item"}>
             <Icon size={17} strokeWidth={1.8} />
             <span>{label}</span>
-          </button>
+          </Link>
         ))}
       </nav>
       <div className="sidebar-bottom">
         <div className="source-health">
-          <div className="source-health-top"><span>Data sources</span><strong>Federal live</strong></div>
-          <small>SAM.gov connected · SLED next</small>
+          <div className="source-health-top"><span>Data sources</span><strong>Federal + SLED live</strong></div>
+          <small>SAM.gov · state · local · K-12 · higher ed</small>
         </div>
         <button className="nav-item"><Settings2 size={17} /><span>Selling profile</span></button>
       </div>
