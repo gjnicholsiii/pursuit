@@ -19,27 +19,21 @@ function isHttp(value: string) {
   try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; }
 }
 
-export async function GET() {
-  const sql = getSql();
-  const rows = await sql.query(
-    `select o.id, o.source_url, a.agency_type, s.source_name
-     from opportunities o
-     join agencies a on a.id=o.agency_id
-     join sources s on s.id=o.source_id
-     where s.source_family='sled'
-       and o.status='open'
-       and (o.due_at is null or o.due_at >= now())
-       and not exists (select 1 from opportunity_documents d where d.opportunity_id=o.id)
-     order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 else 2 end,
-              o.due_at asc nulls last
-     limit 1`,
-  ) as Array<{id:string; source_url:string; agency_type:string; source_name:string}>;
+interface Candidate {
+  id: string;
+  source_url: string;
+  agency_type: string;
+  source_name: string;
+}
 
-  const opp = rows[0];
-  if (!opp) return NextResponse.json({ ok:true, message:"No undiscovered open SLED opportunities remain" });
+async function discoverLinks(candidate: Candidate) {
+  const response = await fetch(candidate.source_url, {
+    redirect: "follow",
+    cache: "no-store",
+    headers: { "User-Agent": "Pursuit/0.1", Accept: "text/html,application/pdf,*/*" },
+  });
 
-  const response = await fetch(opp.source_url, { redirect:"follow", cache:"no-store", headers:{"User-Agent":"Pursuit/0.1", Accept:"text/html,application/pdf,*/*"} });
-  if (!response.ok) return NextResponse.json({ ok:false, opportunityId:opp.id, status:response.status }, { status:502 });
+  if (!response.ok) return { links: new Set<string>(), status: response.status };
 
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
   const discovered = new Set<string>();
@@ -55,22 +49,78 @@ export async function GET() {
       if (!href) return;
       try {
         const absolute = new URL(href, response.url).toString();
-        if (isHttp(absolute) && (FILE_EXT.test(absolute) || LINK_HINT.test(`${absolute} ${text}`))) discovered.add(absolute);
+        if (isHttp(absolute) && (FILE_EXT.test(absolute) || LINK_HINT.test(`${absolute} ${text}`))) {
+          discovered.add(absolute);
+        }
       } catch {}
     });
   }
 
-  let inserted = 0;
-  for (const url of [...discovered].slice(0, 50)) {
-    const result = await sql.query(
-      `insert into opportunity_documents (opportunity_id, document_type, filename, source_url, referenced_by, extraction_status)
-       select $1, 'sled_resource', $2, $3, $4, 'pending'
-       where not exists (select 1 from opportunity_documents where opportunity_id=$1 and source_url=$3)
-       returning id`,
-      [opp.id, safeName(url, `${opp.agency_type}-document`), url, `${opp.source_name} source page`],
-    ) as Array<{id:string}>;
-    inserted += result.length;
+  return { links: discovered, status: response.status };
+}
+
+export async function GET() {
+  const sql = getSql();
+  const rows = await sql.query(
+    `select o.id, o.source_url, a.agency_type, s.source_name
+     from opportunities o
+     join agencies a on a.id=o.agency_id
+     join sources s on s.id=o.source_id
+     where s.source_family='sled'
+       and o.status='open'
+       and (o.due_at is null or o.due_at >= now())
+       and not exists (select 1 from opportunity_documents d where d.opportunity_id=o.id)
+     order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 else 2 end,
+              o.due_at asc nulls last,
+              o.id
+     limit 25`,
+  ) as Candidate[];
+
+  if (!rows.length) {
+    return NextResponse.json({ ok: true, message: "No undiscovered open SLED opportunities remain" });
   }
 
-  return NextResponse.json({ ok:true, opportunityId:opp.id, agencyType:opp.agency_type, sourceName:opp.source_name, discovered:discovered.size, inserted });
+  const scanned: Array<{ opportunityId: string; agencyType: string; sourceName: string; discovered: number; inserted: number; status: number }> = [];
+  let totalInserted = 0;
+
+  for (const candidate of rows) {
+    try {
+      const result = await discoverLinks(candidate);
+      let inserted = 0;
+
+      for (const url of [...result.links].slice(0, 50)) {
+        const created = await sql.query(
+          `insert into opportunity_documents (opportunity_id, document_type, filename, source_url, referenced_by, extraction_status)
+           select $1, 'sled_resource', $2, $3, $4, 'pending'
+           where not exists (select 1 from opportunity_documents where opportunity_id=$1 and source_url=$3)
+           returning id`,
+          [candidate.id, safeName(url, `${candidate.agency_type}-document`), url, `${candidate.source_name} source page`],
+        ) as Array<{ id: string }>;
+        inserted += created.length;
+      }
+
+      totalInserted += inserted;
+      scanned.push({
+        opportunityId: candidate.id,
+        agencyType: candidate.agency_type,
+        sourceName: candidate.source_name,
+        discovered: result.links.size,
+        inserted,
+        status: result.status,
+      });
+
+      if (inserted > 0) break;
+    } catch {
+      scanned.push({
+        opportunityId: candidate.id,
+        agencyType: candidate.agency_type,
+        sourceName: candidate.source_name,
+        discovered: 0,
+        inserted: 0,
+        status: 0,
+      });
+    }
+  }
+
+  return NextResponse.json({ ok: true, scannedCount: scanned.length, totalInserted, scanned });
 }
