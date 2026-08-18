@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ArrowUpRight, Clock3, DollarSign, MapPin } from "lucide-react";
 import { Opportunity, OpportunityStage } from "@/lib/types";
 import { useState } from "react";
@@ -17,7 +18,7 @@ export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
           <span className="agency">{opportunity.agency}</span>
           <span className={`eligibility-pill ${opportunity.eligibility}`}>{opportunity.eligibility.toUpperCase()}</span>
         </div>
-        <h3>{opportunity.title}</h3>
+        <h3><Link href={`/opportunities/${opportunity.id}`}>{opportunity.title}</Link></h3>
         <div className="opp-meta">
           <span><MapPin size={14} />{opportunity.location}</span>
           <span><DollarSign size={14} />{opportunity.value == null ? "Value not stated" : money(opportunity.value)}</span>
@@ -41,11 +42,7 @@ export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
       <div className="opp-score">
         <span>Confidence</span>
         <strong>{opportunity.confidence}%</strong>
-        {opportunity.sourceUrl ? (
-          <a href={opportunity.sourceUrl} target="_blank" rel="noreferrer" aria-label="Open source opportunity"><ArrowUpRight size={18} /></a>
-        ) : (
-          <button aria-label="Open opportunity"><ArrowUpRight size={18} /></button>
-        )}
+        <Link href={`/opportunities/${opportunity.id}`} aria-label="Open Five-Minute Brief"><ArrowUpRight size={18} /></Link>
       </div>
     </article>
   );
