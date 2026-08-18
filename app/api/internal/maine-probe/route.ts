@@ -24,6 +24,16 @@ function mergeCookies(...sets: string[][]) {
   }
   return [...map.values()];
 }
+function hiddenParams(html: string, formName?: string) {
+  const $ = load(html);
+  const form = formName ? $(`form[name='${formName}']`).first() : $("form").first();
+  const params = new URLSearchParams();
+  form.find("input[type='hidden']").each((_, input) => {
+    const name = $(input).attr("name");
+    if (name) params.append(name, $(input).attr("value") || "");
+  });
+  return params;
+}
 function inspect(html: string, url: string) {
   const $ = load(html);
   return {
@@ -31,56 +41,53 @@ function inspect(html: string, url: string) {
     title: text($("title").text()),
     length: html.length,
     base: $("base").attr("href") || null,
-    frames: $("frame,iframe").toArray().map(frame => ({ name: $(frame).attr("name") || null, src: $(frame).attr("src") || null, title: $(frame).attr("title") || null })),
-    links: $("a").toArray().map(link => ({ text: text($(link).text()), href: $(link).attr("href") || null, target: $(link).attr("target") || null, onclick: $(link).attr("onclick") || null, name: $(link).attr("name") || null, id: $(link).attr("id") || null })).filter(item => item.text || item.href || item.onclick).slice(0, 160),
+    links: $("a").toArray().map(link => ({ text: text($(link).text()), href: $(link).attr("href") || null, onclick: $(link).attr("onclick") || null, name: $(link).attr("name") || null, id: $(link).attr("id") || null })).filter(item => item.text || item.href || item.onclick).slice(0, 200),
     forms: $("form").toArray().map(form => ({
       name: $(form).attr("name") || null,
-      id: $(form).attr("id") || null,
       action: $(form).attr("action") || null,
       method: $(form).attr("method") || null,
-      controls: $(form).find("input,select,button").toArray().map(input => ({ tag: input.tagName, name: $(input).attr("name") || null, id: $(input).attr("id") || null, type: $(input).attr("type") || null, value: $(input).attr("value") || null, onclick: $(input).attr("onclick") || null, title: $(input).attr("title") || null })).filter(x => x.name || x.id || x.value || x.onclick).slice(0, 220),
+      controls: $(form).find("input,select,button").toArray().map(input => ({ tag: input.tagName, name: $(input).attr("name") || null, id: $(input).attr("id") || null, type: $(input).attr("type") || null, value: $(input).attr("value") || null, onclick: $(input).attr("onclick") || null, title: $(input).attr("title") || null })).filter(x => x.name || x.id || x.value || x.onclick).slice(0, 260),
     })),
-    body: text($("body").text()).slice(0, 7000),
+    tables: $("table").toArray().map(table => ({ id: $(table).attr("id") || null, class: $(table).attr("class") || null, headers: $(table).find("th").toArray().map(th => text($(th).text())).filter(Boolean), text: text($(table).text()).slice(0, 4500) })).filter(item => item.headers.length || /solicitation|bid|document|closing|status/i.test(item.text)).slice(0, 80),
+    body: text($("body").text()).slice(0, 10000),
   };
+}
+async function post(url: string, params: URLSearchParams, cookies: string[], referer: string) {
+  return fetch(url, {
+    method: "POST",
+    headers: { accept: "text/html,application/xhtml+xml", "content-type": "application/x-www-form-urlencoded", "user-agent": UA, referer, origin: ROOT, ...(cookies.length ? { cookie: cookies.join("; ") } : {}) },
+    body: params.toString(), redirect: "follow", cache: "no-store",
+  });
 }
 
 export async function GET() {
   const first = await fetch(ENTRY, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": UA }, redirect: "follow", cache: "no-store" });
   const firstHtml = await first.text();
   let cookies = cookiePairs(first);
-  const $ = load(firstHtml);
-  const form = $("#login_form").first();
-  const action = form.attr("action") || first.url || ENTRY;
-  const params = new URLSearchParams();
-  form.find("input").each((_, input) => {
-    const name = $(input).attr("name");
-    const type = ($(input).attr("type") || "text").toLowerCase();
-    if (!name || ["submit", "button", "reset", "radio", "checkbox", "password", "text"].includes(type)) return;
-    params.append(name, $(input).attr("value") || "");
-  });
-  params.set("guest_login", "Public Access");
-
-  const guest = await fetch(new URL(action, first.url || ENTRY), {
-    method: "POST",
-    headers: { accept: "text/html,application/xhtml+xml", "content-type": "application/x-www-form-urlencoded", "user-agent": UA, referer: first.url || ENTRY, origin: ROOT, ...(cookies.length ? { cookie: cookies.join("; ") } : {}) },
-    body: params.toString(), redirect: "follow", cache: "no-store",
-  });
+  const loginParams = hiddenParams(firstHtml, "login_form");
+  loginParams.set("guest_login", "Public Access");
+  const guest = await post(ENTRY, loginParams, cookies, first.url || ENTRY);
   const guestHtml = await guest.text();
   cookies = mergeCookies(cookies, cookiePairs(guest));
+
   const g = load(guestHtml);
   const base = g("base").attr("href") || guest.url;
   const startupSrc = g("frame[name='Startup']").attr("src") || "";
-  const navSrc = g("frame[name='pPrimaryNavPanel']").attr("src") || "";
+  const startupUrl = new URL(startupSrc, base).toString();
+  const startupResponse = await fetch(startupUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": UA, referer: guest.url, ...(cookies.length ? { cookie: cookies.join("; ") } : {}) }, redirect: "follow", cache: "no-store" });
+  const startupHtml = await startupResponse.text();
+  cookies = mergeCookies(cookies, cookiePairs(startupResponse));
 
-  async function getFrame(src: string) {
-    if (!src) return null;
-    const frameUrl = new URL(src, base).toString();
-    const response = await fetch(frameUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": UA, referer: guest.url, ...(cookies.length ? { cookie: cookies.join("; ") } : {}) }, redirect: "follow", cache: "no-store" });
-    const html = await response.text();
-    cookies = mergeCookies(cookies, cookiePairs(response));
-    return { status: response.status, ...inspect(html, response.url), raw: html.slice(0, 18000) };
-  }
+  const searchParams = hiddenParams(startupHtml, "StartupPage");
+  searchParams.set("frame_name", "Display");
+  searchParams.set("query_string", 'menu_action=menu_action&ams_action=13&ams_destination="pCombSolicitation_Search"&ams_whereclause=""&ams_framesetpagename=""&ams_framename="Display"&ams_applname="VSS"&&ams_orderbyclause=""&ams_pagecode="SOSRCH"');
+  const searchResponse = await post(ENTRY, searchParams, cookies, startupResponse.url);
+  const searchHtml = await searchResponse.text();
+  cookies = mergeCookies(cookies, cookiePairs(searchResponse));
 
-  const [startup, navigation] = await Promise.all([getFrame(startupSrc), getFrame(navSrc)]);
-  return NextResponse.json({ loginStatus: first.status, guestStatus: guest.status, cookies, startup, navigation });
+  return NextResponse.json({
+    statuses: { login: first.status, guest: guest.status, startup: startupResponse.status, search: searchResponse.status },
+    cookies,
+    search: { ...inspect(searchHtml, searchResponse.url), raw: searchHtml.slice(0, 30000) },
+  });
 }
