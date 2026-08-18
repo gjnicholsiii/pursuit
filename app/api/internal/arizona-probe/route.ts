@@ -4,7 +4,7 @@ import { load } from "cheerio";
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
-const URL = "https://app.az.gov/page.aspx/en/rfp/request_browse_public";
+const PAGE_URL = "https://app.az.gov/page.aspx/en/rfp/request_browse_public";
 const ORIGIN = "https://app.az.gov";
 
 function snippets(text: string, needles: string[]) {
@@ -23,7 +23,7 @@ function snippets(text: string, needles: string[]) {
 
 export async function GET() {
   try {
-    const response = await fetch(URL, {
+    const response = await fetch(PAGE_URL, {
       headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
       redirect: "follow",
       cache: "no-store",
@@ -33,7 +33,7 @@ export async function GET() {
     const scriptSrcs = $("script[src]").map((_, el) => $(el).attr("src")).get().filter(Boolean) as string[];
     const scriptResults = [];
     for (const src of scriptSrcs.filter(src => /global_defer|global_script|rfp_public|rfp_script/i.test(src)).slice(0, 6)) {
-      const scriptUrl = new URL(src, ORIGIN).toString();
+      const scriptUrl = new globalThis.URL(src, ORIGIN).toString();
       const r = await fetch(scriptUrl, { headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, cache: "no-store" });
       const text = await r.text();
       scriptResults.push({
