@@ -32,6 +32,20 @@
 .uncertainty-panel .brief-list svg { color:var(--warm); }
 .brief-list p { margin:0; color:#c6cccf; font-size:11px; line-height:1.5; }
 .muted-copy { color:var(--muted) !important; }
+.package-panel { margin-top:14px; background:linear-gradient(145deg,rgba(201,255,66,.025),var(--panel) 42%); }
+.package-stats { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--line-soft); border-radius:10px; overflow:hidden; margin-top:16px; }
+.package-stats > div { padding:13px 15px; border-right:1px solid var(--line-soft); }
+.package-stats > div:last-child { border-right:0; }
+.package-stats span { display:block; color:var(--muted-2); font-size:8px; letter-spacing:.12em; }
+.package-stats strong { display:block; margin-top:4px; font-size:20px; letter-spacing:-.035em; }
+.package-stats > div:nth-child(2) strong, .package-stats > div:nth-child(3) strong { color:var(--accent); }
+.package-list { display:grid; margin-top:12px; }
+.package-list a { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; gap:9px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line-soft); color:#c8ced1; }
+.package-list a:last-child { border-bottom:0; }
+.package-list a:hover { color:var(--text); }
+.package-list svg:first-child { color:var(--accent); }
+.package-list span { font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.package-list small { color:var(--muted-2); font-size:9px; white-space:nowrap; }
 .lower-grid { align-items:stretch; }
 .brief-detail-list { display:grid; margin-top:10px; }
 .brief-detail-list > div { display:flex; justify-content:space-between; gap:20px; padding:10px 0; border-bottom:1px solid var(--line-soft); }
@@ -57,6 +71,9 @@
   .brief-facts > div:nth-child(2) { border-right:0; }
   .brief-facts > div:nth-child(-n+2) { border-bottom:1px solid var(--line); }
   .brief-grid { grid-template-columns:1fr; }
+  .package-stats { grid-template-columns:1fr 1fr; }
+  .package-stats > div:nth-child(2) { border-right:0; }
+  .package-stats > div:nth-child(-n+2) { border-bottom:1px solid var(--line-soft); }
   .evidence-strip { grid-template-columns:1fr; gap:10px; }
 }
 
@@ -64,4 +81,6 @@
   .brief-facts { grid-template-columns:1fr; }
   .brief-facts > div { border-right:0; border-bottom:1px solid var(--line); }
   .brief-facts > div:last-child { border-bottom:0; }
+  .package-list a { grid-template-columns:auto minmax(0,1fr) auto; }
+  .package-list small { grid-column:2; grid-row:2; }
 }
