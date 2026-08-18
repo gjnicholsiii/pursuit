@@ -13,24 +13,41 @@ function cookies(response: Response) {
 }
 
 export async function GET() {
-  const page = await fetch(PAGE, { headers: { accept: "text/html", "user-agent": UA, referer: "https://eva.virginia.gov/" }, redirect: "follow", cache: "no-store" });
-  const cookie = cookies(page);
-  const scriptUrl = new URL("AllOpportunitiesapp.js", page.url).toString();
-  const response = await fetch(`${scriptUrl}?_=${Date.now()}`, {
-    headers: { accept: "application/javascript,text/javascript,*/*;q=0.8", "user-agent": UA, referer: page.url, ...(cookie ? { cookie } : {}) },
+  const page = await fetch(PAGE, {
+    headers: { accept: "text/html", "user-agent": UA, referer: "https://eva.virginia.gov/" },
+    redirect: "follow",
     cache: "no-store",
   });
-  const body = await response.text();
-  const needles = ["solrconnect.jsp", "searchUrl", "cursorMark", "resultsPerPage", "Opportunity Created Date", "Advertise Detail Url", "OrgName_s", "SmallBusSetAside", "Description"];
-  const snippets: Record<string,string[]> = {};
-  for (const needle of needles) {
-    const values:string[]=[]; let pos=0;
-    while ((pos=body.indexOf(needle,pos))>=0 && values.length<8) {
-      values.push(body.slice(Math.max(0,pos-2200),Math.min(body.length,pos+4200)));
-      pos+=needle.length;
-    }
-    snippets[needle]=values;
-  }
-  const requestLike = [...body.matchAll(/[\s\S]{0,600}(?:fetch\(|XMLHttpRequest|\.ajax\(|axios|searchUrl|solrconnect\.jsp)[\s\S]{0,1400}/gi)].slice(0,20).map(m=>m[0]);
-  return NextResponse.json({ pageStatus:page.status, scriptStatus:response.status, length:body.length, snippets, requestLike });
+  const cookie = cookies(page);
+  const bridge = new URL("solrconnect.jsp", page.url);
+  bridge.search = new URLSearchParams({
+    q: "*: *".replace(" ", ""),
+    rows: "3",
+    wt: "json",
+    facet: "off",
+  }).toString();
+  const response = await fetch(bridge, {
+    headers: {
+      accept: "application/json,text/plain,*/*",
+      "user-agent": UA,
+      referer: page.url,
+      ...(cookie ? { cookie } : {}),
+    },
+    cache: "no-store",
+  });
+  const raw = await response.text();
+  let parsed: any = null;
+  try { parsed = JSON.parse(raw); } catch {}
+  return NextResponse.json({
+    pageStatus: page.status,
+    bridgeUrl: bridge.toString(),
+    bridgeStatus: response.status,
+    bridgeContentType: response.headers.get("content-type"),
+    rawLength: raw.length,
+    responseHeader: parsed?.responseHeader ?? null,
+    numFound: parsed?.response?.numFound ?? null,
+    docs: Array.isArray(parsed?.response?.docs) ? parsed.response.docs : null,
+    topLevelKeys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
+    rawPreview: parsed ? undefined : raw.slice(0, 5000),
+  });
 }
