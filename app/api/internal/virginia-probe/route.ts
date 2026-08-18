@@ -14,7 +14,6 @@ function cookies(response: Response) {
 
 export async function GET() {
   const page = await fetch(PAGE, { headers: { accept: "text/html", "user-agent": UA, referer: "https://eva.virginia.gov/" }, redirect: "follow", cache: "no-store" });
-  const html = await page.text();
   const cookie = cookies(page);
   const scriptUrl = new URL("AllOpportunitiesapp.js", page.url).toString();
   const response = await fetch(`${scriptUrl}?_=${Date.now()}`, {
@@ -22,9 +21,12 @@ export async function GET() {
     cache: "no-store",
   });
   const body = await response.text();
-  const strings = [...body.matchAll(/["']([^"'\\]{2,300})["']/g)].map(m => m[1]);
-  const endpointStrings = [...new Set(strings.filter(s => /(?:\.jsp|ajax|opportun|solicit|search|bid|quickquote|rfp|public\/)/i.test(s)))].slice(0, 500);
-  const jspRefs = [...new Set(body.match(/[A-Za-z0-9_./?=&%-]+\.jsp(?:\?[A-Za-z0-9_./?=&%+-]*)?/gi) ?? [])].slice(0, 300);
-  const urlRefs = [...new Set(body.match(/https?:\\?\/\\?\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+/gi) ?? [])].slice(0, 100);
-  return NextResponse.json({ pageStatus: page.status, scriptStatus: response.status, length: body.length, jspRefs, urlRefs, endpointStrings });
+  const needles = ["solrconnect.jsp", "solr-faceted-search", "searchFields:[", "sortFields", "rows:", "idField", "pageStrategy", "cursorMark"];
+  const snippets: Record<string,string[]> = {};
+  for (const needle of needles) {
+    const values:string[]=[]; let pos=0;
+    while ((pos=body.indexOf(needle,pos))>=0 && values.length<12) { values.push(body.slice(Math.max(0,pos-4500),Math.min(body.length,pos+9000))); pos+=needle.length; }
+    snippets[needle]=values;
+  }
+  return NextResponse.json({ pageStatus:page.status, scriptStatus:response.status, length:body.length, snippets });
 }
