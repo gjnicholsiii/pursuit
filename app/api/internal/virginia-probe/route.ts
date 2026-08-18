@@ -16,20 +16,15 @@ export async function GET() {
   const page = await fetch(PAGE, { headers: { accept: "text/html", "user-agent": UA, referer: "https://eva.virginia.gov/" }, redirect: "follow", cache: "no-store" });
   const html = await page.text();
   const cookie = cookies(page);
-  const rawScripts = [...html.matchAll(/<script\b[^>]*src=["']([^"']+)["'][^>]*>/gi)].map(m => m[1]);
-  const urls = [...new Set(rawScripts.map(src => new URL(src, page.url).toString()))];
-  const needles = ["getAllOpportunities", "retreiveAllOpportunitiesResponse", "opportunityList", "recentlyPosted", "pastYear", "searchText", "zoneSelected", "AllOpportunities"];
-  const scans = [];
-  for (const url of urls) {
-    const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`, {
-      headers: { accept: "application/javascript,text/javascript,*/*;q=0.8", "user-agent": UA, referer: page.url, ...(cookie ? { cookie } : {}) },
-      cache: "no-store",
-    });
-    const body = await response.text();
-    const hits = Object.fromEntries(needles.map(needle => [needle, body.indexOf(needle)]));
-    const snippets: Record<string,string> = {};
-    for (const [needle, pos] of Object.entries(hits)) if (typeof pos === "number" && pos >= 0) snippets[needle] = body.slice(Math.max(0, pos - 1500), Math.min(body.length, pos + 3500));
-    scans.push({ url, status: response.status, contentType: response.headers.get("content-type"), length: body.length, hits, snippets });
-  }
-  return NextResponse.json({ pageStatus: page.status, scriptCount: scans.length, scans });
+  const scriptUrl = new URL("AllOpportunitiesapp.js", page.url).toString();
+  const response = await fetch(`${scriptUrl}?_=${Date.now()}`, {
+    headers: { accept: "application/javascript,text/javascript,*/*;q=0.8", "user-agent": UA, referer: page.url, ...(cookie ? { cookie } : {}) },
+    cache: "no-store",
+  });
+  const body = await response.text();
+  const strings = [...body.matchAll(/["']([^"'\\]{2,300})["']/g)].map(m => m[1]);
+  const endpointStrings = [...new Set(strings.filter(s => /(?:\.jsp|ajax|opportun|solicit|search|bid|quickquote|rfp|public\/)/i.test(s)))].slice(0, 500);
+  const jspRefs = [...new Set(body.match(/[A-Za-z0-9_./?=&%-]+\.jsp(?:\?[A-Za-z0-9_./?=&%+-]*)?/gi) ?? [])].slice(0, 300);
+  const urlRefs = [...new Set(body.match(/https?:\\?\/\\?\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+/gi) ?? [])].slice(0, 100);
+  return NextResponse.json({ pageStatus: page.status, scriptStatus: response.status, length: body.length, jspRefs, urlRefs, endpointStrings });
 }
