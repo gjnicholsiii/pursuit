@@ -176,7 +176,6 @@ function parsePage(html: string) {
       procurementMechanism: "Maine CGI Advantage VSS public solicitation",
       status: "open",
       issueDate: parseEastern(published),
-      amendedAt: parseEastern(amended),
       dueAt: parseEastern(closing),
       stateCode: "ME",
       sourceUrl: ENTRY,
