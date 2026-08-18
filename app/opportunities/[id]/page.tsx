@@ -19,6 +19,19 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
   ]);
   if (!opportunity) notFound();
 
+  const packageAnalyzed = documents.identified > 0 && documents.analyzed === documents.identified && documents.missing === 0;
+  const uncertainty = (opportunity.uncertainty || []).filter(item => item !== "Full solicitation package has not yet been analyzed");
+  if (!packageAnalyzed) uncertainty.push("Full solicitation package has not yet been analyzed");
+  else uncertainty.push("All identified package documents have been analyzed; requirements absent from those documents remain unknown until additional source evidence appears.");
+
+  const pathExplainer = packageAnalyzed
+    ? "Pursuit has analyzed every package document currently identified in the source record. Verified requirements above are evidence-backed; bonding, insurance, certifications, evaluation details or other requirements remain unknown when the analyzed material does not state them."
+    : "Pursuit has identified the procurement mechanism from the public record. The complete submission path, mandatory forms, evaluation method, bonding, insurance and certifications remain provisional until the identified package is acquired and analyzed.";
+
+  const nextAction = packageAnalyzed
+    ? "Review the verified requirements and source evidence. Treat any requirement not found in the analyzed package as unknown rather than assumed."
+    : opportunity.nextStep;
+
   return (
     <main className="shell">
       <Sidebar active="Opportunities" />
@@ -61,7 +74,7 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
             <article className="brief-panel uncertainty-panel">
               <div className="brief-panel-heading"><CircleAlert size={18} /><div><span>UNKNOWN / UNVERIFIED</span><h2>What still needs evidence</h2></div></div>
               <div className="brief-list">
-                {(opportunity.uncertainty || []).map(item => <div key={item}><CircleAlert size={15} /><p>{item}</p></div>)}
+                {uncertainty.map(item => <div key={item}><CircleAlert size={15} /><p>{item}</p></div>)}
               </div>
             </article>
           </section>
@@ -122,12 +135,12 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
                 <div><span>Set-aside</span><strong>{opportunity.setAside || "Not stated"}</strong></div>
                 <div><span>Source</span><strong>{opportunity.source}</strong></div>
               </div>
-              <p className="brief-explainer">Pursuit has identified the procurement mechanism from the public record. The complete submission path, mandatory forms, evaluation method, bonding, insurance and certifications remain provisional until the full package is acquired and analyzed.</p>
+              <p className="brief-explainer">{pathExplainer}</p>
             </article>
 
             <article className="brief-panel next-action-panel">
               <div className="brief-panel-heading"><ArrowUpRight size={18} /><div><span>NEXT ACTION</span><h2>What to do now</h2></div></div>
-              <p className="next-action-copy">{opportunity.nextStep}</p>
+              <p className="next-action-copy">{nextAction}</p>
               <div className="brief-decisions">
                 <button>Pursue</button>
                 <button>Watch</button>
