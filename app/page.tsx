@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Bell, ChevronDown, Search, SlidersHorizontal } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { OpportunityCard } from "@/components/opportunity-card";
@@ -42,7 +43,7 @@ export default async function Home() {
       <Sidebar />
       <section className="workspace">
         <header className="topbar">
-          <div className="searchbox"><Search size={17} /><span>Search federal, state, local, K-12, higher ed...</span><kbd>⌘ K</kbd></div>
+          <Link href="/opportunities" className="searchbox"><Search size={17} /><span>Search federal, state, local, K-12, higher ed...</span><kbd>⌘ K</kbd></Link>
           <div className="top-actions"><button className="icon-button"><Bell size={18} /></button><button className="company-button">Set up company <ChevronDown size={15} /></button></div>
         </header>
 
@@ -83,7 +84,7 @@ export default async function Home() {
           </section>
 
           <section className="section-block">
-            <div className="section-heading"><div><span>{isLive ? "LIVE INVENTORY" : "FIVE-MINUTE BRIEF"}</span><h2>{isLive ? "Federal + SLED opportunities" : "Preview opportunities"}</h2></div><button>View all opportunities</button></div>
+            <div className="section-heading"><div><span>{isLive ? "LIVE INVENTORY" : "FIVE-MINUTE BRIEF"}</span><h2>{isLive ? "Federal + SLED opportunities" : "Preview opportunities"}</h2></div><Link href="/opportunities" className="section-link">View all opportunities</Link></div>
             <div className="opportunity-list">{opportunities.map(o => <OpportunityCard key={o.id} opportunity={o} />)}</div>
           </section>
 
