@@ -160,6 +160,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "Reusable JAGGAER connector verified against Utah public events with a complete result sweep matching the portal-reported total.",
   },
+  VA: {
+    connectorFamily: "custom",
+    platformLabel: "Virginia eVA Vendor Bulletin Board / Solr public search",
+    officialUrl: "https://eva.virginia.gov/",
+    status: "live",
+    notes: "Pursuit reproduces the eVA public VBO session and queries the complete source-reported Open set through the public Solr bridge. Production validation reconciled all 565 source-open records; 3 past-due rows still marked Open by eVA are excluded from actionable Pursuit opportunities, leaving 562 current opportunities.",
+  },
   WV: {
     status: "live",
     notes: "Reusable CGI Advantage connector verified end-to-end against wvOASIS Vendor Self Service with a complete public solicitation sweep and live records stored in Pursuit.",
