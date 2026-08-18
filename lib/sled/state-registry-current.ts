@@ -12,6 +12,14 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "planned",
     notes: "Arkansas transitioned new procurement activity to SAP Ariba in July 2026. ARBuy remains for solicitations opened before the transition.",
   },
+  AK: {
+    status: "partial",
+    notes: "CGI Advantage guest connector verified end-to-end against Alaska IRIS VSS. The verified sweep completed successfully but returned no open solicitations, so Pursuit keeps Alaska partial until a non-zero live sweep is observed.",
+  },
+  CO: {
+    status: "live",
+    notes: "Reusable CGI Advantage connector verified end-to-end against Colorado VSS with a complete public solicitation sweep and live records stored in Pursuit.",
+  },
   DE: {
     connectorFamily: "socrata_open_data",
     platformLabel: "Delaware MyMarketplace + Delaware Open Data",
@@ -47,6 +55,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     officialUrl: "https://wwwcfprd.doa.louisiana.gov/OSP/LaPAC/pubMain.cfm",
     status: "planned",
     notes: "Direct LaPAC connector is staged against official public department listings. LaPAC exposes open bids, documents and addenda without vendor login; production validation is pending the next deliberate release.",
+  },
+  ME: {
+    connectorFamily: "cgi_advantage",
+    platformLabel: "CGI Advantage Vendor Self Service (AltSelfService)",
+    officialUrl: "https://mevss.hostams.com/PRDVSS1X1/AltSelfService",
+    status: "planned",
+    notes: "Maine moved all solicitations into VSS effective October 1, 2025. Public guest access is verified, but Maine uses the legacy AltSelfService interface and requires a dedicated parser rather than the reusable Advantage4 connector.",
   },
   MA: {
     status: "live",
@@ -112,6 +127,10 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "Reusable JAGGAER connector verified against Utah public events with a complete result sweep matching the portal-reported total.",
   },
+  WV: {
+    status: "live",
+    notes: "Reusable CGI Advantage connector verified end-to-end against wvOASIS Vendor Self Service with a complete public solicitation sweep and live records stored in Pursuit.",
+  },
   WI: {
     status: "blocked",
     notes: "Wisconsin eSupplier public solicitation route currently redirects server-side requests to PeopleSoft login; alternate official public source required.",
@@ -135,7 +154,7 @@ export function summarizeCurrentStateCoverage() {
   }, {});
 
   return {
-    verifiedAt: "2026-08-17",
+    verifiedAt: "2026-08-18",
     totalStates: CURRENT_STATE_PROCUREMENT_REGISTRY.length,
     byStatus,
     byFamily,
