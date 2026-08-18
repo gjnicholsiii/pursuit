@@ -53,17 +53,55 @@ function classifyAgency(name: string) {
   return { agencyType: "state_agency", jurisdictionLevel: "state" };
 }
 
+function mergeCookies(existing: string, setCookie: string | null) {
+  const values = new Map<string, string>();
+  for (const header of [existing, setCookie || ""]) {
+    const pieces = header.includes(",")
+      ? header.split(/,(?=\s*[^;,=\s]+=)/)
+      : header.split(";");
+    for (const piece of pieces) {
+      const token = piece.trim().split(";")[0]?.trim();
+      if (!token) continue;
+      const at = token.indexOf("=");
+      if (at <= 0) continue;
+      values.set(token.slice(0, at), token.slice(at + 1));
+    }
+  }
+  return [...values].map(([key, value]) => `${key}=${value}`).join("; ");
+}
+
 async function fetchKansasHtml() {
-  const response = await fetch(KANSAS_BIDS_URL, {
-    headers: {
-      accept: "text/html,application/xhtml+xml",
-      "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
-    },
-    redirect: "follow",
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error(`Kansas eSupplier returned ${response.status}`);
-  return { html: await response.text(), finalUrl: response.url };
+  let currentUrl = KANSAS_BIDS_URL;
+  let cookie = "";
+
+  for (let hop = 0; hop < 12; hop += 1) {
+    const response = await fetch(currentUrl, {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        ...(cookie ? { cookie } : {}),
+        "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
+      },
+      redirect: "manual",
+      cache: "no-store",
+    });
+    cookie = mergeCookies(cookie, response.headers.get("set-cookie"));
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) throw new Error(`Kansas eSupplier redirect ${response.status} had no location`);
+      currentUrl = new URL(location, currentUrl).toString();
+      continue;
+    }
+
+    if (!response.ok) throw new Error(`Kansas eSupplier returned ${response.status}`);
+    const html = await response.text();
+    if (/You must have cookies enabled/i.test(html)) {
+      throw new Error("Kansas eSupplier rejected the server cookie session");
+    }
+    return { html, finalUrl: currentUrl };
+  }
+
+  throw new Error("Kansas eSupplier exceeded redirect limit");
 }
 
 function parseKansas(html: string, finalUrl: string): SledOpportunityRecord[] {
