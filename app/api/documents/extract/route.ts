@@ -45,7 +45,7 @@ export async function GET() {
     const bytes = await new Response(blob.stream).arrayBuffer();
     const pdf = await getDocumentProxy(new Uint8Array(bytes));
     const extracted = await extractText(pdf, { mergePages: true });
-    const text = typeof extracted.text === "string" ? extracted.text : extracted.text.join("\n\n");
+    const text = extracted.text;
 
     if (!text.trim()) {
       await sql.query(
