@@ -2,95 +2,106 @@ import { NextResponse } from "next/server";
 import { load } from "cheerio";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 90;
+export const maxDuration = 120;
 
-const NC = "https://evp.nc.gov/solicitations/?status=0";
-const CA_PSP = "https://caleprocure.ca.gov/psp/psfpd1_3/SUPPLIER/ERP/c/AUC_MANAGE_BIDS.AUC_RESP_INQ_AUC.GBL";
-const CA_PSC = "https://caleprocure.ca.gov/psc/psfpd1_3/SUPPLIER/ERP/c/AUC_MANAGE_BIDS.AUC_RESP_INQ_AUC.GBL";
+const ROOT = "https://evp.nc.gov";
+const PAGE = `${ROOT}/solicitations/?status=0`;
+const LIST_ID = "863ea987-6d3e-ed11-9daf-001dd805ec0b";
+const VIEW_ID = "662288b0-eba7-ed11-aad1-001dd807215d";
+const GRID = `${ROOT}/_services/entity-grid-data.json/${LIST_ID}`;
+const EXPORT = `${ROOT}/_services/download-as-excel/${LIST_ID}`;
 
-function attrs($: ReturnType<typeof load>, node: any) {
-  return Object.fromEntries(Object.entries(node?.attribs || {}).map(([k, v]) => [k, String(v).slice(0, 1000)]));
-}
-
-async function probeNc() {
-  const response = await fetch(NC, {
-    headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
-    redirect: "follow",
-    cache: "no-store",
-  });
-  const html = await response.text();
-  const $ = load(html);
-  const grids = $(".entitylist, .entity-grid, [data-entitylist-id], [data-url*='entity-grid']").toArray().slice(0, 10).map(node => ({
-    tag: node.tagName,
-    attrs: attrs($, node),
-    html: $.html(node).slice(0, 12000),
-  }));
-  const serviceHits = [...html.matchAll(/[^\"'\s<>]{0,120}(?:_services\/entity-grid|entity-grid|entitylistid|data-url|fetchxml)[^\"'\s<>]{0,300}/gi)].slice(0, 40).map(m => m[0]);
-  const urls = [...new Set([...html.matchAll(/(?:https?:\/\/[^\"'\s<>]+|\/_services\/[^\"'\s<>]+)/gi)].map(m => m[0]))].filter(v => /entity|grid|api|service/i.test(v)).slice(0, 60);
-  return {
-    status: response.status,
-    finalUrl: response.url,
-    title: $("title").text().replace(/\s+/g, " ").trim(),
-    htmlLength: html.length,
-    grids,
-    serviceHits,
-    urls,
-  };
-}
-
-function collectCookies(response: Response) {
+function cookiesFrom(response: Response) {
   const values = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
   const fallback = response.headers.get("set-cookie");
   return (values.length ? values : fallback ? [fallback] : []).map(v => v.split(";", 1)[0]);
 }
 
-async function probeCa() {
-  const first = await fetch(CA_PSP, {
-    headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
-    redirect: "manual",
-    cache: "no-store",
-  });
-  const cookies = collectCookies(first);
-  const location = first.headers.get("location");
-  const secondUrl = location ? new URL(location, CA_PSP).toString() : CA_PSP;
-  const headers = {
-    accept: "text/html,application/xhtml+xml",
-    "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
-    ...(cookies.length ? { cookie: cookies.join("; ") } : {}),
-  };
-  const second = await fetch(secondUrl, { headers, redirect: "follow", cache: "no-store" });
-  const secondCookies = collectCookies(second);
-  const allCookies = [...new Map([...cookies, ...secondCookies].map(v => [v.split("=")[0], v])).values()];
-  const component = await fetch(CA_PSC, {
-    headers: { ...headers, ...(allCookies.length ? { cookie: allCookies.join("; ") } : {}) },
-    redirect: "follow",
-    cache: "no-store",
-  });
-  const html = await component.text();
-  const $ = load(html);
-  const body = $("body").text().replace(/\s+/g, " ").trim();
+async function summarize(response: Response) {
+  const type = response.headers.get("content-type") || "";
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const prefix = buffer.subarray(0, 3000).toString("utf8").replace(/\s+/g, " ");
   return {
-    firstStatus: first.status,
-    firstLocation: location,
-    cookieNames: allCookies.map(v => v.split("=")[0]),
-    status: component.status,
-    finalUrl: component.url,
-    title: $("title").text().replace(/\s+/g, " ").trim(),
-    htmlLength: html.length,
-    bodyStart: body.slice(0, 10000),
-    tables: $("table").length,
-    rows: $("table tr").length,
-    forms: $("form").toArray().slice(0, 5).map(form => ({ id: $(form).attr("id") || null, action: $(form).attr("action") || null, method: $(form).attr("method") || null })),
-    hiddenInputs: $("input[type=hidden]").toArray().slice(0, 100).map(input => ({ name: $(input).attr("name") || null, id: $(input).attr("id") || null, value: ($(input).attr("value") || "").slice(0, 600) })),
-    visibleInputs: $("input:not([type=hidden]), select").toArray().slice(0, 100).map(input => ({ tag: input.tagName, name: $(input).attr("name") || null, id: $(input).attr("id") || null, value: ($(input).attr("value") || "").slice(0, 300), title: $(input).attr("title") || null })),
-    tableText: $("table").toArray().slice(0, 20).map(table => $(table).text().replace(/\s+/g, " ").trim().slice(0, 4000)),
+    status: response.status,
+    type,
+    length: buffer.length,
+    prefix: prefix.slice(0, 2500),
+    disposition: response.headers.get("content-disposition"),
   };
 }
 
 export async function GET() {
-  const [nc, ca] = await Promise.allSettled([probeNc(), probeCa()]);
+  const page = await fetch(PAGE, {
+    headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
+    redirect: "follow",
+    cache: "no-store",
+  });
+  const html = await page.text();
+  const $ = load(html);
+  const pageCookies = cookiesFrom(page);
+  const cookie = pageCookies.join("; ");
+  const common = {
+    "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
+    ...(cookie ? { cookie } : {}),
+    referer: PAGE,
+  };
+
+  const tests: Record<string, unknown> = {};
+
+  const apiUrls = [
+    `${ROOT}/_api/evp_solicitations?$top=2`,
+    `${ROOT}/_api/evp_solicitations?$select=evp_solicitationid&$top=2`,
+  ];
+  for (const [index, url] of apiUrls.entries()) {
+    try {
+      tests[`api${index + 1}`] = await summarize(await fetch(url, {
+        headers: { ...common, accept: "application/json" },
+        cache: "no-store",
+      }));
+    } catch (error) {
+      tests[`api${index + 1}`] = { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  const exportTests: Array<[string, RequestInit]> = [
+    ["exportGet", { method: "GET", headers: { ...common, accept: "*/*" } }],
+    ["exportPostEmpty", { method: "POST", headers: { ...common, accept: "*/*", "content-type": "application/x-www-form-urlencoded" }, body: "" }],
+    ["exportPostView", { method: "POST", headers: { ...common, accept: "*/*", "content-type": "application/x-www-form-urlencoded" }, body: `viewid=${encodeURIComponent(VIEW_ID)}` }],
+  ];
+  for (const [name, init] of exportTests) {
+    try { tests[name] = await summarize(await fetch(EXPORT, { ...init, cache: "no-store", redirect: "follow" })); }
+    catch (error) { tests[name] = { error: error instanceof Error ? error.message : String(error) }; }
+  }
+
+  const gridBodies: Array<[string, unknown]> = [
+    ["gridEmpty", {}],
+    ["gridPage", { page: 1 }],
+    ["gridViewPage", { viewId: VIEW_ID, page: 1 }],
+    ["gridSelectedView", { selectedView: VIEW_ID, page: 1, pageSize: 10 }],
+    ["gridView", { view: VIEW_ID, page: 1, pageSize: 10, search: "", sort: "", filter: "" }],
+  ];
+  for (const [name, body] of gridBodies) {
+    try {
+      tests[name] = await summarize(await fetch(GRID, {
+        method: "POST",
+        headers: { ...common, accept: "application/json", "content-type": "application/json; charset=UTF-8" },
+        body: JSON.stringify(body),
+        cache: "no-store",
+      }));
+    } catch (error) {
+      tests[name] = { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  const grid = $(".entity-grid").first();
   return NextResponse.json({
-    nc: nc.status === "fulfilled" ? nc.value : { error: String(nc.reason) },
-    ca: ca.status === "fulfilled" ? ca.value : { error: String(ca.reason) },
+    pageStatus: page.status,
+    cookieNames: pageCookies.map(v => v.split("=")[0]),
+    grid: {
+      getUrl: grid.attr("data-get-url") || null,
+      selectedView: grid.attr("data-selected-view") || null,
+      layoutLength: (grid.attr("data-view-layouts") || "").length,
+    },
+    tests,
   });
 }
