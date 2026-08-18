@@ -24,42 +24,6 @@ function mergeCookies(...sets: string[][]) {
   }
   return [...map.values()];
 }
-function describePage(html: string, finalUrl: string) {
-  const $ = load(html);
-  return {
-    finalUrl,
-    title: text($("title").text()),
-    htmlLength: html.length,
-    forms: $("form").toArray().map(form => ({
-      id: $(form).attr("id") || null,
-      name: $(form).attr("name") || null,
-      method: $(form).attr("method") || null,
-      action: $(form).attr("action") || null,
-      inputs: $(form).find("input,button,select").toArray().map(input => ({
-        tag: input.tagName,
-        id: $(input).attr("id") || null,
-        name: $(input).attr("name") || null,
-        type: $(input).attr("type") || null,
-        value: $(input).attr("value") || null,
-        title: $(input).attr("title") || null,
-        onclick: $(input).attr("onclick") || null,
-        text: text($(input).text()),
-      })).filter(item => item.name || item.id || item.value || item.onclick).slice(0, 180),
-    })),
-    links: $("a").toArray().map(link => ({
-      text: text($(link).text()),
-      href: $(link).attr("href") || null,
-      onclick: $(link).attr("onclick") || null,
-      id: $(link).attr("id") || null,
-    })).filter(item => /solicitation|contract|bid|search|home|document/i.test(`${item.text} ${item.href} ${item.onclick}`)).slice(0, 120),
-    tables: $("table").toArray().map(table => ({
-      id: $(table).attr("id") || null,
-      class: $(table).attr("class") || null,
-      text: text($(table).text()).slice(0, 1500),
-    })).filter(item => /solicitation|bid|contract|search|document/i.test(item.text)).slice(0, 50),
-    bodyExcerpt: text($("body").text()).slice(0, 5000),
-  };
-}
 
 export async function GET() {
   const first = await fetch(ENTRY, {
@@ -97,12 +61,28 @@ export async function GET() {
   });
   const guestHtml = await guest.text();
   cookies = mergeCookies(cookies, cookiePairs(guest));
+  const g = load(guestHtml);
+  const frames = g("frame,iframe").toArray().map(frame => ({
+    tag: frame.tagName,
+    id: g(frame).attr("id") || null,
+    name: g(frame).attr("name") || null,
+    src: g(frame).attr("src") || null,
+    title: g(frame).attr("title") || null,
+  }));
+  const scripts = g("script").toArray().map(script => ({
+    src: g(script).attr("src") || null,
+    inline: g(script).attr("src") ? null : text(g(script).html()).slice(0, 2500),
+  }));
 
   return NextResponse.json({
     loginStatus: first.status,
     guestStatus: guest.status,
+    finalUrl: guest.url,
     cookies,
-    submittedKeys: [...params.keys()],
-    page: describePage(guestHtml, guest.url),
+    title: text(g("title").text()),
+    htmlLength: guestHtml.length,
+    frames,
+    scripts,
+    rawHtml: guestHtml,
   });
 }
