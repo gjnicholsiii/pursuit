@@ -31,6 +31,6 @@ export async function GET() {
     }
     snippets[needle]=values;
   }
-  const requestLike = [...body.matchAll(/.{0,600}(?:fetch\(|XMLHttpRequest|\.ajax\(|axios|searchUrl|solrconnect\.jsp).{0,1400}/gis)].slice(0,20).map(m=>m[0]);
+  const requestLike = [...body.matchAll(/[\s\S]{0,600}(?:fetch\(|XMLHttpRequest|\.ajax\(|axios|searchUrl|solrconnect\.jsp)[\s\S]{0,1400}/gi)].slice(0,20).map(m=>m[0]);
   return NextResponse.json({ pageStatus:page.status, scriptStatus:response.status, length:body.length, snippets, requestLike });
 }
