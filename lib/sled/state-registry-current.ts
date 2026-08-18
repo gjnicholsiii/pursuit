@@ -123,6 +123,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "Pursuit verified a complete open-opportunity sweep across all Contract Reporter result pages. Direct public-buyer notices are stored; private contractor advertisements are intentionally excluded.",
   },
+  NC: {
+    connectorFamily: "custom",
+    platformLabel: "North Carolina electronic Vendor Portal (eVP) / Microsoft Power Pages",
+    officialUrl: "https://evp.nc.gov/solicitations/?status=0",
+    status: "live",
+    notes: "Pursuit reproduces the public eVP Power Pages grid session and Open solicitation metafilter, reconciles all grid pages to the portal-reported total, and closes records that leave the live set. Production validation reconciled all 280 open solicitations.",
+  },
   OR: {
     officialUrl: "https://oregonbuys.gov/bso/",
     status: "live",
