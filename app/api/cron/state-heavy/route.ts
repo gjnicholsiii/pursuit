@@ -6,6 +6,7 @@ import { syncTexasEsbd } from "@/lib/sled/texas";
 import { syncNewYorkContractReporter } from "@/lib/sled/new-york";
 import { syncCaliforniaPeopleSoft } from "@/lib/sled/california";
 import { syncNorthCarolinaEvp } from "@/lib/sled/north-carolina";
+import { syncVirginiaEva } from "@/lib/sled/virginia";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina] = await Promise.all([
+  const [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia] = await Promise.all([
     syncNebraskaBoard(false),
     syncLouisianaLapac(false),
     syncSouthCarolinaScbo(false),
@@ -25,13 +26,14 @@ export async function GET(request: NextRequest) {
     syncNewYorkContractReporter(),
     syncCaliforniaPeopleSoft(),
     syncNorthCarolinaEvp(),
+    syncVirginiaEva(),
   ]);
 
-  const results = [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina];
+  const results = [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia];
   const failures = results.filter(result => !result.ok);
   return NextResponse.json({
     ok: failures.length === 0,
-    sync: { nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina },
+    sync: { nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia },
     failures,
   }, { status: failures.length === 0 ? 200 : 207 });
 }
