@@ -43,8 +43,7 @@ export async function GET() {
       value: $(el).attr("value") || null,
     })).get().filter(x => x.id || x.name).slice(0, 150);
     const bodyText = $("body").text().replace(/\s+/g, " ").trim().slice(0, 12000);
-    const endpointMatches = [...html.matchAll(/(?:https?:)?\/\/[^
-"'<> ]+|\/[A-Za-z0-9_.?=&%\/-]*(?:ajax|api|json|request|rfp|browse|search)[A-Za-z0-9_.?=&%\/-]*/gi)].map(m => m[0]).slice(0, 200);
+    const endpointMatches = [...new Set((html.match(/\/[A-Za-z0-9_.?=&%\/-]*(?:ajax|api|json|request|rfp|browse|search)[A-Za-z0-9_.?=&%\/-]*/gi) || []))].slice(0, 200);
     return NextResponse.json({
       ok: response.ok,
       status: response.status,
