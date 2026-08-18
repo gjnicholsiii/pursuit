@@ -4,6 +4,7 @@ import { syncPeriscopeFullSweeps } from "@/lib/sled/periscope";
 import { syncJaggaerFullSweeps } from "@/lib/sled/jaggaer";
 import { syncCgiAdvantageFullSweeps } from "@/lib/sled/cgi-advantage";
 import { syncPublicPeopleSoft } from "@/lib/sled/peoplesoft";
+import { syncKansasPeopleSoft } from "@/lib/sled/kansas";
 import { syncDelawareOpenBids } from "@/lib/sled/delaware";
 
 export const dynamic = "force-dynamic";
@@ -16,12 +17,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const [official, periscope, jaggaer, cgiAdvantage, peoplesoft, delaware] = await Promise.all([
+  const [official, periscope, jaggaer, cgiAdvantage, peoplesoft, kansas, delaware] = await Promise.all([
     syncOfficialStatePages(false),
     syncPeriscopeFullSweeps(),
     syncJaggaerFullSweeps(),
     syncCgiAdvantageFullSweeps(),
     syncPublicPeopleSoft(),
+    syncKansasPeopleSoft(),
     syncDelawareOpenBids(false),
   ]);
 
@@ -35,12 +37,13 @@ export async function GET(request: NextRequest) {
     ...jaggaer,
     ...cgiAdvantage.filter(result => result.stateCode !== "ME"),
     ...peoplesoft,
+    kansas,
     delaware,
   ].filter(result => !result.ok);
 
   return NextResponse.json({
     ok: failures.length === 0,
-    sync: { official, periscope, jaggaer, cgiAdvantage, peoplesoft, delaware },
+    sync: { official, periscope, jaggaer, cgiAdvantage, peoplesoft, kansas, delaware },
     failures,
   }, { status: failures.length === 0 ? 200 : 207 });
 }
