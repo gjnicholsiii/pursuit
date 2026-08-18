@@ -5,6 +5,13 @@ type StateOverride = Partial<Omit<StateProcurementSource, "stateCode" | "stateNa
 // Live observations override the NASPO baseline when a portal has transitioned or
 // Pursuit has directly verified a connector against the current public system.
 const CURRENT_OVERRIDES: Record<string, StateOverride> = {
+  AL: {
+    connectorFamily: "cgi_advantage",
+    platformLabel: "STAARS Vendor Self Service / CGI Advantage AltSelfService",
+    officialUrl: "https://procurement.staars.alabama.gov/",
+    status: "live",
+    notes: "Pursuit reproduces Alabama STAARS Public Access through the session-specific CGI Advantage AltSelfService workflow, paginates the complete Open solicitation board, and closes records that leave the live set. Production validation reconciled 14 current opportunities across 2 pages.",
+  },
   AR: {
     connectorFamily: "sap_ariba",
     platformLabel: "SAP Ariba (current); Periscope ARBuy (legacy solicitations)",
