@@ -53,6 +53,39 @@ function decodeLayout(value: string) {
   return null;
 }
 
+async function postGrid(url: string, token: string, cookie: string, body: Record<string, unknown>) {
+  const response = await fetch(new URL(url, ROOT), {
+    method: "POST",
+    headers: {
+      accept: "application/json, text/javascript, */*; q=0.01",
+      "content-type": "application/json; charset=UTF-8",
+      "user-agent": USER_AGENT,
+      referer: PAGE,
+      "x-requested-with": "XMLHttpRequest",
+      __RequestVerificationToken: token,
+      ...(cookie ? { cookie } : {}),
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    redirect: "follow",
+  });
+  const responseText = await response.text();
+  let parsed: any = null;
+  try { parsed = JSON.parse(responseText); } catch {}
+  const bodyText = load(responseText)("body").text().replace(/\s+/g, " ").trim();
+  return {
+    status: response.status,
+    type: response.headers.get("content-type"),
+    length: responseText.length,
+    keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
+    itemCount: parsed?.ItemCount ?? parsed?.itemCount ?? parsed?.TotalRecordCount ?? parsed?.totalRecordCount ?? null,
+    pageNumber: parsed?.PageNumber ?? parsed?.pageNumber ?? null,
+    pageCount: parsed?.PageCount ?? parsed?.pageCount ?? null,
+    bodyText: bodyText.slice(0, 1200),
+    sample: parsed ? JSON.stringify(parsed).slice(0, 3500) : "",
+  };
+}
+
 export async function GET() {
   const page = await fetch(PAGE, {
     headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT },
@@ -87,70 +120,47 @@ export async function GET() {
   const active = layoutList.find((entry: any) => String(entry?.Id || "").toLowerCase() === selectedView.toLowerCase()) || layoutList[0] || null;
   const secure = active?.Base64SecureConfiguration || "";
   const entityName = active?.Configuration?.EntityName || "";
+  const pageSize = Number(active?.Configuration?.PageSize || 10) || 10;
   const getUrl = grid.attr("data-get-url") || GRID;
 
-  const requestBody = {
+  const base = {
     base64SecureConfiguration: secure,
     sortExpression: "",
     search: null,
     page: 1,
-    pageSize: 25,
+    pageSize,
     pcfFilter: "",
-    timezoneOffset: 300,
+    timezoneOffset: 240,
     entityName,
-    entityId: null,
   };
 
-  let gridResult: Record<string, unknown> = { attempted: false };
+  const variants: Array<[string, Record<string, unknown>]> = [
+    ["exact", base],
+    ["withNullEntityId", { ...base, entityId: null }],
+    ["zeroTimezone", { ...base, timezoneOffset: 0 }],
+    ["emptySearch", { ...base, search: "" }],
+    ["omitSearch", Object.fromEntries(Object.entries(base).filter(([key]) => key !== "search"))],
+    ["omitFilter", Object.fromEntries(Object.entries(base).filter(([key]) => key !== "pcfFilter"))],
+    ["pageMinusOne", { ...base, pageSize: -1 }],
+  ];
+
+  const tests: Record<string, unknown> = {};
   if (token && secure && entityName) {
-    const response = await fetch(new URL(getUrl, ROOT), {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json; charset=utf-8",
-        "user-agent": USER_AGENT,
-        referer: PAGE,
-        __RequestVerificationToken: token,
-        ...(cookie ? { cookie } : {}),
-      },
-      body: JSON.stringify(requestBody),
-      cache: "no-store",
-      redirect: "follow",
-    });
-    const responseText = await response.text();
-    let parsed: any = null;
-    try { parsed = JSON.parse(responseText); } catch {}
-    gridResult = {
-      attempted: true,
-      status: response.status,
-      type: response.headers.get("content-type"),
-      length: responseText.length,
-      keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
-      itemCount: parsed?.ItemCount ?? parsed?.itemCount ?? parsed?.TotalRecordCount ?? parsed?.totalRecordCount ?? null,
-      pageNumber: parsed?.PageNumber ?? parsed?.pageNumber ?? null,
-      pageCount: parsed?.PageCount ?? parsed?.pageCount ?? null,
-      sample: parsed ? JSON.stringify(parsed).slice(0, 6000) : responseText.slice(0, 3000),
-    };
+    for (const [name, body] of variants) tests[name] = await postGrid(getUrl, token, cookie, body);
   }
 
   return NextResponse.json({
     pageStatus: page.status,
     tokenStatus: tokenResponse.status,
     tokenFound: Boolean(token),
-    tokenLength: token.length,
     grid: {
       selectedView,
-      attrKeys: Object.keys((grid.get(0) as any)?.attribs || {}),
-      layoutsRawLength: layoutsRaw.length,
-      layoutsRawPrefix: layoutsRaw.slice(0, 2000),
-      layoutType: layouts === null ? "null" : Array.isArray(layouts) ? "array" : typeof layouts,
       layoutCount: layoutList.length,
-      activeViewId: active?.Id || null,
+      pageSize,
       secureConfigFound: Boolean(secure),
-      secureConfigLength: secure.length,
       entityName: entityName || null,
       getUrl,
     },
-    gridResult,
+    tests,
   });
 }
