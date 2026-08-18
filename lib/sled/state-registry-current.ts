@@ -49,6 +49,10 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "Reusable Periscope connector verified against anonymous Open Bids with complete PrimeFaces pagination and portal-total reconciliation.",
   },
+  KS: {
+    status: "live",
+    notes: "Kansas eSupplier public bid events are live through a PeopleSoft connector with explicit cookie-session handling. Pursuit verified and stored the current public event set end-to-end.",
+  },
   LA: {
     connectorFamily: "direct_state_board",
     platformLabel: "Louisiana LaPAC public network (SAP/LaGov downstream)",
@@ -96,6 +100,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
   NJ: {
     status: "live",
     notes: "Reusable Periscope connector verified against NJSTART with complete PrimeFaces pagination and portal-total reconciliation.",
+  },
+  NY: {
+    connectorFamily: "direct_state_board",
+    platformLabel: "New York State Contract Reporter",
+    officialUrl: "https://www.nyscr.ny.gov/Ads/Search",
+    status: "live",
+    notes: "Pursuit verified a complete open-opportunity sweep across all Contract Reporter result pages. Direct public-buyer notices are stored; private contractor advertisements are intentionally excluded.",
   },
   OR: {
     officialUrl: "https://oregonbuys.gov/bso/",
