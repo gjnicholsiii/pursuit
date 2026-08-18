@@ -30,32 +30,58 @@ function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function looksLikeProcurementIdentifier(value: string) {
+  const candidate = value.trim().toUpperCase();
+  if (candidate.length < 7 || candidate.length > 40) return false;
+  if (!/[0-9]/.test(candidate)) return false;
+  if (!/[A-Z]/.test(candidate)) return false;
+  if (!/^[A-Z0-9][A-Z0-9-]+$/.test(candidate)) return false;
+  return true;
+}
+
 function collectFacts(lines: string[]): EvidenceFact[] {
   const facts: EvidenceFact[] = [];
   const seen = new Set<string>();
 
-  const rules: Array<{ factType: string; pattern: RegExp; group?: number }> = [
-    { factType: "solicitation_number", pattern: /(?:solicitation|contract)\s*(?:no\.?|number|#)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{5,})/i },
-    { factType: "amendment_number", pattern: /amendment\s*(?:no\.?|number|#)?\s*[:#-]?\s*([A-Z0-9-]+)/i },
-    { factType: "naics_code", pattern: /\bNAICS\b[^0-9]{0,24}(\d{6})\b/i },
-    { factType: "set_aside", pattern: /\b(set[- ]aside|small business|8\(a\)|HUBZone|service[- ]disabled veteran[- ]owned|SDVOSB|women[- ]owned|WOSB)\b/i, group: 1 },
-    { factType: "response_deadline", pattern: /(?:response|offer|proposal|quote|quotation|bid)s?[^\n]{0,50}(?:due|deadline|close|closing)[^\n]{0,80}/i, group: 0 },
-    { factType: "submission_instruction", pattern: /(?:submit|submission|offerors? shall submit|quotes? shall be submitted|proposals? shall be submitted)[^\n]{0,180}/i, group: 0 },
-    { factType: "evaluation_criteria", pattern: /(?:evaluation criteria|basis for award|award will be made|lowest price technically acceptable|best value)[^\n]{0,180}/i, group: 0 },
-  ];
+  const add = (factType: string, value: string, sourceText: string, line: number) => {
+    const cleaned = compact(value);
+    if (!cleaned) return;
+    const key = `${factType}:${cleaned.toLowerCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    facts.push({ factType, value: cleaned, sourceText, line });
+  };
 
   lines.forEach((rawLine, index) => {
     const line = compact(rawLine);
     if (!line) return;
 
-    for (const rule of rules) {
-      const match = line.match(rule.pattern);
-      if (!match) continue;
-      const value = compact(match[rule.group ?? 1] ?? match[0]);
-      const key = `${rule.factType}:${value.toLowerCase()}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      facts.push({ factType: rule.factType, value, sourceText: line, line: index + 1 });
+    const solicitationMatch = line.match(/\b(?:solicitation|contract)\s+(?:no\.?|number|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{6,39})\b/i);
+    if (solicitationMatch && looksLikeProcurementIdentifier(solicitationMatch[1])) {
+      add("solicitation_number", solicitationMatch[1], line, index + 1);
+    }
+
+    const amendmentMatch = line.match(/\bamendment\s+(?:no\.?|number|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{0,12})\b/i);
+    if (amendmentMatch && /\d/.test(amendmentMatch[1])) {
+      add("amendment_number", amendmentMatch[1], line, index + 1);
+    }
+
+    const naicsMatch = line.match(/\bNAICS\b[^0-9]{0,24}(\d{6})\b/i);
+    if (naicsMatch) add("naics_code", naicsMatch[1], line, index + 1);
+
+    const setAsideMatch = line.match(/\b(8\(a\)|HUBZone|SDVOSB|WOSB|service[- ]disabled veteran[- ]owned small business|women[- ]owned small business|small business set[- ]aside|total small business set[- ]aside)\b/i);
+    if (setAsideMatch) add("set_aside", setAsideMatch[1], line, index + 1);
+
+    if (/\b(?:response|offer|proposal|quote|quotation|bid)s?\b/i.test(line) && /\b(?:due|deadline|closing|close date)\b/i.test(line)) {
+      add("response_deadline", line, line, index + 1);
+    }
+
+    if (/\b(?:offerors? shall submit|quotes? shall be submitted|proposals? shall be submitted|submit (?:offers?|quotes?|proposals?))\b/i.test(line)) {
+      add("submission_instruction", line, line, index + 1);
+    }
+
+    if (/\b(?:evaluation criteria|basis for award|award will be made|lowest price technically acceptable|best value)\b/i.test(line)) {
+      add("evaluation_criteria", line, line, index + 1);
     }
   });
 
@@ -68,8 +94,11 @@ function collectRequirements(lines: string[]): EvidenceRequirement[] {
 
   lines.forEach((rawLine, index) => {
     const line = compact(rawLine);
-    if (line.length < 20 || line.length > 500) return;
-    if (!/\b(shall|must|required|is required to|are required to)\b/i.test(line)) return;
+    if (line.length < 25 || line.length > 500) return;
+    if (!/\b(shall|must|required to|are required to|is required to)\b/i.test(line)) return;
+    if (/\bif required\b/i.test(line)) return;
+    if (/\bnot\s+(?:is\s+)?required\b/i.test(line)) return;
+    if (/\bnot required\b/i.test(line)) return;
 
     const normalized = line.toLowerCase();
     if (seen.has(normalized)) return;
@@ -147,7 +176,7 @@ export async function GET() {
            jsonb_build_object('value', $4::text),
            $5::text,
            jsonb_build_object('document_id', $2::text, 'line', $6::int),
-           0.95
+           0.98
          where not exists (
            select 1
            from extracted_facts existing
@@ -179,7 +208,7 @@ export async function GET() {
            true,
            jsonb_build_object('document_id', $2::text, 'line', $5::int),
            jsonb_build_object('source', 'document_text'),
-           0.95
+           0.98
          where not exists (
            select 1
            from requirements existing
