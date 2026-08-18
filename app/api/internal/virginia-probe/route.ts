@@ -20,31 +20,28 @@ export async function GET() {
     redirect: "follow",
     cache: "no-store",
   });
-  const pageHtml = await page.text();
   const cookie = cookies(page);
-  const script = await fetch(SCRIPT, {
+  const script = await fetch(`${SCRIPT}?_=${Date.now()}`, {
     headers: { accept: "application/javascript,text/javascript,*/*;q=0.8", "user-agent": UA, referer: PAGE, ...(cookie ? { cookie } : {}) },
     cache: "no-store",
   });
   const js = await script.text();
-  const needle = "getAllOpportunities";
-  const snippets: string[] = [];
-  let pos = 0;
-  while ((pos = js.indexOf(needle, pos)) >= 0 && snippets.length < 20) {
-    snippets.push(js.slice(Math.max(0, pos - 1200), Math.min(js.length, pos + 2200)));
-    pos += needle.length;
+  const needles = ["getAllOpportunities", "retreiveAllOpportunitiesResponse", "opportunityList", "recentlyPosted", "pastYear", "ajax", "webpack", "<!doctype", "<html"];
+  const hits = Object.fromEntries(needles.map(needle => [needle, js.indexOf(needle)]));
+  const interesting: Record<string,string> = {};
+  for (const [needle, pos] of Object.entries(hits)) {
+    if (typeof pos === "number" && pos >= 0) interesting[needle] = js.slice(Math.max(0, pos - 1000), Math.min(js.length, pos + 2500));
   }
-  const baseTags = [...pageHtml.matchAll(/<base\b[^>]*>/gi)].map(m => m[0]);
-  const scripts = [...pageHtml.matchAll(/<script\b[^>]*src=["']([^"']+)["'][^>]*>/gi)].map(m => m[1]);
   return NextResponse.json({
     pageStatus: page.status,
-    pageUrl: page.url,
-    baseTags,
+    pageContentType: page.headers.get("content-type"),
     scriptStatus: script.status,
-    scriptUrl: script.url,
+    scriptContentType: script.headers.get("content-type"),
+    scriptContentEncoding: script.headers.get("content-encoding"),
     scriptLength: js.length,
-    scripts,
-    occurrences: snippets.length,
-    snippets,
+    hits,
+    first2000: js.slice(0, 2000),
+    last1000: js.slice(-1000),
+    interesting,
   });
 }
