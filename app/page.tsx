@@ -8,6 +8,7 @@ import {
   getStoredFederalCount,
   getStoredFederalOpportunities,
   getStoredSledCount,
+  getStoredSledMarketCounts,
   getStoredSledOpportunities,
 } from "@/lib/opportunity-store";
 import type { Opportunity } from "@/lib/types";
@@ -19,15 +20,30 @@ export default async function Home() {
   let sledOpportunities: Opportunity[] = [];
   let federalCount = 0;
   let sledCount = 0;
+  let k12Count = 0;
+  let higherEdCount = 0;
+  let stateCount = 0;
+  let localCount = 0;
+  let authorityCount = 0;
   let dataError: string | undefined;
 
   try {
-    [federalOpportunities, sledOpportunities, federalCount, sledCount] = await Promise.all([
+    const [federalItems, sledItems, federalTotal, sledTotal, marketCounts] = await Promise.all([
       getStoredFederalOpportunities(6),
       getStoredSledOpportunities(6),
       getStoredFederalCount(),
       getStoredSledCount(),
+      getStoredSledMarketCounts(),
     ]);
+    federalOpportunities = federalItems;
+    sledOpportunities = sledItems;
+    federalCount = federalTotal;
+    sledCount = sledTotal;
+    k12Count = marketCounts.k12;
+    higherEdCount = marketCounts.higherEd;
+    stateCount = marketCounts.state;
+    localCount = marketCounts.local;
+    authorityCount = marketCounts.authorities;
   } catch (error) {
     dataError = error instanceof Error ? error.message : "Unable to read the live opportunity inventory";
   }
@@ -52,17 +68,33 @@ export default async function Home() {
             <div>
               <span className="eyebrow">REVENUE TODAY</span>
               <h1>WIN MORE / WORK LESS</h1>
-              <p>Federal + SLED.</p>
+              <p>Federal, state, local, K-12 and higher education opportunities in one live inventory.</p>
             </div>
             <button className="secondary-button"><SlidersHorizontal size={16} />Selling profile</button>
           </div>
 
           <div className="metrics">
-            <MetricCard label="Live opportunities" value={isLive ? totalCount.toLocaleString() : "Waiting"} detail={isLive ? "Current federal + SLED inventory in Pursuit" : "Opportunity inventory is unavailable"} accent />
+            <MetricCard label="Live opportunities" value={isLive ? totalCount.toLocaleString() : "Waiting"} detail={isLive ? "Current government opportunity inventory in Pursuit" : "Opportunity inventory is unavailable"} accent />
             <MetricCard label="Federal" value={federalCount.toLocaleString()} detail="Current SAM.gov opportunities" />
-            <MetricCard label="SLED" value={sledCount.toLocaleString()} detail="Current public state and local opportunities" />
-            <MetricCard label="Brief confidence" value={`${averageConfidence}%`} detail="Metadata confidence; package analysis comes next" />
+            <MetricCard label="K-12" value={k12Count.toLocaleString()} detail="School districts and public K-12 buyers" />
+            <MetricCard label="Higher Education" value={higherEdCount.toLocaleString()} detail="Public colleges and universities" />
           </div>
+
+          <section className="readiness-panel">
+            <div className="readiness-copy">
+              <span className="eyebrow">MARKET COVERAGE</span>
+              <h2>Government is bigger than federal.</h2>
+              <p>Pursuit is already tracking the public buyers SMBs actually sell to: state agencies, cities, counties, school districts, colleges, universities and authorities.</p>
+            </div>
+            <div className="readiness-grid">
+              <div className="readiness-item"><div><strong>K-12</strong><small>{k12Count.toLocaleString()} live opportunities</small></div></div>
+              <div className="readiness-item"><div><strong>Higher Education</strong><small>{higherEdCount.toLocaleString()} live opportunities</small></div></div>
+              <div className="readiness-item"><div><strong>State Agencies</strong><small>{stateCount.toLocaleString()} live opportunities</small></div></div>
+              <div className="readiness-item"><div><strong>Local + County</strong><small>{localCount.toLocaleString()} live opportunities</small></div></div>
+              <div className="readiness-item"><div><strong>Authorities</strong><small>{authorityCount.toLocaleString()} live opportunities</small></div></div>
+              <div className="readiness-item"><div><strong>SLED Total</strong><small>{sledCount.toLocaleString()} live opportunities</small></div></div>
+            </div>
+          </section>
 
           {dataError && (
             <section className="readiness-panel">
