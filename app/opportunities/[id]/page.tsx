@@ -11,6 +11,13 @@ const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency",
 
 const categoryLabel = (category: string) => category.replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
 
+const packageBoilerplate = new Set([
+  "Solicitation documents have not yet been acquired and analyzed by Pursuit",
+  "Participation, bonding and certification requirements still require package review",
+  "Full solicitation package has not yet been analyzed",
+  "Bid-package attachments have not yet been acquired by Pursuit",
+]);
+
 export default async function OpportunityBriefPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [opportunity, documents] = await Promise.all([
@@ -20,17 +27,41 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
   if (!opportunity) notFound();
 
   const packageAnalyzed = documents.identified > 0 && documents.analyzed === documents.identified && documents.missing === 0;
-  const uncertainty = (opportunity.uncertainty || []).filter(item => item !== "Full solicitation package has not yet been analyzed");
-  if (!packageAnalyzed) uncertainty.push("Full solicitation package has not yet been analyzed");
-  else uncertainty.push("All identified package documents have been analyzed; requirements absent from those documents remain unknown until additional source evidence appears.");
+  const uncertainty = (opportunity.uncertainty || []).filter(item => !packageBoilerplate.has(item));
+
+  if (documents.identified === 0) {
+    uncertainty.push("No bid-package documents have been identified in the stored source record yet.");
+  } else {
+    const awaitingFetch = Math.max(0, documents.identified - documents.fetched - documents.missing);
+    const awaitingAnalysis = Math.max(0, documents.fetched - documents.analyzed);
+
+    if (documents.missing > 0) {
+      uncertainty.push(`${documents.missing} identified package document${documents.missing === 1 ? " is" : "s are"} currently unavailable from the source.`);
+    }
+    if (awaitingFetch > 0) {
+      uncertainty.push(`${awaitingFetch} identified package document${awaitingFetch === 1 ? " has" : "s have"} not yet been fetched by Pursuit.`);
+    }
+    if (awaitingAnalysis > 0) {
+      uncertainty.push(`${awaitingAnalysis} fetched package document${awaitingAnalysis === 1 ? " is" : "s are"} awaiting analysis.`);
+    }
+    if (packageAnalyzed) {
+      uncertainty.push("All identified package documents have been analyzed; requirements absent from those documents remain unknown until additional source evidence appears.");
+    }
+  }
 
   const pathExplainer = packageAnalyzed
     ? "Pursuit has analyzed every package document currently identified in the source record. Verified requirements above are evidence-backed; bonding, insurance, certifications, evaluation details or other requirements remain unknown when the analyzed material does not state them."
-    : "Pursuit has identified the procurement mechanism from the public record. The complete submission path, mandatory forms, evaluation method, bonding, insurance and certifications remain provisional until the identified package is acquired and analyzed.";
+    : documents.identified === 0
+      ? "Pursuit has the public opportunity record, but no bid-package documents are currently identified. Submission details and requirements remain unknown until source documents are found."
+      : "Pursuit has identified package documents and is tracking their acquisition and analysis state above. Only source-backed requirements are promoted as verified.";
 
   const nextAction = packageAnalyzed
     ? "Review the verified requirements and source evidence. Treat any requirement not found in the analyzed package as unknown rather than assumed."
-    : opportunity.nextStep;
+    : documents.identified === 0
+      ? "Open the original source and locate the bid package or solicitation documents."
+      : documents.fetched < documents.identified
+        ? "Acquire the remaining identified package documents before making a pursuit decision."
+        : "Analyze the fetched package documents and verify mandatory requirements before making a pursuit decision.";
 
   return (
     <main className="shell">
