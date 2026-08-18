@@ -27,8 +27,8 @@ function safeFilename(value: string) {
 }
 
 export async function GET() {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    return NextResponse.json({ ok: false, error: "BLOB_READ_WRITE_TOKEN is not available to this deployment" }, { status: 503 });
+  if (!process.env.BLOB_STORE_ID) {
+    return NextResponse.json({ ok: false, error: "BLOB_STORE_ID is not available to this deployment" }, { status: 503 });
   }
 
   const sql = getSql();
