@@ -20,6 +20,7 @@ export interface NebraskaSyncResult {
   stored: number;
   newRecords: number;
   changedRecords: number;
+  closedRecords?: number;
   pageLimited: false;
   error?: string;
 }
@@ -127,6 +128,7 @@ export async function syncNebraskaBoard(bootstrap = false): Promise<NebraskaSync
     const persisted = await persistSledOpportunities(SOURCE, records, {
       mode: bootstrap ? "nebraska_bootstrap" : "nebraska_refresh",
       recordChanges: !bootstrap,
+      closeMissing: true,
     });
     return { stateCode: "NE", sourceName: SOURCE.sourceName, ok: true, rowsFound: records.length, ...persisted, pageLimited: false };
   } catch (error) {
@@ -138,6 +140,7 @@ export async function syncNebraskaBoard(bootstrap = false): Promise<NebraskaSync
       stored: 0,
       newRecords: 0,
       changedRecords: 0,
+      closedRecords: 0,
       pageLimited: false,
       error: error instanceof Error ? error.message : String(error),
     };
