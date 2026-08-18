@@ -16,6 +16,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "partial",
     notes: "CGI Advantage guest connector verified end-to-end against Alaska IRIS VSS. The verified sweep completed successfully but returned no open solicitations, so Pursuit keeps Alaska partial until a non-zero live sweep is observed.",
   },
+  CA: {
+    connectorFamily: "oracle_peoplesoft",
+    platformLabel: "Cal eProcure / PeopleSoft Supplier Portal",
+    officialUrl: "https://caleprocure.ca.gov/",
+    status: "live",
+    notes: "Pursuit uses California's anonymous PeopleSoft bidder session and verifies the complete portal-reported event set before storing current posted opportunities. The production validation reconciled all 356 reported events.",
+  },
   CO: {
     status: "live",
     notes: "Reusable CGI Advantage connector verified end-to-end against Colorado VSS with a complete public solicitation sweep and live records stored in Pursuit.",
