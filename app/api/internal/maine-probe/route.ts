@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
 const ROOT = "https://mevss.hostams.com";
-const URL = `${ROOT}/PRDVSS1X1/AltSelfService`;
+const ENTRY = `${ROOT}/PRDVSS1X1/AltSelfService`;
 const UA = "Mozilla/5.0 PursuitGovernmentRevenue/1.0";
 
 function text(value: unknown) {
@@ -62,7 +62,7 @@ function describePage(html: string, finalUrl: string) {
 }
 
 export async function GET() {
-  const first = await fetch(URL, {
+  const first = await fetch(ENTRY, {
     headers: { accept: "text/html,application/xhtml+xml", "user-agent": UA },
     redirect: "follow",
     cache: "no-store",
@@ -71,7 +71,7 @@ export async function GET() {
   let cookies = cookiePairs(first);
   const $ = load(firstHtml);
   const form = $("#login_form").first();
-  const action = form.attr("action") || first.url || URL;
+  const action = form.attr("action") || first.url || ENTRY;
   const params = new URLSearchParams();
   form.find("input").each((_, input) => {
     const name = $(input).attr("name");
@@ -81,13 +81,13 @@ export async function GET() {
   });
   params.set("guest_login", "Public Access");
 
-  const guest = await fetch(new URL(action, first.url || URL), {
+  const guest = await fetch(new URL(action, first.url || ENTRY), {
     method: "POST",
     headers: {
       accept: "text/html,application/xhtml+xml",
       "content-type": "application/x-www-form-urlencoded",
       "user-agent": UA,
-      referer: first.url || URL,
+      referer: first.url || ENTRY,
       origin: ROOT,
       ...(cookies.length ? { cookie: cookies.join("; ") } : {}),
     },
