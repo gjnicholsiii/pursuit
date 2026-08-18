@@ -32,6 +32,19 @@
 .uncertainty-panel .brief-list svg { color:var(--warm); }
 .brief-list p { margin:0; color:#c6cccf; font-size:11px; line-height:1.5; }
 .muted-copy { color:var(--muted) !important; }
+.requirement-panel { margin-top:14px; background:linear-gradient(145deg,rgba(201,255,66,.05),var(--panel) 46%); }
+.requirement-list { display:grid; gap:10px; margin-top:14px; }
+.requirement-item { border:1px solid var(--line-soft); border-radius:10px; padding:15px; background:#0d1214; }
+.requirement-meta { display:flex; justify-content:space-between; gap:18px; align-items:center; }
+.requirement-meta span { color:var(--accent); font-size:8px; font-weight:800; letter-spacing:.12em; }
+.requirement-meta small { color:var(--muted-2); font-size:8px; }
+.requirement-item > p { margin:11px 0 13px; color:#d7dcde; font-size:12px; line-height:1.55; }
+.requirement-source { display:flex; justify-content:space-between; gap:18px; align-items:flex-end; padding-top:11px; border-top:1px solid var(--line-soft); }
+.requirement-source > div { min-width:0; }
+.requirement-source strong { display:block; color:#bcc4c7; font-size:9px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.requirement-source span { display:block; margin-top:3px; color:var(--muted-2); font-size:8px; }
+.requirement-source a { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:9px; white-space:nowrap; }
+.requirement-source a:hover { color:var(--text); }
 .package-panel { margin-top:14px; background:linear-gradient(145deg,rgba(201,255,66,.025),var(--panel) 42%); }
 .package-stats { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--line-soft); border-radius:10px; overflow:hidden; margin-top:16px; }
 .package-stats > div { padding:13px 15px; border-right:1px solid var(--line-soft); }
@@ -81,6 +94,7 @@
   .brief-facts { grid-template-columns:1fr; }
   .brief-facts > div { border-right:0; border-bottom:1px solid var(--line); }
   .brief-facts > div:last-child { border-bottom:0; }
+  .requirement-meta, .requirement-source { align-items:flex-start; flex-direction:column; }
   .package-list a { grid-template-columns:auto minmax(0,1fr) auto; }
   .package-list small { grid-column:2; grid-row:2; }
 }
