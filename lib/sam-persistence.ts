@@ -47,6 +47,11 @@ function hashPayload(raw: SamOpportunityRaw) {
   return createHash("sha256").update(JSON.stringify(raw)).digest("hex");
 }
 
+function compactRawPayload(raw: SamOpportunityRaw): SamOpportunityRaw {
+  const { description: _description, ...rest } = raw;
+  return rest;
+}
+
 function changeSnapshot(raw: SamOpportunityRaw | null | undefined) {
   if (!raw) return {};
   return {
@@ -130,6 +135,7 @@ export async function persistSamOpportunities(
     const rawForStorage: SamOpportunityRaw = !raw.resourceLinks?.length && previousLinks?.length
       ? { ...raw, resourceLinks: previousLinks }
       : raw;
+    const compactPayload = compactRawPayload(rawForStorage);
 
     const stateCode = rawForStorage.placeOfPerformance?.state?.code;
     return [{
@@ -148,7 +154,7 @@ export async function persistSamOpportunities(
       set_aside: rawForStorage.typeOfSetAsideDescription || rawForStorage.typeOfSetAside || null,
       source_url: sourceUrl(rawForStorage),
       content_hash: hashPayload(rawForStorage),
-      raw_payload: rawForStorage,
+      raw_payload: compactPayload,
     }];
   });
 
