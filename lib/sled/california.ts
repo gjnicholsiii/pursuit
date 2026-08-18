@@ -40,11 +40,14 @@ function collectCookies(response: Response) {
 
 function parsePacificDate(value: string) {
   const cleaned = text(value);
-  if (!cleaned) return null;
-  const normalized = cleaned
-    .replace(/\bPDT\b/g, "GMT-0700")
-    .replace(/\bPST\b/g, "GMT-0800");
-  const parsed = new Date(normalized);
+  const match = cleaned.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s*(PDT|PST)$/i);
+  if (!match) return null;
+  const [, month, day, year, rawHour, minute, meridiem, zone] = match;
+  let hour = Number(rawHour);
+  if (meridiem.toUpperCase() === "PM" && hour < 12) hour += 12;
+  if (meridiem.toUpperCase() === "AM" && hour === 12) hour = 0;
+  const offsetHours = zone.toUpperCase() === "PDT" ? 7 : 8;
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), hour + offsetHours, Number(minute), 0));
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
