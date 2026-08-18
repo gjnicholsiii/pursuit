@@ -48,26 +48,27 @@ function mergeCookies(...sets: string[][]) {
   return [...map.values()];
 }
 
-function hiddenParams(html: string, formName?: string) {
+function formData(html: string, formName?: string) {
   const $ = load(html);
-  const form = formName ? $(`form[name='${formName}']`).first() : $("form").first();
+  const form = formName ? $(`form[name='${formName}'],form#${formName}`).first() : $("form").first();
   const params = new URLSearchParams();
   form.find("input[type='hidden']").each((_, input) => {
     const name = $(input).attr("name");
     if (name) params.append(name, $(input).attr("value") || "");
   });
-  return params;
+  return { params, action: form.attr("action") || "" };
 }
 
-async function post(params: URLSearchParams, cookies: string[], referer: string) {
-  return fetch(ENTRY, {
+async function post(action: string, params: URLSearchParams, cookies: string[], referer: string) {
+  const url = new URL(action || ENTRY, referer).toString();
+  return fetch(url, {
     method: "POST",
     headers: {
       accept: "text/html,application/xhtml+xml",
       "content-type": "application/x-www-form-urlencoded",
       "user-agent": UA,
       referer,
-      origin: ROOT,
+      origin: new URL(url).origin,
       ...(cookies.length ? { cookie: cookies.join("; ") } : {}),
     },
     body: params.toString(),
@@ -78,7 +79,8 @@ async function post(params: URLSearchParams, cookies: string[], referer: string)
 
 function documentRefs(html: string) {
   const match = html.match(/var\s+lsDocReference\s*=\s*\[([^\]]*)\]/i);
-  return match ? [...match[1].matchAll(/['"]([^'"]+)['"]/g)].map(item => text(item[1])).filter(Boolean) : [];
+  const refs = match ? [...match[1].matchAll(/['"]([^'"]*)['"]/g)].map(item => text(item[1])) : [];
+  return refs.filter(Boolean);
 }
 
 function nextDisabled(html: string) {
@@ -136,10 +138,10 @@ function parsePage(html: string) {
     const cells = $(row).children("td");
     if (cells.length < 4) return null;
     const firstLines = cells.eq(0).find("> table > tbody > tr, > table > tr").toArray().map(item => text($(item).text())).filter(Boolean);
-    const title = firstLines[0] || "";
+    const title = firstLines[0] || text(cells.eq(0).text());
     const solicitationLine = firstLines[1] || "";
     const agencyLines = cells.eq(1).find("> table > tbody > tr, > table > tr").toArray().map(item => text($(item).text())).filter(Boolean);
-    const agencyName = agencyLines[0] || "State of Alabama";
+    const agencyName = agencyLines[0] || text(cells.eq(1).text()) || "State of Alabama";
     const buyer = agencyLines[1] || null;
     const solicitationType = agencyLines.at(-1) || solicitationLine.split("-")[0]?.trim() || "Solicitation";
     const dateText = text(cells.eq(2).text());
@@ -193,56 +195,65 @@ async function establishOpenSession() {
   if (!first.ok) throw new Error(`Alabama VSS entry returned ${first.status}`);
   const firstHtml = await first.text();
   let cookies = cookiePairs(first);
-  const login = hiddenParams(firstHtml, "login_form");
-  login.set("guest_login", "Public Access");
-  const guest = await post(login, cookies, first.url || ENTRY);
+
+  const login = formData(firstHtml, "login_form");
+  login.params.set("guest_login", "Public Access");
+  const guest = await post(login.action, login.params, cookies, first.url || ENTRY);
   if (!guest.ok) throw new Error(`Alabama VSS guest login returned ${guest.status}`);
   const guestHtml = await guest.text();
   cookies = mergeCookies(cookies, cookiePairs(guest));
+
   const $guest = load(guestHtml);
   const base = $guest("base").attr("href") || guest.url;
   const startupSrc = $guest("frame[name='Startup']").attr("src") || "";
-  if (!startupSrc) throw new Error("Alabama VSS startup frame was not found");
+  if (!startupSrc) throw new Error("Alabama VSS startup frame was not found after Public Access login");
   const startupUrl = new URL(startupSrc, base).toString();
   const startup = await fetch(startupUrl, { headers: { accept: "text/html", "user-agent": UA, referer: guest.url, ...(cookies.length ? { cookie: cookies.join("; ") } : {}) }, cache: "no-store" });
   if (!startup.ok) throw new Error(`Alabama VSS startup returned ${startup.status}`);
   const startupHtml = await startup.text();
   cookies = mergeCookies(cookies, cookiePairs(startup));
-  const enter = hiddenParams(startupHtml, "StartupPage");
-  enter.set("frame_name", "Display");
-  enter.set("query_string", 'menu_action=menu_action&ams_action=13&ams_destination="pCombSolicitation_Search"&ams_whereclause=""&ams_framesetpagename=""&ams_framename="Display"&ams_applname="VSS"&&ams_orderbyclause=""&ams_pagecode="SOSRCH"');
-  const search = await post(enter, cookies, startup.url);
+
+  const enter = formData(startupHtml, "StartupPage");
+  enter.params.set("frame_name", "Display");
+  enter.params.set("query_string", 'menu_action=menu_action&ams_action=13&ams_destination="pCombSolicitation_Search"&ams_whereclause=""&ams_framesetpagename=""&ams_framename="Display"&ams_applname="VSS"&&ams_orderbyclause=""&ams_pagecode="SOSRCH"');
+  const search = await post(enter.action, enter.params, cookies, startup.url);
   if (!search.ok) throw new Error(`Alabama VSS solicitation search returned ${search.status}`);
   const searchHtml = await search.text();
   cookies = mergeCookies(cookies, cookiePairs(search));
-  const openParams = hiddenParams(searchHtml, "pCombSolicitation_Search");
-  openParams.set("frame_name", "Display");
-  openParams.set("query_string", "AMSBrowseOpenSolicit=AMSBrowseOpenSolicit");
-  const open = await post(openParams, cookies, search.url);
+
+  const openForm = formData(searchHtml, "pCombSolicitation_Search");
+  openForm.params.set("frame_name", "Display");
+  openForm.params.set("query_string", "AMSBrowseOpenSolicit=AMSBrowseOpenSolicit");
+  const open = await post(openForm.action, openForm.params, cookies, search.url);
   if (!open.ok) throw new Error(`Alabama VSS open solicitations returned ${open.status}`);
-  return { html: await open.text(), cookies: mergeCookies(cookies, cookiePairs(open)) };
+  return { html: await open.text(), cookies: mergeCookies(cookies, cookiePairs(open)), referer: open.url };
 }
 
 async function fetchCompleteSweep() {
   const session = await establishOpenSession();
   let html = session.html;
   let cookies = session.cookies;
+  let referer = session.referer;
   const records = new Map<string, SledOpportunityRecord>();
   let pagesFetched = 0;
   let complete = false;
+
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const pageRecords = parsePage(html);
     if (!pageRecords.length) throw new Error(`Alabama VSS page ${page} returned no actionable open solicitation rows`);
     for (const record of pageRecords) records.set(record.externalId, record);
     pagesFetched = page;
     if (nextDisabled(html)) { complete = true; break; }
-    const params = hiddenParams(html, "pCombSolicitation_Search");
-    params.set("T1SO_SRCH_QRYnextpage", "Next");
-    const next = await post(params, cookies, ENTRY);
+
+    const nextForm = formData(html, "pCombSolicitation_Search");
+    nextForm.params.set("T1SO_SRCH_QRYnextpage", "Next");
+    const next = await post(nextForm.action, nextForm.params, cookies, referer);
     if (!next.ok) throw new Error(`Alabama VSS page ${page + 1} returned ${next.status}`);
     html = await next.text();
     cookies = mergeCookies(cookies, cookiePairs(next));
+    referer = next.url;
   }
+
   if (!complete) throw new Error(`Alabama VSS did not reach the final page within ${MAX_PAGES} pages`);
   return { records: [...records.values()], pagesFetched, complete };
 }
