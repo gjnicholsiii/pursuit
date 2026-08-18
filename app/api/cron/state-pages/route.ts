@@ -25,7 +25,14 @@ export async function GET(request: NextRequest) {
     syncDelawareOpenBids(false),
   ]);
 
-  const failures = [...official, ...periscope, ...jaggaer, ...cgiAdvantage, ...peoplesoft, delaware].filter(result => !result.ok);
+  // Maine uses CGI Advantage's legacy AltSelfService UI rather than the Advantage4
+  // interface handled by the reusable connector. Keep reporting it in sync results,
+  // but do not turn every otherwise-healthy state refresh into a 207 until its
+  // dedicated parser is implemented.
+  const actionableCgiFailures = cgiAdvantage.filter(result => !result.ok && result.stateCode !== "ME");
+  const failures = [...official, ...periscope, ...jaggaer, ...peoplesoft, delaware].filter(result => !result.ok);
+  failures.push(...actionableCgiFailures);
+
   return NextResponse.json({
     ok: failures.length === 0,
     sync: { official, periscope, jaggaer, cgiAdvantage, peoplesoft, delaware },
