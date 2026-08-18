@@ -5,60 +5,59 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
 const URL = "https://app.az.gov/page.aspx/en/rfp/request_browse_public";
+const ORIGIN = "https://app.az.gov";
+
+function snippets(text: string, needles: string[]) {
+  const out: Record<string, string[]> = {};
+  for (const needle of needles) {
+    const hits: string[] = [];
+    let at = text.indexOf(needle);
+    while (at >= 0 && hits.length < 12) {
+      hits.push(text.slice(Math.max(0, at - 700), Math.min(text.length, at + needle.length + 1400)));
+      at = text.indexOf(needle, at + needle.length);
+    }
+    out[needle] = hits;
+  }
+  return out;
+}
 
 export async function GET() {
   try {
     const response = await fetch(URL, {
-      headers: {
-        accept: "text/html,application/xhtml+xml,*/*;q=0.8",
-        "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
-      },
+      headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" },
       redirect: "follow",
       cache: "no-store",
     });
     const html = await response.text();
     const $ = load(html);
-    const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().slice(0, 50);
-    const forms = $("form").map((_, el) => ({
-      id: $(el).attr("id") || null,
-      name: $(el).attr("name") || null,
-      action: $(el).attr("action") || null,
-      method: $(el).attr("method") || null,
-    })).get();
-    const tables = $("table").map((_, el) => ({
-      id: $(el).attr("id") || null,
-      cls: $(el).attr("class") || null,
-      rows: $(el).find("tr").length,
-      text: $(el).text().replace(/\s+/g, " ").trim().slice(0, 500),
-    })).get().slice(0, 30);
-    const links = $("a[href]").map((_, el) => ({
-      text: $(el).text().replace(/\s+/g, " ").trim().slice(0, 120),
-      href: $(el).attr("href") || null,
-    })).get().filter(x => /rfp|bpm|request|solic|bid|ajax|json|api/i.test(`${x.text} ${x.href}`)).slice(0, 100);
-    const inputs = $("input,select").map((_, el) => ({
-      tag: el.tagName,
-      id: $(el).attr("id") || null,
-      name: $(el).attr("name") || null,
-      type: $(el).attr("type") || null,
-      value: $(el).attr("value") || null,
-    })).get().filter(x => x.id || x.name).slice(0, 150);
-    const bodyText = $("body").text().replace(/\s+/g, " ").trim().slice(0, 12000);
-    const endpointMatches = [...new Set((html.match(/\/[A-Za-z0-9_.?=&%\/-]*(?:ajax|api|json|request|rfp|browse|search)[A-Za-z0-9_.?=&%\/-]*/gi) || []))].slice(0, 200);
+    const scriptSrcs = $("script[src]").map((_, el) => $(el).attr("src")).get().filter(Boolean) as string[];
+    const scriptResults = [];
+    for (const src of scriptSrcs.filter(src => /global_defer|global_script|rfp_public|rfp_script/i.test(src)).slice(0, 6)) {
+      const scriptUrl = new URL(src, ORIGIN).toString();
+      const r = await fetch(scriptUrl, { headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, cache: "no-store" });
+      const text = await r.text();
+      scriptResults.push({
+        src,
+        status: r.status,
+        length: text.length,
+        snippets: snippets(text, ["hdnCurrentPageIndex", "maxpageindex", "ajax.aspx", "PageIndex", "currentPage", "pageindex", "grid_grd"]),
+      });
+    }
+    const hidden: Record<string, string | null> = {};
+    $("input[type='hidden']").each((_, el) => {
+      const name = $(el).attr("name") || $(el).attr("id");
+      if (name && /grid|page|csrf|viewstate|event/i.test(name)) hidden[name] = $(el).attr("value") || null;
+    });
     return NextResponse.json({
       ok: response.ok,
       status: response.status,
-      finalUrl: response.url,
-      contentType: response.headers.get("content-type"),
       title: $("title").text().trim(),
-      scripts,
-      forms,
-      tables,
-      links,
-      inputs,
-      endpointMatches,
-      bodyText,
-      htmlStart: html.slice(0, 30000),
-    }, { status: response.ok ? 200 : 502 });
+      gridRows: $("#body_x_grid_grd tbody tr").length,
+      links: $("#body_x_grid_grd a[href]").map((_, el) => ({ text: $(el).text().replace(/\s+/g, " ").trim(), href: $(el).attr("href") })).get().slice(0, 25),
+      hidden,
+      formAction: $("#mainForm").attr("action") || null,
+      scriptResults,
+    });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
