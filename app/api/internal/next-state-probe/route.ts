@@ -38,9 +38,19 @@ function extractToken(html: string) {
   return stripped && stripped.length < 2000 ? stripped : "";
 }
 
-function safeJson(value: string | undefined) {
-  if (!value) return null;
-  try { return JSON.parse(value); } catch { return null; }
+function decodeLayout(value: string) {
+  const candidates = [value];
+  try { candidates.push(decodeURIComponent(value)); } catch {}
+  candidates.push(value.replace(/&quot;/g, '"').replace(/&#34;/g, '"').replace(/&amp;/g, "&"));
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try { return JSON.parse(candidate); } catch {}
+    try {
+      const decoded = Buffer.from(candidate, "base64").toString("utf8");
+      return JSON.parse(decoded);
+    } catch {}
+  }
+  return null;
 }
 
 export async function GET() {
@@ -72,7 +82,7 @@ export async function GET() {
   const grid = $(".entity-grid").first();
   const selectedView = grid.attr("data-selected-view") || "";
   const layoutsRaw = grid.attr("data-view-layouts") || "";
-  const layouts = safeJson(layoutsRaw);
+  const layouts = decodeLayout(layoutsRaw);
   const layoutList = Array.isArray(layouts) ? layouts : [];
   const active = layoutList.find((entry: any) => String(entry?.Id || "").toLowerCase() === selectedView.toLowerCase()) || layoutList[0] || null;
   const secure = active?.Base64SecureConfiguration || "";
@@ -107,31 +117,33 @@ export async function GET() {
       cache: "no-store",
       redirect: "follow",
     });
-    const text = await response.text();
+    const responseText = await response.text();
     let parsed: any = null;
-    try { parsed = JSON.parse(text); } catch {}
+    try { parsed = JSON.parse(responseText); } catch {}
     gridResult = {
       attempted: true,
       status: response.status,
       type: response.headers.get("content-type"),
-      length: text.length,
+      length: responseText.length,
       keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
       itemCount: parsed?.ItemCount ?? parsed?.itemCount ?? parsed?.TotalRecordCount ?? parsed?.totalRecordCount ?? null,
       pageNumber: parsed?.PageNumber ?? parsed?.pageNumber ?? null,
       pageCount: parsed?.PageCount ?? parsed?.pageCount ?? null,
-      sample: parsed ? JSON.stringify(parsed).slice(0, 6000) : text.slice(0, 3000),
+      sample: parsed ? JSON.stringify(parsed).slice(0, 6000) : responseText.slice(0, 3000),
     };
   }
 
   return NextResponse.json({
     pageStatus: page.status,
-    pageCookieNames: pageCookies.map(pair => pair.split("=", 1)[0]),
     tokenStatus: tokenResponse.status,
-    tokenCookieNames: allCookies.map(pair => pair.split("=", 1)[0]),
     tokenFound: Boolean(token),
     tokenLength: token.length,
     grid: {
       selectedView,
+      attrKeys: Object.keys((grid.get(0) as any)?.attribs || {}),
+      layoutsRawLength: layoutsRaw.length,
+      layoutsRawPrefix: layoutsRaw.slice(0, 2000),
+      layoutType: layouts === null ? "null" : Array.isArray(layouts) ? "array" : typeof layouts,
       layoutCount: layoutList.length,
       activeViewId: active?.Id || null,
       secureConfigFound: Boolean(secure),
