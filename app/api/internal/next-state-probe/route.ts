@@ -19,11 +19,9 @@ function cookiePairs(response: Response) {
 
 function mergeCookies(...sets: string[][]) {
   const map = new Map<string, string>();
-  for (const set of sets) {
-    for (const pair of set) {
-      const eq = pair.indexOf("=");
-      if (eq > 0) map.set(pair.slice(0, eq), pair);
-    }
+  for (const set of sets) for (const pair of set) {
+    const eq = pair.indexOf("=");
+    if (eq > 0) map.set(pair.slice(0, eq), pair);
   }
   return [...map.values()];
 }
@@ -41,48 +39,19 @@ function extractToken(html: string) {
 function decodeLayout(value: string) {
   const candidates = [value];
   try { candidates.push(decodeURIComponent(value)); } catch {}
-  candidates.push(value.replace(/&quot;/g, '"').replace(/&#34;/g, '"').replace(/&amp;/g, "&"));
   for (const candidate of candidates) {
     if (!candidate) continue;
     try { return JSON.parse(candidate); } catch {}
-    try {
-      const decoded = Buffer.from(candidate, "base64").toString("utf8");
-      return JSON.parse(decoded);
-    } catch {}
+    try { return JSON.parse(Buffer.from(candidate, "base64").toString("utf8")); } catch {}
   }
   return null;
 }
 
-async function postGrid(url: string, token: string, cookie: string, body: Record<string, unknown>) {
-  const response = await fetch(new URL(url, ROOT), {
-    method: "POST",
-    headers: {
-      accept: "application/json, text/javascript, */*; q=0.01",
-      "content-type": "application/json; charset=UTF-8",
-      "user-agent": USER_AGENT,
-      referer: PAGE,
-      "x-requested-with": "XMLHttpRequest",
-      __RequestVerificationToken: token,
-      ...(cookie ? { cookie } : {}),
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-    redirect: "follow",
-  });
-  const responseText = await response.text();
-  let parsed: any = null;
-  try { parsed = JSON.parse(responseText); } catch {}
-  const bodyText = load(responseText)("body").text().replace(/\s+/g, " ").trim();
+function conciseRecord(record: any) {
+  const attrs = Array.isArray(record?.Attributes) ? record.Attributes : [];
   return {
-    status: response.status,
-    type: response.headers.get("content-type"),
-    length: responseText.length,
-    keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
-    itemCount: parsed?.ItemCount ?? parsed?.itemCount ?? parsed?.TotalRecordCount ?? parsed?.totalRecordCount ?? null,
-    pageNumber: parsed?.PageNumber ?? parsed?.pageNumber ?? null,
-    pageCount: parsed?.PageCount ?? parsed?.pageCount ?? null,
-    bodyText: bodyText.slice(0, 1200),
-    sample: parsed ? JSON.stringify(parsed).slice(0, 3500) : "",
+    id: record?.Id || null,
+    fields: Object.fromEntries(attrs.map((attr: any) => [attr?.Name, attr?.DisplayValue ?? attr?.FormattedValue ?? attr?.Value ?? null])),
   };
 }
 
@@ -94,28 +63,24 @@ export async function GET() {
   });
   const pageHtml = await page.text();
   const pageCookies = cookiePairs(page);
-  const pageCookie = pageCookies.join("; ");
-
   const tokenResponse = await fetch(TOKEN, {
     headers: {
       accept: "text/html,*/*",
       "user-agent": USER_AGENT,
       referer: PAGE,
-      ...(pageCookie ? { cookie: pageCookie } : {}),
+      ...(pageCookies.length ? { cookie: pageCookies.join("; ") } : {}),
     },
     redirect: "follow",
     cache: "no-store",
   });
   const tokenHtml = await tokenResponse.text();
   const allCookies = mergeCookies(pageCookies, cookiePairs(tokenResponse));
-  const cookie = allCookies.join("; ");
   const token = extractToken(tokenHtml);
 
   const $ = load(pageHtml);
   const grid = $(".entity-grid").first();
   const selectedView = grid.attr("data-selected-view") || "";
-  const layoutsRaw = grid.attr("data-view-layouts") || "";
-  const layouts = decodeLayout(layoutsRaw);
+  const layouts = decodeLayout(grid.attr("data-view-layouts") || "");
   const layoutList = Array.isArray(layouts) ? layouts : [];
   const active = layoutList.find((entry: any) => String(entry?.Id || "").toLowerCase() === selectedView.toLowerCase()) || layoutList[0] || null;
   const secure = active?.Base64SecureConfiguration || "";
@@ -123,44 +88,68 @@ export async function GET() {
   const pageSize = Number(active?.Configuration?.PageSize || 10) || 10;
   const getUrl = grid.attr("data-get-url") || GRID;
 
-  const base = {
-    base64SecureConfiguration: secure,
-    sortExpression: "",
-    search: null,
-    page: 1,
-    pageSize,
-    pcfFilter: "",
-    timezoneOffset: 240,
-    entityName,
-  };
+  const filters = $(".entitylist-filter-option-group").toArray().map(group => {
+    const el = $(group);
+    const label = el.find(".entitylist-filter-option-group-label").first();
+    return {
+      label: label.text().replace(/\s+/g, " ").trim(),
+      filterId: label.attr("data-filter-id") || null,
+      html: $.html(group).slice(0, 12000),
+      inputs: el.find("input,select,option").toArray().map(input => ({
+        tag: input.tagName,
+        type: $(input).attr("type") || null,
+        name: $(input).attr("name") || null,
+        value: $(input).attr("value") || null,
+        checked: $(input).is(":checked"),
+        selected: $(input).is(":selected"),
+        text: $(input).text().replace(/\s+/g, " ").trim(),
+      })),
+    };
+  });
 
-  const variants: Array<[string, Record<string, unknown>]> = [
-    ["exact", base],
-    ["withNullEntityId", { ...base, entityId: null }],
-    ["zeroTimezone", { ...base, timezoneOffset: 0 }],
-    ["emptySearch", { ...base, search: "" }],
-    ["omitSearch", Object.fromEntries(Object.entries(base).filter(([key]) => key !== "search"))],
-    ["omitFilter", Object.fromEntries(Object.entries(base).filter(([key]) => key !== "pcfFilter"))],
-    ["pageMinusOne", { ...base, pageSize: -1 }],
-  ];
-
-  const tests: Record<string, unknown> = {};
+  let gridSummary: Record<string, unknown> = {};
   if (token && secure && entityName) {
-    for (const [name, body] of variants) tests[name] = await postGrid(getUrl, token, cookie, body);
+    const response = await fetch(new URL(getUrl, ROOT), {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/javascript, */*; q=0.01",
+        "content-type": "application/json; charset=UTF-8",
+        "user-agent": USER_AGENT,
+        referer: PAGE,
+        "x-requested-with": "XMLHttpRequest",
+        __RequestVerificationToken: token,
+        ...(allCookies.length ? { cookie: allCookies.join("; ") } : {}),
+      },
+      body: JSON.stringify({
+        base64SecureConfiguration: secure,
+        sortExpression: "",
+        search: null,
+        page: 1,
+        pageSize,
+        pcfFilter: "",
+        timezoneOffset: 240,
+        entityName,
+      }),
+      cache: "no-store",
+    });
+    const parsed = await response.json();
+    gridSummary = {
+      status: response.status,
+      itemCount: parsed?.ItemCount ?? null,
+      pageCount: parsed?.PageCount ?? null,
+      pageSize: parsed?.PageSize ?? null,
+      samples: (parsed?.Records || []).slice(0, 10).map(conciseRecord),
+      viewConfig: parsed?.ViewConfiguration ? {
+        keys: Object.keys(parsed.ViewConfiguration),
+        value: parsed.ViewConfiguration,
+      } : null,
+    };
   }
 
   return NextResponse.json({
-    pageStatus: page.status,
-    tokenStatus: tokenResponse.status,
     tokenFound: Boolean(token),
-    grid: {
-      selectedView,
-      layoutCount: layoutList.length,
-      pageSize,
-      secureConfigFound: Boolean(secure),
-      entityName: entityName || null,
-      getUrl,
-    },
-    tests,
+    grid: { selectedView, pageSize, entityName, getUrl },
+    filters,
+    gridSummary,
   });
 }
