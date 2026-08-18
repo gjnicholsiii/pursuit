@@ -19,6 +19,10 @@ interface StoredOpportunityRow {
   set_aside: string | null;
   source_url: string;
   raw_payload: Record<string, unknown> | null;
+  document_identified: number | string | null;
+  document_fetched: number | string | null;
+  document_analyzed: number | string | null;
+  document_missing: number | string | null;
 }
 
 export interface SledMarketCounts {
@@ -48,6 +52,45 @@ function solicitationNumberFor(row: StoredOpportunityRow) {
   }
   const value = rawProject(row).financialId;
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function documentState(row: StoredOpportunityRow) {
+  return {
+    identified: Number(row.document_identified || 0),
+    fetched: Number(row.document_fetched || 0),
+    analyzed: Number(row.document_analyzed || 0),
+    missing: Number(row.document_missing || 0),
+  };
+}
+
+function packageUncertainty(row: StoredOpportunityRow) {
+  const state = documentState(row);
+
+  if (state.identified === 0) {
+    return "No bid-package documents have been identified in Pursuit yet.";
+  }
+  if (state.missing > 0) {
+    return `${state.missing} of ${state.identified} identified package document${state.identified === 1 ? "" : "s"} ${state.missing === 1 ? "is" : "are"} marked missing.`;
+  }
+  if (state.fetched < state.identified) {
+    const waiting = state.identified - state.fetched;
+    return `${waiting} of ${state.identified} identified package document${state.identified === 1 ? "" : "s"} ${waiting === 1 ? "has" : "have"} not yet been fetched by Pursuit.`;
+  }
+  if (state.analyzed < state.fetched) {
+    const waiting = state.fetched - state.analyzed;
+    return `${waiting} of ${state.fetched} fetched package document${state.fetched === 1 ? "" : "s"} ${waiting === 1 ? "has" : "have"} not yet been analyzed.`;
+  }
+  return "All currently identified package documents have been analyzed; package completeness is not yet verified.";
+}
+
+function packageNextStep(row: StoredOpportunityRow) {
+  const state = documentState(row);
+
+  if (state.identified === 0) return "Open the original source and locate the bid package or solicitation documents.";
+  if (state.missing > 0) return "Resolve the missing package documents before making a Pursue / Watch / Walk decision.";
+  if (state.fetched < state.identified) return "Acquire the remaining identified package documents.";
+  if (state.analyzed < state.fetched) return "Analyze the remaining fetched package documents.";
+  return "Review verified requirements and confirm package completeness before deciding Pursue / Watch / Walk.";
 }
 
 function confidenceFor(row: StoredOpportunityRow) {
@@ -81,9 +124,8 @@ function mapFederal(row: StoredOpportunityRow): Opportunity {
   else uncertainty.push("Set-aside status not stated in the stored feed record");
   if (naicsCode) verified.push(`NAICS ${naicsCode}`);
   else uncertainty.push("NAICS code not present in the stored feed record");
-  if (resources.length) verified.push(`${resources.length} linked resource${resources.length === 1 ? "" : "s"} identified`);
-  else uncertainty.push("Bid-package attachments have not yet been acquired by Pursuit");
-  uncertainty.push("Full solicitation package has not yet been analyzed");
+  if (resources.length) verified.push(`${resources.length} linked resource${resources.length === 1 ? "" : "s"} identified by SAM.gov`);
+  uncertainty.push(packageUncertainty(row));
 
   return {
     id: row.id,
@@ -104,7 +146,7 @@ function mapFederal(row: StoredOpportunityRow): Opportunity {
     tags: ["Federal", row.solicitation_type || "Opportunity"],
     verified,
     uncertainty,
-    nextStep: "Open the source package. Pursuit will raise confidence only after the solicitation and attachments are acquired and analyzed.",
+    nextStep: packageNextStep(row),
   };
 }
 
@@ -118,8 +160,7 @@ function mapSled(row: StoredOpportunityRow): Opportunity {
   if (solicitationNumber) verified.push(`Solicitation ${solicitationNumber}`);
   if (project.preProposalDate) verified.push("Pre-proposal date is published in the source record");
   if (project.qaDeadline) verified.push("Question deadline is published in the source record");
-  uncertainty.push("Solicitation documents have not yet been acquired and analyzed by Pursuit");
-  uncertainty.push("Participation, bonding and certification requirements still require package review");
+  uncertainty.push(packageUncertainty(row));
 
   return {
     id: row.id,
@@ -138,9 +179,22 @@ function mapSled(row: StoredOpportunityRow): Opportunity {
     tags: ["SLED", row.agency_type, row.solicitation_type || "Opportunity"],
     verified,
     uncertainty,
-    nextStep: "Open the public solicitation. Pursuit will acquire the bid package next and raise confidence only from source evidence.",
+    nextStep: packageNextStep(row),
   };
 }
+
+const DOCUMENT_STATE_JOIN = `
+  left join (
+    select
+      opportunity_id,
+      count(*)::int as identified,
+      count(*) filter (where fetched_at is not null)::int as fetched,
+      count(*) filter (where extraction_status in ('complete', 'extracted', 'analyzed'))::int as analyzed,
+      count(*) filter (where is_missing)::int as missing
+    from opportunity_documents
+    group by opportunity_id
+  ) ds on ds.opportunity_id = o.id
+`;
 
 function selectSql(whereClause: string) {
   return `select
@@ -160,10 +214,15 @@ function selectSql(whereClause: string) {
        o.naics_codes,
        o.set_aside,
        o.source_url,
-       o.raw_payload
+       o.raw_payload,
+       coalesce(ds.identified, 0)::int as document_identified,
+       coalesce(ds.fetched, 0)::int as document_fetched,
+       coalesce(ds.analyzed, 0)::int as document_analyzed,
+       coalesce(ds.missing, 0)::int as document_missing
      from opportunities o
      join agencies a on a.id = o.agency_id
      join sources s on s.id = o.source_id
+     ${DOCUMENT_STATE_JOIN}
      where ${whereClause}
      order by o.due_at asc nulls last, o.last_seen_at desc
      limit $1`;
@@ -215,10 +274,15 @@ export async function getStoredOpportunityById(id: string): Promise<Opportunity 
        o.naics_codes,
        o.set_aside,
        o.source_url,
-       o.raw_payload
+       o.raw_payload,
+       coalesce(ds.identified, 0)::int as document_identified,
+       coalesce(ds.fetched, 0)::int as document_fetched,
+       coalesce(ds.analyzed, 0)::int as document_analyzed,
+       coalesce(ds.missing, 0)::int as document_missing
      from opportunities o
      join agencies a on a.id = o.agency_id
      join sources s on s.id = o.source_id
+     ${DOCUMENT_STATE_JOIN}
      where o.id = $1
      limit 1`,
     [id],
