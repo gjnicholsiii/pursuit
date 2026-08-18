@@ -10,6 +10,7 @@ interface PendingDocumentRow {
   opportunity_id: string;
   source_url: string;
   filename: string;
+  source_family: string;
 }
 
 function filenameFromDisposition(value: string | null) {
@@ -33,20 +34,20 @@ export async function GET() {
 
   const sql = getSql();
   const rows = await sql.query(
-    `select d.id, d.opportunity_id, d.source_url, d.filename
+    `select d.id, d.opportunity_id, d.source_url, d.filename, s.source_family
      from opportunity_documents d
      join opportunities o on o.id = d.opportunity_id
      join sources s on s.id = o.source_id
-     where s.adapter_key = 'sam_gov'
-       and d.extraction_status = 'pending'
+     where d.extraction_status = 'pending'
        and d.is_missing = false
        and d.storage_key is null
-     order by o.due_at asc nulls last, d.id
+     order by case when s.source_family='sled' then 0 else 1 end,
+              o.due_at asc nulls last, d.id
      limit 1`,
   ) as PendingDocumentRow[];
 
   const document = rows[0];
-  if (!document) return NextResponse.json({ ok: true, message: "No pending SAM documents remain" });
+  if (!document) return NextResponse.json({ ok: true, message: "No pending documents remain" });
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
@@ -62,17 +63,29 @@ export async function GET() {
     if (!response.ok) {
       await sql.query(
         `update opportunity_documents
-         set is_missing = true, extraction_status = 'fetch_failed'
+         set extraction_status = 'fetch_failed'
          where id = $1`,
         [document.id],
       );
       return NextResponse.json({ ok: false, status: response.status, documentId: document.id }, { status: 502 });
     }
 
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (contentLength > 25 * 1024 * 1024) {
+      await sql.query(`update opportunity_documents set extraction_status='fetch_too_large' where id=$1`, [document.id]);
+      return NextResponse.json({ ok:false, documentId:document.id, error:"Document exceeds 25 MB acquisition limit" }, { status:413 });
+    }
+
     const bytes = await response.arrayBuffer();
+    if (bytes.byteLength > 25 * 1024 * 1024) {
+      await sql.query(`update opportunity_documents set extraction_status='fetch_too_large' where id=$1`, [document.id]);
+      return NextResponse.json({ ok:false, documentId:document.id, error:"Document exceeds 25 MB acquisition limit" }, { status:413 });
+    }
+
     const contentType = response.headers.get("content-type") || "application/octet-stream";
     const filename = safeFilename(filenameFromDisposition(response.headers.get("content-disposition")) || document.filename);
-    const pathname = `sam/${document.opportunity_id}/${document.id}/${filename}`;
+    const family = document.source_family === "sled" ? "sled" : "sam";
+    const pathname = `${family}/${document.opportunity_id}/${document.id}/${filename}`;
 
     const blob = await put(pathname, bytes, {
       access: "private",
@@ -95,6 +108,7 @@ export async function GET() {
       ok: true,
       documentId: document.id,
       opportunityId: document.opportunity_id,
+      sourceFamily: document.source_family,
       filename,
       bytes: bytes.byteLength,
       contentType,
@@ -102,6 +116,7 @@ export async function GET() {
       extractionStatus: "fetched",
     });
   } catch (error) {
+    await sql.query(`update opportunity_documents set extraction_status='fetch_failed' where id=$1`, [document.id]);
     return NextResponse.json({
       ok: false,
       documentId: document.id,
