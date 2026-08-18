@@ -21,6 +21,14 @@ interface StoredOpportunityRow {
   raw_payload: Record<string, unknown> | null;
 }
 
+export interface SledMarketCounts {
+  k12: number;
+  higherEd: number;
+  state: number;
+  local: number;
+  authorities: number;
+}
+
 function displayDate(value: string | null) {
   if (!value) return "Not stated";
   const date = new Date(value);
@@ -221,11 +229,12 @@ export async function getStoredOpportunityById(id: string): Promise<Opportunity 
   return row.adapter_key === "sam_gov" ? mapFederal(row) : mapSled(row);
 }
 
-async function countWhere(filter: string) {
+async function countWhere(filter: string, joinAgencies = false) {
   const sql = getSql();
   const rows = await sql.query(
     `select count(*)::int as count
      from opportunities o
+     ${joinAgencies ? "join agencies a on a.id = o.agency_id" : ""}
      join sources s on s.id = o.source_id
      where ${filter}`,
   ) as Array<{ count: number }>;
@@ -238,4 +247,29 @@ export async function getStoredFederalCount(): Promise<number> {
 
 export async function getStoredSledCount(): Promise<number> {
   return countWhere(CURRENT_SLED_FILTER);
+}
+
+export async function getStoredSledMarketCounts(): Promise<SledMarketCounts> {
+  const sql = getSql();
+  const rows = await sql.query(
+    `select
+       count(*) filter (where a.agency_type = 'k12')::int as k12,
+       count(*) filter (where a.agency_type = 'higher_ed')::int as higher_ed,
+       count(*) filter (where a.agency_type = 'state_agency')::int as state,
+       count(*) filter (where a.agency_type in ('municipal', 'municipality', 'county', 'local_agency'))::int as local,
+       count(*) filter (where a.agency_type = 'authority')::int as authorities
+     from opportunities o
+     join agencies a on a.id = o.agency_id
+     join sources s on s.id = o.source_id
+     where ${CURRENT_SLED_FILTER}`,
+  ) as Array<{ k12: number; higher_ed: number; state: number; local: number; authorities: number }>;
+
+  const row = rows[0];
+  return {
+    k12: row?.k12 || 0,
+    higherEd: row?.higher_ed || 0,
+    state: row?.state || 0,
+    local: row?.local || 0,
+    authorities: row?.authorities || 0,
+  };
 }
