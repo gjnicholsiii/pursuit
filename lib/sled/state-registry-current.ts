@@ -53,6 +53,10 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "Kansas eSupplier public bid events are live through a PeopleSoft connector with explicit cookie-session handling. Pursuit verified and stored the current public event set end-to-end.",
   },
+  KY: {
+    status: "live",
+    notes: "Reusable CGI Advantage connector verified end-to-end against Kentucky Vendor Self Service with a complete public solicitation sweep.",
+  },
   LA: {
     connectorFamily: "direct_state_board",
     platformLabel: "Louisiana LaPAC public network (SAP/LaGov downstream)",
@@ -70,6 +74,10 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
   MA: {
     status: "live",
     notes: "Reusable Periscope connector verified end-to-end with complete pagination across state, higher-ed, municipal, and K-12 buyers.",
+  },
+  MI: {
+    status: "live",
+    notes: "Reusable CGI Advantage connector verified end-to-end against Michigan SIGMA Vendor Self Service with a complete public solicitation sweep.",
   },
   MN: {
     status: "partial",
