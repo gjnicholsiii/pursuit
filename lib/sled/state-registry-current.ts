@@ -72,7 +72,7 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     notes: "Pursuit verified the complete set of non-empty LaPAC department bid boards, including public documents and addenda, and closes opportunities that disappear from the live board.",
   },
   ME: {
-    connectorFamily: "cgi_advantage_legacy",
+    connectorFamily: "cgi_advantage",
     platformLabel: "CGI Advantage Vendor Self Service (AltSelfService)",
     officialUrl: "https://mevss.hostams.com/PRDVSS1X1/AltSelfService",
     status: "live",
