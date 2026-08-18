@@ -25,7 +25,7 @@ function displayDate(value: string | null) {
   if (!value) return "Not stated";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not stated";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
 function rawProject(row: StoredOpportunityRow) {
@@ -185,6 +185,40 @@ export async function getStoredSledOpportunities(limit = 50): Promise<Opportunit
   const safeLimit = Math.max(1, Math.min(Math.floor(limit), 500));
   const rows = await sql.query(selectSql(CURRENT_SLED_FILTER), [safeLimit]) as StoredOpportunityRow[];
   return rows.map(mapSled);
+}
+
+export async function getStoredOpportunityById(id: string): Promise<Opportunity | null> {
+  const sql = getSql();
+  const rows = await sql.query(
+    `select
+       o.id,
+       a.canonical_name as agency,
+       a.agency_type,
+       s.adapter_key,
+       s.source_name,
+       o.title,
+       o.description,
+       o.solicitation_type,
+       o.status,
+       o.due_at,
+       o.estimated_value,
+       o.state_code,
+       o.city,
+       o.naics_codes,
+       o.set_aside,
+       o.source_url,
+       o.raw_payload
+     from opportunities o
+     join agencies a on a.id = o.agency_id
+     join sources s on s.id = o.source_id
+     where o.id = $1
+     limit 1`,
+    [id],
+  ) as StoredOpportunityRow[];
+
+  const row = rows[0];
+  if (!row) return null;
+  return row.adapter_key === "sam_gov" ? mapFederal(row) : mapSled(row);
 }
 
 async function countWhere(filter: string) {
