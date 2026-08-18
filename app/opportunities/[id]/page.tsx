@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 
 const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 
+const categoryLabel = (category: string) => category.replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
+
 export default async function OpportunityBriefPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [opportunity, documents] = await Promise.all([
@@ -63,6 +65,30 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
               </div>
             </article>
           </section>
+
+          {documents.requirements.length > 0 && (
+            <section className="brief-panel requirement-panel">
+              <div className="brief-panel-heading"><ShieldCheck size={18} /><div><span>VERIFIED REQUIREMENTS</span><h2>Mandatory items found in the package</h2></div></div>
+              <div className="requirement-list">
+                {documents.requirements.map(requirement => (
+                  <article className="requirement-item" key={requirement.id}>
+                    <div className="requirement-meta">
+                      <span>{categoryLabel(requirement.category)}</span>
+                      <small>{requirement.line ? `Source line ${requirement.line}` : "Source located"}</small>
+                    </div>
+                    <p>{requirement.requirementText}</p>
+                    <div className="requirement-source">
+                      <div>
+                        <strong>{requirement.filename}</strong>
+                        <span>{requirement.confidence == null ? "Evidence-backed" : `${Math.round(requirement.confidence * 100)}% extraction confidence`}</span>
+                      </div>
+                      <a href={requirement.sourceUrl} target="_blank" rel="noreferrer">Open source document <ArrowUpRight size={14} /></a>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="brief-panel package-panel">
             <div className="brief-panel-heading"><Files size={18} /><div><span>BID PACKAGE</span><h2>Document acquisition status</h2></div></div>
