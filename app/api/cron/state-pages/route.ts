@@ -6,6 +6,7 @@ import { syncCgiAdvantageFullSweeps } from "@/lib/sled/cgi-advantage";
 import { syncPublicPeopleSoft } from "@/lib/sled/peoplesoft";
 import { syncKansasPeopleSoft } from "@/lib/sled/kansas";
 import { syncDelawareOpenBids } from "@/lib/sled/delaware";
+import { syncMaineLegacyVss } from "@/lib/sled/maine";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const [official, periscope, jaggaer, cgiAdvantage, peoplesoft, kansas, delaware] = await Promise.all([
+  const [official, periscope, jaggaer, cgiAdvantage, peoplesoft, kansas, delaware, maine] = await Promise.all([
     syncOfficialStatePages(false),
     syncPeriscopeFullSweeps(),
     syncJaggaerFullSweeps(),
@@ -25,12 +26,11 @@ export async function GET(request: NextRequest) {
     syncPublicPeopleSoft(),
     syncKansasPeopleSoft(),
     syncDelawareOpenBids(false),
+    syncMaineLegacyVss(),
   ]);
 
-  // Maine uses CGI Advantage's legacy AltSelfService UI rather than the Advantage4
-  // interface handled by the reusable connector. Keep reporting it in sync results,
-  // but do not turn every otherwise-healthy state refresh into a 207 until its
-  // dedicated parser is implemented.
+  // The reusable CGI connector still probes Maine's incompatible legacy endpoint.
+  // Maine's authoritative result is the dedicated AltSelfService connector below.
   const failures = [
     ...official,
     ...periscope,
@@ -39,11 +39,12 @@ export async function GET(request: NextRequest) {
     ...peoplesoft,
     kansas,
     delaware,
+    maine,
   ].filter(result => !result.ok);
 
   return NextResponse.json({
     ok: failures.length === 0,
-    sync: { official, periscope, jaggaer, cgiAdvantage, peoplesoft, kansas, delaware },
+    sync: { official, periscope, jaggaer, cgiAdvantage, peoplesoft, kansas, delaware, maine },
     failures,
   }, { status: failures.length === 0 ? 200 : 207 });
 }
