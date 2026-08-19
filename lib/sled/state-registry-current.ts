@@ -12,6 +12,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "Pursuit reproduces Alabama STAARS Public Access through the session-specific CGI Advantage AltSelfService workflow, paginates the complete Open solicitation board, and closes records that leave the live set. Production validation reconciled 14 current opportunities across 2 pages.",
   },
+  AZ: {
+    connectorFamily: "ivalua",
+    platformLabel: "Arizona Procurement Portal (APP) / Ivalua",
+    officialUrl: "https://app.az.gov/page.aspx/en/rfp/request_browse_public",
+    status: "live",
+    notes: "Pursuit applies APP's public Open for Bidding filter, paginates the complete filtered Ivalua grid through its anonymous AJAX control, and closes records that leave the verified source-open set. Production validation reconciled all 39 source-open rows across 3 pages; 7 past-due rows still marked Open for Bidding by APP are excluded, leaving 32 actionable opportunities.",
+  },
   AR: {
     connectorFamily: "sap_ariba",
     platformLabel: "SAP Ariba (current); Periscope ARBuy (legacy solicitations)",
