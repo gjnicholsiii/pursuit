@@ -4,7 +4,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { getSql } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 interface FetchedDocumentRow {
   id: string;
@@ -13,74 +13,71 @@ interface FetchedDocumentRow {
   storage_key: string;
 }
 
-export async function GET() {
+async function extractOne(document: FetchedDocumentRow) {
   const sql = getSql();
-  const rows = await sql.query(
-    `select d.id, d.opportunity_id, d.filename, d.storage_key
-     from opportunity_documents d
-     join opportunities o on o.id = d.opportunity_id
-     join sources s on s.id = o.source_id
-     where d.extraction_status = 'fetched'
-       and d.storage_key is not null
-       and lower(d.filename) like '%.pdf'
-     order by case when s.source_family='sled' then 0 else 1 end,
-              d.fetched_at asc nulls last, d.id
-     limit 1`,
-  ) as FetchedDocumentRow[];
-
-  const document = rows[0];
-  if (!document) {
-    return NextResponse.json({ ok: true, message: "No fetched PDFs are waiting for text extraction" });
-  }
-
   try {
-    const blob = await get(document.storage_key, { access: "private" });
+    const blob = await get(document.storage_key, { access:"private" });
     if (!blob || blob.statusCode !== 200 || !blob.stream) {
-      return NextResponse.json(
-        { ok: false, documentId: document.id, error: "Stored PDF could not be read from private Blob storage" },
-        { status: 502 },
-      );
+      await sql.query(`update opportunity_documents set extraction_status='text_fetch_failed' where id=$1::uuid`, [document.id]);
+      return { ok:false, documentId:document.id, reason:"stored_pdf_unavailable" };
     }
 
     const bytes = await new Response(blob.stream).arrayBuffer();
     const pdf = await getDocumentProxy(new Uint8Array(bytes));
-    const extracted = await extractText(pdf, { mergePages: true });
+    const extracted = await extractText(pdf, { mergePages:true });
     const text = extracted.text;
 
     if (!text.trim()) {
       await sql.query(`update opportunity_documents set extraction_status='text_empty' where id=$1::uuid`, [document.id]);
-      return NextResponse.json({ ok:false, documentId:document.id, error:"PDF contained no extractable text" }, { status:422 });
+      return { ok:false, documentId:document.id, reason:"text_empty" };
     }
 
     const textPath = `extracted/${document.opportunity_id}/${document.id}.txt`;
     const textBlob = await put(textPath, text, {
-      access: "private",
-      contentType: "text/plain; charset=utf-8",
-      addRandomSuffix: false,
-      allowOverwrite: true,
+      access:"private",
+      contentType:"text/plain; charset=utf-8",
+      addRandomSuffix:false,
+      allowOverwrite:true,
     });
 
     await sql.query(
-      `insert into extracted_facts (opportunity_id, document_id, fact_type, normalized_value, source_text, evidence_locator, extraction_confidence)
-       values ($1::uuid, $2::uuid, 'document_text_extract',
-         jsonb_build_object('text_storage_key',$3::text,'page_count',$4::int,'character_count',$5::int),
-         null, jsonb_build_object('document_id',$2::text), 1.0)`,
-      [document.opportunity_id, document.id, textBlob.pathname, extracted.totalPages, text.length],
+      `insert into extracted_facts (opportunity_id,document_id,fact_type,normalized_value,source_text,evidence_locator,extraction_confidence)
+       select $1::uuid,$2::uuid,'document_text_extract',
+              jsonb_build_object('text_storage_key',$3::text,'page_count',$4::int,'character_count',$5::int),
+              null,jsonb_build_object('document_id',$2::text),1.0
+       where not exists (
+         select 1 from extracted_facts where document_id=$2::uuid and fact_type='document_text_extract'
+       )`,
+      [document.opportunity_id,document.id,textBlob.pathname,extracted.totalPages,text.length],
     );
 
     await sql.query(`update opportunity_documents set extraction_status='text_extracted' where id=$1::uuid`, [document.id]);
-
-    return NextResponse.json({
-      ok:true,
-      documentId:document.id,
-      opportunityId:document.opportunity_id,
-      filename:document.filename,
-      pages:extracted.totalPages,
-      characters:text.length,
-      textStorageKey:textBlob.pathname,
-      extractionStatus:"text_extracted",
-    });
+    return { ok:true, documentId:document.id, opportunityId:document.opportunity_id, filename:document.filename, pages:extracted.totalPages, characters:text.length };
   } catch (error) {
-    return NextResponse.json({ ok:false, documentId:document.id, error:error instanceof Error ? error.message : "PDF text extraction failed" }, { status:502 });
+    await sql.query(`update opportunity_documents set extraction_status='text_failed' where id=$1::uuid`, [document.id]);
+    return { ok:false, documentId:document.id, reason:error instanceof Error ? error.message : "text_extraction_failed" };
   }
+}
+
+export async function GET() {
+  const sql = getSql();
+  const rows = await sql.query(
+    `select d.id,d.opportunity_id,d.filename,d.storage_key
+     from opportunity_documents d
+     join opportunities o on o.id=d.opportunity_id
+     join sources s on s.id=o.source_id
+     where d.extraction_status='fetched'
+       and d.storage_key is not null
+       and lower(d.filename) like '%.pdf'
+     order by case when d.document_type='ionwave_attachment' then 0 when s.source_family='sled' then 1 else 2 end,
+              d.fetched_at asc nulls last,d.id
+     limit 5`,
+  ) as FetchedDocumentRow[];
+
+  if (!rows.length) return NextResponse.json({ ok:true, processed:0, message:"No fetched PDFs are waiting for text extraction" });
+
+  const results=[] as Array<Record<string,unknown>>;
+  for (const document of rows) results.push(await extractOne(document));
+  const extracted=results.filter(result=>result.ok).length;
+  return NextResponse.json({ ok:true, processed:results.length, extracted, failed:results.length-extracted, results });
 }
