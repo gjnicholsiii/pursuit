@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bell, ChevronDown, Search, SlidersHorizontal } from "lucide-react";
+import { Search } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
@@ -29,11 +29,7 @@ export default async function Home() {
 
   try {
     const [federalItems, sledItems, federalTotal, sledTotal, marketCounts] = await Promise.all([
-      getStoredFederalOpportunities(6),
-      getStoredSledOpportunities(6),
-      getStoredFederalCount(),
-      getStoredSledCount(),
-      getStoredSledMarketCounts(),
+      getStoredFederalOpportunities(6), getStoredSledOpportunities(6), getStoredFederalCount(), getStoredSledCount(), getStoredSledMarketCounts(),
     ]);
     federalOpportunities = federalItems;
     sledOpportunities = sledItems;
@@ -51,7 +47,6 @@ export default async function Home() {
   const liveOpportunities = [...federalOpportunities, ...sledOpportunities];
   const isLive = liveOpportunities.length > 0;
   const opportunities = isLive ? liveOpportunities : demoOpportunities;
-  const averageConfidence = Math.round(opportunities.reduce((sum, item) => sum + item.confidence, 0) / Math.max(opportunities.length, 1));
   const totalCount = federalCount + sledCount;
 
   return (
@@ -60,17 +55,11 @@ export default async function Home() {
       <section className="workspace">
         <header className="topbar">
           <Link href="/opportunities" className="searchbox"><Search size={17} /><span>Search federal, state, local, K-12, higher ed...</span><kbd>⌘ K</kbd></Link>
-          <div className="top-actions"><button className="icon-button"><Bell size={18} /></button><button className="company-button">Set up company <ChevronDown size={15} /></button></div>
         </header>
 
         <div className="content">
           <div className="hero-row">
-            <div>
-              <span className="eyebrow">REVENUE TODAY</span>
-              <h1>WIN MORE / WORK LESS</h1>
-              <p>Federal, state, local, K-12 and higher education opportunities in one live inventory.</p>
-            </div>
-            <button className="secondary-button"><SlidersHorizontal size={16} />Selling profile</button>
+            <div><span className="eyebrow">REVENUE TODAY</span><h1>WIN MORE / WORK LESS</h1><p>Federal, state, local, K-12 and higher education opportunities in one live inventory.</p></div>
           </div>
 
           <div className="metrics">
@@ -81,11 +70,7 @@ export default async function Home() {
           </div>
 
           <section className="readiness-panel">
-            <div className="readiness-copy">
-              <span className="eyebrow">MARKET COVERAGE</span>
-              <h2>Government is bigger than federal.</h2>
-              <p>Pursuit is already tracking the public buyers SMBs actually sell to: state agencies, cities, counties, school districts, colleges, universities and authorities.</p>
-            </div>
+            <div className="readiness-copy"><span className="eyebrow">MARKET COVERAGE</span><h2>Government is bigger than federal.</h2><p>Pursuit tracks state agencies, cities, counties, school districts, colleges, universities and authorities alongside federal opportunities.</p></div>
             <div className="readiness-grid">
               <div className="readiness-item"><div><strong>K-12</strong><small>{k12Count.toLocaleString()} live opportunities</small></div></div>
               <div className="readiness-item"><div><strong>Higher Education</strong><small>{higherEdCount.toLocaleString()} live opportunities</small></div></div>
@@ -96,37 +81,14 @@ export default async function Home() {
             </div>
           </section>
 
-          {dataError && (
-            <section className="readiness-panel">
-              <div className="readiness-copy">
-                <span className="eyebrow">LIVE DATA</span>
-                <h2>Opportunity inventory connection needs attention.</h2>
-                <p>{dataError}. Pursuit is showing clearly marked preview records while the connection is checked.</p>
-              </div>
-            </section>
-          )}
-
-          <section className="readiness-panel">
-            <div className="readiness-copy">
-              <span className="eyebrow">READY FOR GOVERNMENT</span>
-              <h2>Tell Pursuit what you sell.</h2>
-              <p>Add territories, NAICS codes, registrations, certifications and contract vehicles. Pursuit will compare your profile against the live inventory and show READY / REVIEW / BLOCKED with source evidence.</p>
-            </div>
-            <button className="secondary-button"><SlidersHorizontal size={16} />Build selling profile</button>
-          </section>
+          {dataError && <section className="readiness-panel"><div className="readiness-copy"><span className="eyebrow">LIVE DATA</span><h2>Opportunity inventory connection needs attention.</h2><p>{dataError}. Pursuit is showing clearly marked preview records while the connection is checked.</p></div></section>}
 
           <section className="section-block">
-            <div className="section-heading"><div><span>{isLive ? "LIVE INVENTORY" : "FIVE-MINUTE BRIEF"}</span><h2>{isLive ? "Federal + SLED opportunities" : "Preview opportunities"}</h2></div><Link href="/opportunities" className="section-link">View all opportunities</Link></div>
+            <div className="section-heading"><div><span>{isLive ? "LIVE INVENTORY" : "PREVIEW"}</span><h2>{isLive ? "Federal + SLED opportunities" : "Preview opportunities"}</h2></div><Link href="/opportunities" className="section-link">View all opportunities</Link></div>
             <div className="opportunity-list">{opportunities.map(o => <OpportunityCard key={o.id} opportunity={o} />)}</div>
           </section>
 
-          <section className="path-panel section-block">
-            <div className="path-heading">
-              <span className="eyebrow">PATH TO AWARD</span>
-              <h2>Choose an opportunity.</h2>
-              <p>Pursuit will show how the agency is buying, the requirements that matter, source evidence, blockers and the next action.</p>
-            </div>
-          </section>
+          <section className="path-panel section-block"><div className="path-heading"><span className="eyebrow">PATH TO AWARD</span><h2>Choose an opportunity.</h2><p>Pursuit shows how the agency is buying, the requirements found in source documents, source evidence and the next action.</p></div></section>
         </div>
       </section>
     </main>
