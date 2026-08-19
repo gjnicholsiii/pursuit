@@ -1,14 +1,9 @@
 import Link from "next/link";
-import { Activity, BadgeCheck, Building2, FileSearch, Landmark, Route, Search, Settings2, Target } from "lucide-react";
+import { Activity, Target, Search } from "lucide-react";
 
 const items = [
   { label: "Revenue Today", icon: Activity, href: "/" },
   { label: "Opportunities", icon: Target, href: "/opportunities" },
-  { label: "Ready for Government", icon: BadgeCheck, href: "#" },
-  { label: "Path to Award", icon: Route, href: "#" },
-  { label: "Pipeline", icon: FileSearch, href: "#" },
-  { label: "Agencies", icon: Building2, href: "#" },
-  { label: "Contracts", icon: Landmark, href: "#" },
   { label: "Search", icon: Search, href: "/opportunities" },
 ];
 
@@ -35,7 +30,6 @@ export function Sidebar({ active = "Revenue Today" }: { active?: string }) {
           <div className="source-health-top"><span>Data sources</span><strong>Federal + SLED live</strong></div>
           <small>SAM.gov · state · local · K-12 · higher ed</small>
         </div>
-        <button className="nav-item"><Settings2 size={17} /><span>Selling profile</span></button>
       </div>
     </aside>
   );
