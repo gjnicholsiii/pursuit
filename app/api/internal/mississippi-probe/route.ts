@@ -3,17 +3,27 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
-const ORIGIN = "https://www.ms.gov";
-const TARGET = `${ORIGIN}/dfa/contract_bid_search/Bid?autoloadGrid=true`;
-const BUNDLE = `${ORIGIN}/dfa/contract_bid_search/bundles/scripts/bid?v=6cRAHBhjQ8myKPsbarDMb-VP23hS0BCpTVPMnM2gg5o1`;
+const ENDPOINT = "https://www.ms.gov/dfa/contract_bid_search/Bid/BidData?AppId=1&Status=Open";
 
 export async function GET() {
   try {
-    const [pageRes,bundleRes] = await Promise.all([
-      fetch(TARGET,{headers:{accept:"text/html,application/xhtml+xml,*/*;q=0.8","user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0"},cache:"no-store"}),
-      fetch(BUNDLE,{headers:{accept:"application/javascript,*/*;q=0.8","user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0"},cache:"no-store"}),
-    ]);
-    const bundle=await bundleRes.text();
-    return NextResponse.json({pageStatus:pageRes.status,bundleStatus:bundleRes.status,bundleLength:bundle.length,bundle});
-  } catch (e) { return NextResponse.json({error:e instanceof Error?e.message:String(e)},{status:500}); }
+    const form = new URLSearchParams();
+    form.set("sEcho","1");
+    form.set("iDisplayStart","0");
+    form.set("iDisplayLength","9999");
+    form.set("iColumns","9");
+    form.set("sSearch","");
+    for (let i=0;i<9;i++) {
+      form.set(`mDataProp_${i}`, ["Agency","BidNumber","ObjectID","VerNumber","BidStatus","AdvertiseDate","SubmissionDate","OpeningDate","BidID"][i]);
+      form.set(`bSearchable_${i}`,"true");
+      form.set(`bSortable_${i}`,i===8?"false":"true");
+      form.set(`sSearch_${i}`,"");
+      form.set(`bRegex_${i}`,"false");
+    }
+    form.set("iSortingCols","0");
+    const r = await fetch(ENDPOINT,{method:"POST",headers:{accept:"application/json,text/javascript,*/*;q=0.01","content-type":"application/x-www-form-urlencoded; charset=UTF-8","x-requested-with":"XMLHttpRequest","user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0","referer":"https://www.ms.gov/dfa/contract_bid_search/Bid?autoloadGrid=true"},body:form.toString(),cache:"no-store"});
+    const text=await r.text();
+    let parsed:any=null; try{parsed=JSON.parse(text);}catch{}
+    return NextResponse.json({status:r.status,contentType:r.headers.get("content-type"),length:text.length,parsed,sample:parsed?undefined:text.slice(0,5000)});
+  } catch(e){return NextResponse.json({error:e instanceof Error?e.message:String(e)},{status:500});}
 }
