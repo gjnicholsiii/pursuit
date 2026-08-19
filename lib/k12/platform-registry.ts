@@ -146,4 +146,22 @@ export const K12_PLATFORM_REGISTRY: K12PlatformRecord[] = [
     status: "classified",
     notes: "LAUSD states that procurement activities have migrated to SAP Ariba while its Procurement Services Division maintains a consolidated solicitation website for purchasing and contracting opportunities. Treat Ariba and the district solicitation site as complementary sources until a production connector is verified.",
   },
+  {
+    stateCode: "NV",
+    districtName: "Clark County School District",
+    procurementPlatform: "Bonfire + DemandStar",
+    procurementUrl: "https://www.ccsd.net/resources/purchasing-and-warehousing",
+    scope: "competitive goods, commodities, and non-construction service solicitations",
+    status: "classified",
+    notes: "CCSD states competitive opportunity downloads and submissions are available through its Bonfire portal, while DemandStar maintains the bidders list and automatic bid notifications. Bonfire is the primary connector target; DemandStar is a complementary notification source.",
+  },
+  {
+    stateCode: "IL",
+    districtName: "Chicago Public Schools",
+    procurementPlatform: "CPS Contracting Opportunities + CPS Supplier Portal",
+    procurementUrl: "https://www.cps.edu/procurement/contracting-opportunities/",
+    scope: "public bids, RFPs, RFQs, prequalified construction opportunities, sourcing plan, and vendor responses",
+    status: "classified",
+    notes: "CPS publishes current contracting opportunities on its own procurement inventory. The CPS Supplier Portal supports active supplier purchase orders, invoice/payment status, and supplier administration; it is not treated as the public solicitation source.",
+  },
 ];
