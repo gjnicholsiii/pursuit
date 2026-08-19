@@ -6,6 +6,14 @@ function hashPayload(payload: Record<string, unknown>) {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+function sourceIdForAdapter(adapterKey: string) {
+  const hex = createHash("sha256").update(`pursuit:sled:${adapterKey}`).digest("hex").slice(0, 32).split("");
+  hex[12] = "5";
+  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  const value = hex.join("");
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
 function safeDate(value?: string | null) {
   if (!value) return null;
   const date = new Date(value);
@@ -52,12 +60,20 @@ export async function persistSledOpportunities(
   ) as Array<{ id: string }>;
 
   if (!sourceRows.length) {
+    const deterministicId = sourceIdForAdapter(source.adapterKey);
     sourceRows = await sql.query(
       `insert into sources
-        (source_family, source_name, base_url, jurisdiction, source_type, adapter_key, active, health_score, last_success_at)
-       values ('sled', $1, $2, $3, $4, $5, true, 100, now())
+        (id, source_family, source_name, base_url, jurisdiction, source_type, adapter_key, active, health_score, last_success_at)
+       values ($1::uuid, 'sled', $2, $3, $4, $5, $6, true, 100, now())
+       on conflict (id) do update set
+         source_name=excluded.source_name,
+         base_url=excluded.base_url,
+         jurisdiction=excluded.jurisdiction,
+         source_type=excluded.source_type,
+         adapter_key=excluded.adapter_key,
+         active=true
        returning id`,
-      [source.sourceName, source.baseUrl, source.jurisdiction || "United States", source.sourceType || "portal", source.adapterKey],
+      [deterministicId, source.sourceName, source.baseUrl, source.jurisdiction || "United States", source.sourceType || "portal", source.adapterKey],
     ) as Array<{ id: string }>;
   } else {
     await sql.query(
