@@ -69,6 +69,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "GA@WORK went live July 1, 2026. Pursuit verified the public JAGGAER event feed and a complete result sweep against the portal-reported total.",
   },
+  HI: {
+    connectorFamily: "custom",
+    platformLabel: "Hawaii Awards and Notices Data System (HANDS)",
+    officialUrl: "https://hands.ehawaii.gov/hands/opportunities",
+    status: "live",
+    notes: "Pursuit queries HANDS' anonymous public POSTED-opportunity API, paginates and reconciles the complete aggregated board, and closes records that leave the verified live set. HANDS aggregates notices from HANDS, HIePRO, and HePS across state, education, county, transit, water-system, Judiciary, and University of Hawaii buyers. Production validation reconciled all 198 current opportunities across 2 pages with zero stale rows, followed by a stable repeat with no changes.",
+  },
   IA: {
     status: "live",
     notes: "Reusable JAGGAER connector verified against Iowa IMPACS with a complete result sweep matching the portal-reported total.",
