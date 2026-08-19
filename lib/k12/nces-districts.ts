@@ -22,6 +22,7 @@ type DistrictRow = {
 };
 
 function text(v: unknown) { return String(v ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim(); }
+function parseNumber(v: string) { const n = Number(v.replace(/,/g, "")); return Number.isFinite(n) ? n : null; }
 
 function pageUrl(fips: string, page: number) {
   const u = new URL(NCES_BASE);
@@ -29,11 +30,6 @@ function pageUrl(fips: string, page: number) {
   u.searchParams.set("State", fips);
   if (page > 1) u.searchParams.set("DistrictPageNum", String(page));
   return u.toString();
-}
-
-function parseNumber(v: string) {
-  const n = Number(v.replace(/,/g, ""));
-  return Number.isFinite(n) ? n : null;
 }
 
 async function fetchPage(fips: string, page: number) {
@@ -47,21 +43,20 @@ async function fetchPage(fips: string, page: number) {
   const maxPages = Math.max(1, Math.ceil(total / 15));
   const rows: DistrictRow[] = [];
 
-  $("a[href*='district_detail.asp']").each((_, a) => {
-    const name = text($(a).text());
-    const href = $(a).attr("href") || "";
+  $("div.resultRow").each((_, node) => {
+    const cells = $(node).children("div");
+    if (cells.length < 6) return;
+    const anchor = $(cells[1]).find("a[href*='district_detail.asp']").first();
+    const name = text(anchor.text());
+    const href = anchor.attr("href") || "";
     const id = href.match(/[?&](?:ID2|DistrictID)=(\d+)/i)?.[1];
-    if (!id || !name || /schools in this district/i.test(name)) return;
-    const tr = $(a).closest("tr");
-    if (!tr.length) return;
-    const cells = tr.find("td").map((__, td) => text($(td).text())).get().filter(Boolean);
-    const rowText = text(tr.text());
-    const addressMatch = rowText.match(/,\s*([^,]+),\s*[A-Z]{2}\s+\d{5}/);
-    const city = addressMatch?.[1]?.trim() || null;
-    const county = cells.find(v => / County$/i.test(v)) || null;
-    const numeric = cells.map(parseNumber).filter((v): v is number => v !== null);
-    const enrollment = numeric.length >= 2 ? numeric[numeric.length - 2] : null;
-    const schools = numeric.length >= 1 ? numeric[numeric.length - 1] : null;
+    if (!id || !name) return;
+    const address = text($(cells[1]).find("span").first().text());
+    const city = address.match(/,\s*([^,]+),\s*[A-Z]{2}\s+\d{5}/)?.[1]?.trim() || null;
+    const countyText = text($(cells[3]).text());
+    const county = /county$/i.test(countyText) ? countyText : null;
+    const enrollment = parseNumber(text($(cells[4]).text()));
+    const schools = parseNumber(text($(cells[5]).text()));
     rows.push({ ncesId:id, name, city, county, enrollment, schools, sourceUrl:new URL(href, url).toString() });
   });
 
@@ -76,6 +71,7 @@ export async function syncNcesDistrictState(stateCode: string) {
   const pages = [first];
   for (let page = 2; page <= first.maxPages; page++) pages.push(await fetchPage(fips, page));
   const rows = [...new Map(pages.flatMap(p => p.rows).map(r => [r.ncesId, r])).values()];
+  if (first.total && rows.length !== first.total) throw new Error(`NCES ${code} reconciliation failed: expected ${first.total}, parsed ${rows.length}`);
   const sql = getSql();
   let inserted = 0;
   let existing = 0;
