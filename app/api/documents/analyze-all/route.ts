@@ -10,7 +10,8 @@ type Req = { category:string; text:string; line:number };
 
 function compact(v:string){ return v.replace(/\s+/g," ").trim(); }
 function skipRequirementMining(filename:string){
-  return /\b(w[- ]?9|form 1295|1295[_ -]?form|certificate of interested parties)\b/i.test(filename);
+  const normalized=filename.toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  return /(^| )(w 9|w9|form 1295|1295 form|certificate of interested parties)( |$)/.test(normalized);
 }
 
 function collectRequirements(lines:string[]):Req[] {
@@ -38,6 +39,7 @@ async function analyzeOne(document:Row){
   const sql=getSql();
   try{
     if(skipRequirementMining(document.filename)){
+      await sql.query(`delete from requirements where document_id=$1::uuid and normalized_value->>'source'='document_text'`,[document.id]);
       await sql.query(`update opportunity_documents set extraction_status='analyzed' where id=$1::uuid`,[document.id]);
       return {ok:true,documentId:document.id,opportunityId:document.opportunity_id,filename:document.filename,requirementsFound:0,skippedBoilerplate:true};
     }
