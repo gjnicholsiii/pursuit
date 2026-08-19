@@ -81,7 +81,16 @@ export async function getStateCoverageSnapshot(): Promise<StateCoverageSnapshot[
                 status: "partial" as const,
                 notes: "Pursuit has two verified production sources in South Dakota: the Central Bid Exchange / ESM current-events API and SDDOT SDEBS currently advertised highway lettings. Production reconciles 42 of 42 current ESM events plus 6 SDDOT projects across 2 advertised lettings, with stable repeat runs and Neon verification. South Dakota remains partial because the Office of the State Engineer maintains a separate construction Bids & Proposals page. Its public ServiceNow shell and page API are server-accessible, but the live article body is not exposed in the deterministic server payload Pursuit can currently ingest.",
               }
-            : registryState;
+            : registryState.stateCode === "VT"
+              ? {
+                  ...registryState,
+                  connectorFamily: "ivalua" as const,
+                  platformLabel: "VTBuys / Ivalua",
+                  officialUrl: "https://vtbuys.suppliers.vermont.gov/",
+                  status: "blocked" as const,
+                  notes: "Vermont's current eProcurement system is VTBuys on Ivalua. Current State solicitations direct bidders to VTBuys for submission and updates. Production probing from Vercel confirms the anonymous Ivalua public solicitation browse route redirects to the platform browser-check/login flow, while an alternate public-bids route returns 401 Access Denied. Pursuit cannot claim deterministic server-side ingestion until VTBuys exposes a server-accessible public solicitation route or official structured feed.",
+                }
+              : registryState;
     const matching = rows.filter(row => sourceMatchesState(String(row.adapter_key), state.stateCode));
     const sourceCount = matching.length;
     const openRecords = matching.reduce((sum, row) => sum + Number(row.open_records || 0), 0);
