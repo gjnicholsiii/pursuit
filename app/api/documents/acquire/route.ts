@@ -41,7 +41,7 @@ export async function GET() {
      where d.extraction_status = 'pending'
        and d.is_missing = false
        and d.storage_key is null
-     order by case when s.source_family='sled' then 0 else 1 end,
+     order by case when d.document_type='ionwave_attachment' then 0 when s.source_family='sled' then 1 else 2 end,
               o.due_at asc nulls last, d.id
      limit 1`,
   ) as PendingDocumentRow[];
