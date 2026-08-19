@@ -21,10 +21,10 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
   },
   AR: {
     connectorFamily: "sap_ariba",
-    platformLabel: "SAP Ariba (current); Periscope ARBuy (legacy solicitations)",
-    officialUrl: "https://sas.arkansas.gov/procurement",
-    status: "planned",
-    notes: "Arkansas transitioned new procurement activity to SAP Ariba in July 2026. ARBuy remains for solicitations opened before the transition.",
+    platformLabel: "Arkansas SAS Bid Opportunities / SAP Ariba; Periscope ARBuy legacy",
+    officialUrl: "https://sas.arkansas.gov/procurement/bid-opportunities/",
+    status: "partial",
+    notes: "Arkansas moved new Office of State Procurement solicitations to SAP Ariba in July 2026. Pursuit now ingests the state's first-party current Ariba index with anonymous preview links and closes records that leave that verified table. Production validation stored 4 current solicitations. Arkansas remains partial because the state separately references other procurement units and the former auxiliary listing is no longer publicly available at its prior URL.",
   },
   AK: {
     status: "partial",
