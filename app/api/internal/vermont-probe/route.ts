@@ -15,7 +15,8 @@ async function inspect(url: string) {
   try {
     const r = await fetch(url, { redirect: "follow", cache: "no-store", headers: { accept: "text/html,application/xhtml+xml,application/json", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
     const text = await r.text();
-    return { url, status:r.status, finalUrl:r.url, contentType:r.headers.get("content-type"), length:text.length, title:text.match(/<title[^>]*>(.*?)<\/title>/is)?.[1]?.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim() || null, sample:text.slice(0,10000) };
+    const flat = text.replace(/\r?\n/g, " ");
+    return { url, status:r.status, finalUrl:r.url, contentType:r.headers.get("content-type"), length:text.length, title:flat.match(/<title[^>]*>(.*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim() || null, sample:text.slice(0,10000) };
   } catch (error) {
     return { url, error:error instanceof Error ? error.message : String(error) };
   }
