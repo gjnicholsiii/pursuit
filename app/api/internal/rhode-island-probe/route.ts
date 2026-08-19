@@ -11,18 +11,23 @@ function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function cookies(raw: string | null) {
+  if (!raw) return "";
+  return raw.split(/,(?=[^;,]+=)/).map(part => part.split(";")[0].trim()).filter(Boolean).join("; ");
+}
+
 function summarize(html: string) {
   const $ = load(html);
   const tables = $("table").toArray().map((table, tableIndex) => ({
     tableIndex,
     id: $(table).attr("id") || "",
     className: $(table).attr("class") || "",
-    rows: $(table).find("tr").toArray().slice(0, 120).map((row, rowIndex) => ({
+    rows: $(table).find("tr").toArray().slice(0, 160).map((row, rowIndex) => ({
       rowIndex,
       cells: $(row).find("th,td").toArray().map(cell => compact($(cell).text())),
       links: $(row).find("a[href]").toArray().map(a => ({ text: compact($(a).text()), href: $(a).attr("href") || "" })),
     })),
-  })).filter(table => table.rows.some(row => row.cells.some(cell => /solicitation|opening|status|agency|entity|bid|rfp|rfq/i.test(cell))));
+  })).filter(table => table.rows.some(row => row.cells.some(cell => /solicitation|opening|status|agency|entity|bid|rfp|rfq|active/i.test(cell))));
   return { title: compact($("title").text()), tables };
 }
 
@@ -32,8 +37,9 @@ function buildPost(html: string) {
   $("input[type=hidden][name]").each((_, el) => body.append($(el).attr("name")!, $(el).attr("value") || ""));
   const group = $("#ctl00_ContentPlaceHolder1_ddl_ExBiddingGroup");
   body.set(group.attr("name") || "ctl00$ContentPlaceHolder1$ddl_ExBiddingGroup", group.val()?.toString() || "All External Bidding Groups");
-  const entities = $("#ctl00_ContentPlaceHolder1_lstbox_ExBiddingEntities option:selected");
-  entities.each((_, el) => body.append("ctl00$ContentPlaceHolder1$lstbox_ExBiddingEntities", $(el).attr("value") || compact($(el).text())));
+  $("#ctl00_ContentPlaceHolder1_lstbox_ExBiddingEntities option:selected").each((_, el) => {
+    body.append("ctl00$ContentPlaceHolder1$lstbox_ExBiddingEntities", $(el).attr("value") || compact($(el).text()));
+  });
   body.append("ctl00$ContentPlaceHolder1$lstbox_ExBidStatus", "Active(Scheduled)");
   body.set("ctl00$ContentPlaceHolder1$btn_ExSearch", "Search");
   return body;
@@ -51,6 +57,7 @@ export async function GET() {
   try {
     const first = await fetch(rivip, { redirect: "follow", headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, cache: "no-store" });
     const firstHtml = await first.text();
+    const cookie = cookies(first.headers.get("set-cookie"));
     const post = buildPost(firstHtml);
     const second = await fetch(first.url, {
       method: "POST",
@@ -58,6 +65,8 @@ export async function GET() {
       headers: {
         accept: "text/html,application/xhtml+xml",
         "content-type": "application/x-www-form-urlencoded",
+        cookie,
+        origin: "https://purchasing.ri.gov",
         referer: first.url,
         "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
       },
@@ -65,7 +74,7 @@ export async function GET() {
       cache: "no-store",
     });
     const secondHtml = await second.text();
-    results.push({ name: "RIVIP", firstStatus: first.status, postStatus: second.status, finalUrl: second.url, length: secondHtml.length, summary: summarize(secondHtml) });
+    results.push({ name: "RIVIP", firstStatus: first.status, postStatus: second.status, cookieNames: cookie.split("; ").filter(Boolean).map(v => v.split("=")[0]), finalUrl: second.url, length: secondHtml.length, summary: summarize(secondHtml) });
   } catch (error) {
     results.push({ name: "RIVIP", error: error instanceof Error ? error.message : String(error) });
   }
