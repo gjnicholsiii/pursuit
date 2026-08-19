@@ -12,6 +12,7 @@ import { syncArizonaApp } from "@/lib/sled/arizona";
 import { syncArkansasSasAriba } from "@/lib/sled/arkansas";
 import { syncFloridaVip } from "@/lib/sled/florida";
 import { syncHawaiiHands } from "@/lib/sled/hawaii";
+import { syncMississippiProcurement } from "@/lib/sled/mississippi";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii] = await Promise.all([
+  const [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii, mississippi] = await Promise.all([
     syncNebraskaBoard(false),
     syncLouisianaLapac(false),
     syncSouthCarolinaScbo(false),
@@ -37,13 +38,14 @@ export async function GET(request: NextRequest) {
     syncArkansasSasAriba(),
     syncFloridaVip(),
     syncHawaiiHands(),
+    syncMississippiProcurement(),
   ]);
 
-  const results = [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii];
+  const results = [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii, mississippi];
   const failures = results.filter(result => !result.ok);
   return NextResponse.json({
     ok: failures.length === 0,
-    sync: { nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii },
+    sync: { nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii, mississippi },
     failures,
   }, { status: failures.length === 0 ? 200 : 207 });
 }
