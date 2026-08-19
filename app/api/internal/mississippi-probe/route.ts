@@ -13,9 +13,7 @@ export async function GET() {
       fetch(TARGET,{headers:{accept:"text/html,application/xhtml+xml,*/*;q=0.8","user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0"},cache:"no-store"}),
       fetch(BUNDLE,{headers:{accept:"application/javascript,*/*;q=0.8","user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0"},cache:"no-store"}),
     ]);
-    const page=await pageRes.text();
     const bundle=await bundleRes.text();
-    const idx=bundle.indexOf("BidData");
-    return NextResponse.json({pageStatus:pageRes.status,bundleStatus:bundleRes.status,bundleLength:bundle.length,bidDataContext:idx>=0?bundle.slice(Math.max(0,idx-6000),idx+12000):null,allUrls:[...bundle.matchAll(/["']([^"']*(?:BidData|BidDetailData|\/Bid\/Details|contract_bid_search\/Search)[^"']*)["']/g)].map(m=>m[1]).slice(0,50)});
+    return NextResponse.json({pageStatus:pageRes.status,bundleStatus:bundleRes.status,bundleLength:bundle.length,bundle});
   } catch (e) { return NextResponse.json({error:e instanceof Error?e.message:String(e)},{status:500}); }
 }
