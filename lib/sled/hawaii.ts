@@ -79,6 +79,14 @@ const CRITERIA = {
   jurisdiction: "",
 };
 
+function stableKey(row: HandsRow) {
+  const system = row.system || "HANDS";
+  if (row.id != null && String(row.id).trim()) return `${system}:id:${row.id}`;
+  if (row.solicitionNo && row.solicitionNo.trim()) return `${system}:sol:${row.solicitionNo.trim()}`;
+  if (row.title && row.dueDate) return `${system}:fallback:${row.title.trim()}|${row.dueDate.trim()}|${row.department || ""}`;
+  return "";
+}
+
 async function fetchPage(page: number): Promise<HandsResponse> {
   const response = await fetch(`${API_URL}?size=${PAGE_SIZE}&page=${page}&sort=publish_date_dt,desc`, {
     method: "POST",
@@ -113,10 +121,10 @@ async function fetchPostedRows() {
     }
     rows.push(...(result?.content || []));
   }
-  const keys = rows.map(row => row.id == null ? "" : `${row.system || "HANDS"}:${row.id}`).filter(Boolean);
+  const keys = rows.map(stableKey).filter(Boolean);
   const unique = new Set(keys);
   if (rows.length !== sourceCount || keys.length !== sourceCount || unique.size !== sourceCount) {
-    throw new Error(`Hawaii HANDS reconciliation failed: count=${sourceCount}, rows=${rows.length}, ids=${keys.length}, unique=${unique.size}`);
+    throw new Error(`Hawaii HANDS reconciliation failed: count=${sourceCount}, rows=${rows.length}, keys=${keys.length}, unique=${unique.size}`);
   }
   return { sourceCount, pages, rows };
 }
@@ -160,7 +168,8 @@ export async function syncHawaiiHands(): Promise<HawaiiSyncResult> {
     const now = Date.now();
     let staleRows = 0;
     const records = rows.flatMap(row => {
-      if (row.id == null || !row.title || row.closed) return [];
+      const key = stableKey(row);
+      if (!key || !row.title || row.closed) return [];
       const dueAt = parseHawaiiDate(row.dueDate, true);
       if (dueAt && new Date(dueAt).getTime() < now) {
         staleRows += 1;
@@ -169,9 +178,9 @@ export async function syncHawaiiHands(): Promise<HawaiiSyncResult> {
       const system = row.system || "HANDS";
       const agencyName = [row.jurisdiction, row.department].filter(Boolean).join(" / ") || "State of Hawaii";
       const agencyClass = classifyAgency(row);
-      const sourceUrl = row.detailsUrl || `${BOARD_URL}/opportunity-details/${row.id}`;
+      const sourceUrl = row.detailsUrl || (row.id != null ? `${BOARD_URL}/opportunity-details/${row.id}` : BOARD_URL);
       const record: SledOpportunityRecord = {
-        externalId: `${system}:${row.id}`,
+        externalId: key,
         agency: {
           key: `hawaii-hands:${row.jurisdiction || "state"}:${row.department || "unknown"}`,
           name: agencyName,
@@ -192,7 +201,7 @@ export async function syncHawaiiHands(): Promise<HawaiiSyncResult> {
         rawPayload: {
           platform: "Hawaii Awards and Notices Data System (HANDS)",
           system,
-          id: row.id,
+          id: row.id ?? null,
           solicitationNo: row.solicitionNo || null,
           category: row.category || null,
           jurisdiction: row.jurisdiction || null,
