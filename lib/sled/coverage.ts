@@ -90,7 +90,16 @@ export async function getStateCoverageSnapshot(): Promise<StateCoverageSnapshot[
                   status: "blocked" as const,
                   notes: "Vermont's current eProcurement system is VTBuys on Ivalua. Current State solicitations direct bidders to VTBuys for submission and updates. Production probing from Vercel confirms the anonymous Ivalua public solicitation browse route redirects to the platform browser-check/login flow, while an alternate public-bids route returns 401 Access Denied. Pursuit cannot claim deterministic server-side ingestion until VTBuys exposes a server-accessible public solicitation route or official structured feed.",
                 }
-              : registryState;
+              : registryState.stateCode === "WA"
+                ? {
+                    ...registryState,
+                    connectorFamily: "webs_custom" as const,
+                    platformLabel: "Washington Electronic Business Solution (WEBS) + DES Public Works / Euna Procurement",
+                    officialUrl: "https://pr-webs-vendor.des.wa.gov/BidCalendar.aspx",
+                    status: "partial" as const,
+                    notes: "Pursuit has a verified production connector for the anonymous Washington Electronic Business Solution (WEBS) bid calendar. Production parsed and stored 25 current solicitations, followed by a stable repeat with no changes and Neon verification. Washington DES requires state agencies to post goods and services solicitations in WEBS, but DES also maintains separate public-works construction and consultant opportunities through Euna Procurement and related public-works pages. Washington remains partial until those separate public-works channels are ingested.",
+                  }
+                : registryState;
     const matching = rows.filter(row => sourceMatchesState(String(row.adapter_key), state.stateCode));
     const sourceCount = matching.length;
     const openRecords = matching.reduce((sum, row) => sum + Number(row.open_records || 0), 0);
