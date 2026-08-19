@@ -280,7 +280,6 @@ function normalizeRow(row: RawRow): SledOpportunityRecord | null {
       publicationBegin: row.publicationBegin || null,
       begin: row.begin || null,
       end: row.end || null,
-      remainingTime: row.remainingTime || null,
       completeOpenSweep: true,
     },
   };
