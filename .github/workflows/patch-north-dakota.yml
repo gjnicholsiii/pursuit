@@ -6,7 +6,6 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Trigger North Dakota coverage patch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
