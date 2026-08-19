@@ -18,9 +18,10 @@ export async function GET(request: NextRequest) {
   const origin = request.nextUrl.origin;
   const results=[] as Array<Record<string,unknown>>;
 
+  results.push(await run(origin, "/api/documents/opengov-sync"));
   results.push(await run(origin, "/api/documents/ionwave-sync"));
   results.push(await run(origin, "/api/documents/discover"));
-  for (let i=0;i<3;i++) results.push(await run(origin, "/api/documents/acquire"));
+  for (let i=0;i<4;i++) results.push(await run(origin, "/api/documents/acquire"));
   for (let i=0;i<5;i++) results.push(await run(origin, "/api/documents/extract"));
   for (let i=0;i<5;i++) results.push(await run(origin, "/api/documents/analyze-all"));
 
