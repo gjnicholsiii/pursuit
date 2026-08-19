@@ -98,12 +98,30 @@ export async function syncNcesDistrictState(stateCode: string) {
   let inserted = 0;
   let existing = 0;
   for (const row of rows) {
-    const found = await sql`
+    // NCES ID is the durable identity. Names are not unique across districts and can change.
+    const foundByNcesId = await sql`
       select id from agencies
-      where state_code=${code} and agency_type='k12' and lower(canonical_name)=lower(${row.name})
+      where state_code=${code}
+        and agency_type='k12'
+        and website like ${`%${row.ncesId}%`}
       limit 1
     `;
-    if (found.length) { existing++; continue; }
+    if (foundByNcesId.length) { existing++; continue; }
+
+    // Preserve already-imported records where the source URL predates this identity fix,
+    // but only when the name match is unambiguous within the state.
+    const nameMatches = await sql`
+      select id, website from agencies
+      where state_code=${code} and agency_type='k12' and lower(canonical_name)=lower(${row.name})
+      order by created_at asc
+      limit 2
+    `;
+    if (nameMatches.length === 1 && !nameMatches[0].website) {
+      await sql`update agencies set website=${row.sourceUrl}, city=coalesce(city,${row.city}), county=coalesce(county,${row.county}) where id=${nameMatches[0].id}`;
+      existing++;
+      continue;
+    }
+
     await sql`
       insert into agencies (canonical_name, agency_type, jurisdiction_level, state_code, city, county, website)
       values (${row.name}, 'k12', 'local', ${code}, ${row.city}, ${row.county}, ${row.sourceUrl})
