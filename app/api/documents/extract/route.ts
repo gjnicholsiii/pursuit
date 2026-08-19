@@ -66,18 +66,24 @@ export async function GET() {
      from opportunity_documents d
      join opportunities o on o.id=d.opportunity_id
      join sources s on s.id=o.source_id
+     join agencies a on a.id=o.agency_id
      where d.extraction_status='fetched'
        and d.storage_key is not null
        and lower(d.filename) like '%.pdf'
-     order by case when d.document_type='ionwave_attachment' then 0 when s.source_family='sled' then 1 else 2 end,
+       and o.status='open'
+       and (o.due_at is null or o.due_at >= now())
+     order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 when s.adapter_key='sam_gov' then 2 when s.source_family='sled' then 3 else 4 end,
               d.fetched_at asc nulls last,d.id
-     limit 5`,
+     limit 24`,
   ) as FetchedDocumentRow[];
 
   if (!rows.length) return NextResponse.json({ ok:true, processed:0, message:"No fetched PDFs are waiting for text extraction" });
 
   const results=[] as Array<Record<string,unknown>>;
-  for (const document of rows) results.push(await extractOne(document));
+  const concurrency=3;
+  for(let i=0;i<rows.length;i+=concurrency){
+    results.push(...await Promise.all(rows.slice(i,i+concurrency).map(extractOne)));
+  }
   const extracted=results.filter(result=>result.ok).length;
   return NextResponse.json({ ok:true, processed:results.length, extracted, failed:results.length-extracted, results });
 }
