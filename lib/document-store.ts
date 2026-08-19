@@ -9,7 +9,6 @@ export interface OpportunityDocumentSummary {
     id: string;
     filename: string;
     sourceUrl: string;
-    viewUrl: string;
     extractionStatus: string;
     fetchedAt: string | null;
   }>;
@@ -21,7 +20,6 @@ export interface OpportunityDocumentSummary {
     line: number | null;
     filename: string;
     sourceUrl: string;
-    viewUrl: string;
     confidence: number | null;
   }>;
 }
@@ -80,8 +78,7 @@ export async function getOpportunityDocumentSummary(opportunityId: string): Prom
     documents: rows.slice(0, 50).map(row => ({
       id: row.id,
       filename: row.filename,
-      sourceUrl: row.source_url,
-      viewUrl: row.storage_key ? `/api/documents/file/${row.id}` : row.source_url,
+      sourceUrl: row.storage_key ? `/api/documents/file/${row.id}` : row.source_url,
       extractionStatus: row.extraction_status,
       fetchedAt: row.fetched_at,
     })),
@@ -92,8 +89,7 @@ export async function getOpportunityDocumentSummary(opportunityId: string): Prom
       sourceText: row.requirement_text,
       line: typeof row.evidence_locator?.line === "number" ? row.evidence_locator.line : null,
       filename: row.filename,
-      sourceUrl: row.source_url,
-      viewUrl: row.storage_key ? `/api/documents/file/${row.document_id}` : row.source_url,
+      sourceUrl: row.storage_key ? `/api/documents/file/${row.document_id}` : row.source_url,
       confidence: row.extraction_confidence == null ? null : Number(row.extraction_confidence),
     })),
   };
