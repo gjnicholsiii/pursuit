@@ -9,6 +9,9 @@ type Row = { id:string; opportunity_id:string; filename:string; text_storage_key
 type Req = { category:string; text:string; line:number };
 
 function compact(v:string){ return v.replace(/\s+/g," ").trim(); }
+function skipRequirementMining(filename:string){
+  return /\b(w[- ]?9|form 1295|1295[_ -]?form|certificate of interested parties)\b/i.test(filename);
+}
 
 function collectRequirements(lines:string[]):Req[] {
   const out:Req[]=[]; const seen=new Set<string>();
@@ -34,6 +37,10 @@ function collectRequirements(lines:string[]):Req[] {
 async function analyzeOne(document:Row){
   const sql=getSql();
   try{
+    if(skipRequirementMining(document.filename)){
+      await sql.query(`update opportunity_documents set extraction_status='analyzed' where id=$1::uuid`,[document.id]);
+      return {ok:true,documentId:document.id,opportunityId:document.opportunity_id,filename:document.filename,requirementsFound:0,skippedBoilerplate:true};
+    }
     const blob=await get(document.text_storage_key,{access:"private"});
     if(!blob || blob.statusCode!==200 || !blob.stream) return {ok:false,documentId:document.id,reason:"extracted_text_unavailable"};
     const text=await new Response(blob.stream).text();
