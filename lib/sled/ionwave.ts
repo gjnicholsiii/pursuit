@@ -25,6 +25,7 @@ export const IONWAVE_SOURCE: SledSourceConfig = {
 };
 
 function clean(value: string) { return value.replace(/\s+/g, " ").trim(); }
+function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function inferSolicitationType(bidNumber: string, title: string) {
   const text = `${bidNumber} ${title}`.toUpperCase();
@@ -61,20 +62,27 @@ function parseBidIds(html: string) {
   const marker = html.indexOf('"_clientKeyValues"');
   const scope = marker >= 0 ? html.slice(marker, marker + 12000) : html;
   const ids = new Map<number, string>();
-  for (const match of scope.matchAll(/"(\d+)"\s*:\s*\{\s*"BidID"\s*:\s*"(\d+)"\s*\}/g)) {
-    ids.set(Number(match[1]), match[2]);
-  }
+  for (const match of scope.matchAll(/"(\d+)"\s*:\s*\{\s*"BidID"\s*:\s*"(\d+)"\s*\}/g)) ids.set(Number(match[1]), match[2]);
   return ids;
 }
 
-export async function discoverIonWavePortal(portal: IonWavePortal): Promise<SledOpportunityRecord[]> {
+async function fetchIonWaveList(portal: IonWavePortal) {
   const listUrl = `${portal.baseUrl}/SourcingEvents.aspx?SourceType=1`;
-  const response = await fetch(listUrl, {
-    headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Pursuit/1.0 procurement-opportunity indexer" },
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error(`IonWave ${portal.key} returned HTTP ${response.status}`);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await fetch(listUrl, {
+      headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Pursuit/1.0 procurement-opportunity indexer" },
+      cache: "no-store",
+    });
+    if (response.ok) return { response, listUrl };
+    if (response.status !== 429 || attempt === 2) throw new Error(`IonWave ${portal.key} returned HTTP ${response.status}`);
+    const retryAfter = Number(response.headers.get("retry-after") || 0);
+    await sleep(Math.min(Math.max(retryAfter * 1000, 2000 * (attempt + 1)), 8000));
+  }
+  throw new Error(`IonWave ${portal.key} retry budget exhausted`);
+}
 
+export async function discoverIonWavePortal(portal: IonWavePortal): Promise<SledOpportunityRecord[]> {
+  const { response, listUrl } = await fetchIonWaveList(portal);
   const html = await response.text();
   const bidIds = parseBidIds(html);
   const $ = cheerio.load(html);
@@ -92,9 +100,7 @@ export async function discoverIonWavePortal(portal: IonWavePortal): Promise<Sled
     const rowIndexMatch = rowId.match(/rgBidList_ctl00__(\d+)$/);
     const rowIndex = rowIndexMatch ? Number(rowIndexMatch[1]) : null;
     const bidId = rowIndex === null ? null : bidIds.get(rowIndex) || null;
-    const sourceUrl = bidId
-      ? `${portal.baseUrl}/PublicDetail.aspx?bidID=${encodeURIComponent(bidId)}&SourceType=1`
-      : listUrl;
+    const sourceUrl = bidId ? `${portal.baseUrl}/PublicDetail.aspx?bidID=${encodeURIComponent(bidId)}&SourceType=1` : listUrl;
     const dueAt = parseIonWaveTimestamp(closeDateText);
     const issueDate = parseIonWaveDate(issueDateText);
 
@@ -129,16 +135,17 @@ export async function discoverIonWavePortal(portal: IonWavePortal): Promise<Sled
 }
 
 export async function discoverIonWaveK12(portals: IonWavePortal[] = IONWAVE_K12_PORTALS) {
-  const results = await Promise.allSettled(portals.map(async portal => ({ portal, opportunities: await discoverIonWavePortal(portal) })));
   const opportunities: SledOpportunityRecord[] = [];
   const diagnostics: Array<Record<string, unknown>> = [];
-  for (const result of results) {
-    if (result.status === "fulfilled") {
-      opportunities.push(...result.value.opportunities);
-      diagnostics.push({ portal: result.value.portal.key, ok: true, records: result.value.opportunities.length });
-    } else {
-      diagnostics.push({ ok: false, error: result.reason instanceof Error ? result.reason.message : String(result.reason) });
+  for (const portal of portals) {
+    try {
+      const portalOpportunities = await discoverIonWavePortal(portal);
+      opportunities.push(...portalOpportunities);
+      diagnostics.push({ portal: portal.key, ok: true, records: portalOpportunities.length });
+    } catch (error) {
+      diagnostics.push({ portal: portal.key, ok: false, error: error instanceof Error ? error.message : String(error) });
     }
+    await sleep(750);
   }
   return { opportunities, diagnostics };
 }
