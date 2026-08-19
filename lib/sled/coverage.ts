@@ -72,7 +72,16 @@ export async function getStateCoverageSnapshot(): Promise<StateCoverageSnapshot[
               status: "blocked" as const,
               notes: "Rhode Island uses Ocean State Procures for centralized State Agency and RIDOT solicitations and RIVIP for municipalities, school districts, quasi-public agencies, higher education, and delegated-authority or grant solicitations. Production cannot reach the public OSP WebProcure backend before an HTTP response. Pursuit reproduced the RIVIP legacy search and listing workflow across all 129 listed external entities; both the Active(Scheduled) query and an all-status control returned zero records. With no usable RIVIP records and the current centralized OSP board unreachable from Vercel, Rhode Island is blocked until OSP becomes server-accessible or another official structured source is available.",
             }
-          : registryState;
+          : registryState.stateCode === "SD"
+            ? {
+                ...registryState,
+                connectorFamily: "esm_solutions" as const,
+                platformLabel: "South Dakota Central Bid Exchange / ESM + SDDOT SDEBS + Office of State Engineer",
+                officialUrl: "https://www.sd.gov/bhra?id=kb_article_view&sysparm_article=KB0044779",
+                status: "partial" as const,
+                notes: "Pursuit has two verified production sources in South Dakota: the Central Bid Exchange / ESM current-events API and SDDOT SDEBS currently advertised highway lettings. Production reconciles 42 of 42 current ESM events plus 6 SDDOT projects across 2 advertised lettings, with stable repeat runs and Neon verification. South Dakota remains partial because the Office of the State Engineer maintains a separate construction Bids & Proposals page. Its public ServiceNow shell and page API are server-accessible, but the live article body is not exposed in the deterministic server payload Pursuit can currently ingest.",
+              }
+            : registryState;
     const matching = rows.filter(row => sourceMatchesState(String(row.adapter_key), state.stateCode));
     const sourceCount = matching.length;
     const openRecords = matching.reduce((sum, row) => sum + Number(row.open_records || 0), 0);
