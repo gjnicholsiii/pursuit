@@ -113,6 +113,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "Pursuit reproduces Maine VSS public guest navigation through the legacy AltSelfService interface, paginates the complete Open solicitation board, and closes records that leave the live set. Production validation reconciled all 24 open solicitations across 3 pages.",
   },
+  MD: {
+    connectorFamily: "ivalua",
+    platformLabel: "eMaryland Marketplace Advantage (eMMA) / Ivalua",
+    officialUrl: "https://emma.maryland.gov/",
+    status: "blocked",
+    notes: "Maryland identifies eMMA as its statewide public solicitation hub across State, Local, County, Schools and Universities. The public Ivalua solicitation route redirects production server-side requests to a browser-check gate that loads Google reCAPTCHA Enterprise, preventing anonymous deterministic ingestion from Vercel. Pursuit cannot claim live eMMA ingestion until an official structured feed or server-accessible public route is available.",
+  },
   MA: {
     status: "live",
     notes: "Reusable Periscope connector verified end-to-end with complete pagination across state, higher-ed, municipal, and K-12 buyers.",
