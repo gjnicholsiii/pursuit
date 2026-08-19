@@ -118,7 +118,7 @@ export async function GET() {
        and d.storage_key is null
        and o.status='open'
        and (o.due_at is null or o.due_at >= now())
-     order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 when d.document_type='opengov_attachment' then 2 when s.source_family='sled' then 3 else 4 end,
+     order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 when s.adapter_key='sam_gov' then 2 when d.document_type='opengov_attachment' then 3 when s.source_family='sled' then 4 else 5 end,
               o.due_at asc nulls last, d.id
      limit 80`,
   ) as PendingDocumentRow[];
