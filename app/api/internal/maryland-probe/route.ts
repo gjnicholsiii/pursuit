@@ -3,25 +3,25 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
-const URLS = [
-  "https://emma.maryland.gov/page.aspx/en/rfp/request_browse_public",
-  "https://emma.maryland.gov/page.aspx/en/rfp/request_browse_public?__redir=true",
-  "https://emma.maryland.gov/page.aspx/en/bpm/process_manage_extranet/0",
-  "https://emma.maryland.gov/",
-];
+const START = "https://emma.maryland.gov/page.aspx/en/rfp/request_browse_public";
+const UA = "Mozilla/5.0 PursuitGovernmentRevenue/1.0";
+
+function cookiePairs(response: Response) {
+  const values = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
+  const fallback = response.headers.get("set-cookie");
+  return (values.length ? values : fallback ? [fallback] : []).map(v=>v.split(";",1)[0]).filter(Boolean);
+}
+function merge(existing:string[],incoming:string[]) { const m=new Map<string,string>(); for(const p of [...existing,...incoming]){const i=p.indexOf("="); if(i>0)m.set(p.slice(0,i),p);} return [...m.values()]; }
 
 export async function GET() {
-  const results:any[]=[];
-  for (const url of URLS) {
-    try {
-      const r=await fetch(url,{redirect:"manual",headers:{accept:"text/html,application/xhtml+xml,*/*;q=0.8","user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0"},cache:"no-store"});
-      const text=await r.text();
-      const scripts=[...text.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m=>m[1]).slice(0,80);
-      const forms=[...text.matchAll(/<form[^>]*(?:action=["']([^"']*)["'])?[^>]*>/gi)].map(m=>m[1]||"").slice(0,20);
-      results.push({url,status:r.status,location:r.headers.get("location"),contentType:r.headers.get("content-type"),length:text.length,title:(text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||null,scripts,forms,sample:text.slice(0,5000)});
-    } catch (e) {
-      results.push({url,error:e instanceof Error?e.message:String(e)});
-    }
+  let url=START; let cookies:string[]=[]; const hops:any[]=[];
+  for(let i=0;i<8;i++) {
+    const r=await fetch(url,{redirect:"manual",headers:{accept:"text/html,application/xhtml+xml,*/*;q=0.8","user-agent":UA,...(cookies.length?{cookie:cookies.join("; ")}:{})},cache:"no-store"});
+    const text=await r.text(); cookies=merge(cookies,cookiePairs(r));
+    const loc=r.headers.get("location");
+    hops.push({url,status:r.status,location:loc,cookies,contentType:r.headers.get("content-type"),length:text.length,title:(text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||null,scripts:[...text.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m=>m[1]).slice(0,40),sample:text.slice(0,8000)});
+    if(!loc || r.status<300 || r.status>=400) break;
+    url=new globalThis.URL(loc,url).toString();
   }
-  return NextResponse.json({results});
+  return NextResponse.json({hops});
 }
