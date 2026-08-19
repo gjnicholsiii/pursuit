@@ -3,9 +3,10 @@ import * as cheerio from "cheerio";
 import { getSql } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const API_BASE = "https://api.procurement.opengov.com/api/v1";
+const BATCH_SIZE = 100;
 
 type OppRow = {
   id: string;
@@ -89,13 +90,14 @@ export async function GET() {
      join agencies a on a.id=o.agency_id
      join sources s on s.id=o.source_id
      where s.adapter_key='opengov_public'
-       and a.agency_type in ('k12','higher_ed')
        and o.status='open'
        and (o.due_at is null or o.due_at >= now())
        and o.raw_payload->'project'->>'id' is not null
-     order by case when a.agency_type='k12' then 0 else 1 end,
-              o.due_at asc nulls last
-     limit 5`,
+       and o.raw_payload->>'_pursuitDocumentSyncAt' is null
+     order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 else 2 end,
+              o.due_at asc nulls last,
+              o.id
+     limit ${BATCH_SIZE}`,
   ) as OppRow[];
 
   let attachmentsRegistered = 0;
@@ -201,6 +203,13 @@ export async function GET() {
           evaluationFactsRegistered += result.length;
         }
       }
+
+      await sql.query(
+        `update opportunities
+         set raw_payload = coalesce(raw_payload, '{}'::jsonb) || jsonb_build_object('_pursuitDocumentSyncAt', now()::text)
+         where id=$1::uuid`,
+        [opp.id],
+      );
 
       processed.push({
         opportunityId: opp.id,
