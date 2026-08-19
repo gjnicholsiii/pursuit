@@ -7,20 +7,30 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 interface FetchedDocumentRow {
+  job_id: string;
   id: string;
   opportunity_id: string;
   filename: string;
   storage_key: string;
+  host_class: string;
+  priority: number;
+}
+
+async function finishJob(jobId:string){
+  const sql=getSql();
+  await sql.query(`update document_jobs set state='done',leased_until=null,lease_owner=null,updated_at=now() where id=$1::bigint`,[jobId]);
+}
+
+async function retryJob(jobId:string,error:string){
+  const sql=getSql();
+  await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,attempts))),leased_until=null,lease_owner=null,last_error=$2,updated_at=now() where id=$1::bigint`,[jobId,error.slice(0,1000)]);
 }
 
 async function extractOne(document: FetchedDocumentRow) {
   const sql = getSql();
   try {
     const blob = await get(document.storage_key, { access:"private" });
-    if (!blob || blob.statusCode !== 200 || !blob.stream) {
-      await sql.query(`update opportunity_documents set extraction_status='text_fetch_failed' where id=$1::uuid`, [document.id]);
-      return { ok:false, documentId:document.id, reason:"stored_pdf_unavailable" };
-    }
+    if (!blob || blob.statusCode !== 200 || !blob.stream) throw new Error("stored_pdf_unavailable");
 
     const bytes = await new Response(blob.stream).arrayBuffer();
     const pdf = await getDocumentProxy(new Uint8Array(bytes));
@@ -29,61 +39,49 @@ async function extractOne(document: FetchedDocumentRow) {
 
     if (!text.trim()) {
       await sql.query(`update opportunity_documents set extraction_status='text_empty' where id=$1::uuid`, [document.id]);
-      return { ok:false, documentId:document.id, reason:"text_empty" };
+      await finishJob(document.job_id);
+      return { ok:false, documentId:document.id, reason:"text_empty", permanent:true };
     }
 
     const textPath = `extracted/${document.opportunity_id}/${document.id}.txt`;
-    const textBlob = await put(textPath, text, {
-      access:"private",
-      contentType:"text/plain; charset=utf-8",
-      addRandomSuffix:false,
-      allowOverwrite:true,
-    });
+    const textBlob = await put(textPath, text, { access:"private", contentType:"text/plain; charset=utf-8", addRandomSuffix:false, allowOverwrite:true });
 
     await sql.query(
       `insert into extracted_facts (opportunity_id,document_id,fact_type,normalized_value,source_text,evidence_locator,extraction_confidence)
-       select $1::uuid,$2::uuid,'document_text_extract',
-              jsonb_build_object('text_storage_key',$3::text,'page_count',$4::int,'character_count',$5::int),
-              null,jsonb_build_object('document_id',$2::text),1.0
-       where not exists (
-         select 1 from extracted_facts where document_id=$2::uuid and fact_type='document_text_extract'
-       )`,
-      [document.opportunity_id,document.id,textBlob.pathname,extracted.totalPages,text.length],
+       select $1::uuid,$2::uuid,'document_text_extract',jsonb_build_object('text_storage_key',$3::text,'page_count',$4::int,'character_count',$5::int),null,jsonb_build_object('document_id',$2::text),1.0
+       where not exists (select 1 from extracted_facts where document_id=$2::uuid and fact_type='document_text_extract')`,
+      [document.opportunity_id,document.id,textBlob.pathname,extracted.totalPages,text.length]
     );
-
     await sql.query(`update opportunity_documents set extraction_status='text_extracted' where id=$1::uuid`, [document.id]);
-    return { ok:true, documentId:document.id, opportunityId:document.opportunity_id, filename:document.filename, pages:extracted.totalPages, characters:text.length };
+    await sql.query(`insert into document_jobs(document_id,stage,host_class,priority) values($1::uuid,'analyze',$2,$3) on conflict(document_id,stage) do update set priority=least(document_jobs.priority,excluded.priority),state=case when document_jobs.state in ('done','leased') then document_jobs.state else 'pending' end,updated_at=now()`,[document.id,document.host_class,Math.max(0,document.priority-10)]);
+    await finishJob(document.job_id);
+    return { ok:true, documentId:document.id, pages:extracted.totalPages, characters:text.length };
   } catch (error) {
-    await sql.query(`update opportunity_documents set extraction_status='text_failed' where id=$1::uuid`, [document.id]);
-    return { ok:false, documentId:document.id, reason:error instanceof Error ? error.message : "text_extraction_failed" };
+    const message=error instanceof Error ? error.message : "text_extraction_failed";
+    await retryJob(document.job_id,message);
+    return { ok:false, documentId:document.id, reason:message };
   }
 }
 
 export async function GET() {
   const sql = getSql();
+  await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,attempts))),leased_until=null,lease_owner=null,last_error=coalesce(last_error,'lease expired'),updated_at=now() where state='leased' and leased_until<now()`);
+  const owner=`vercel-extract-${crypto.randomUUID()}`;
   const rows = await sql.query(
-    `select d.id,d.opportunity_id,d.filename,d.storage_key
-     from opportunity_documents d
-     join opportunities o on o.id=d.opportunity_id
-     join sources s on s.id=o.source_id
-     join agencies a on a.id=o.agency_id
-     where d.extraction_status='fetched'
-       and d.storage_key is not null
-       and lower(d.filename) like '%.pdf'
-       and o.status='open'
-       and (o.due_at is null or o.due_at >= now())
-     order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 when s.adapter_key='sam_gov' then 2 when s.source_family='sled' then 3 else 4 end,
-              d.fetched_at asc nulls last,d.id
-     limit 24`,
+    `with claim as (
+       select j.id from document_jobs j join opportunity_documents d on d.id=j.document_id join opportunities o on o.id=d.opportunity_id
+       where j.stage='extract' and j.state='pending' and j.run_after<=now() and d.extraction_status='fetched' and d.storage_key is not null and lower(d.filename) like '%.pdf' and o.status='open' and (o.due_at is null or o.due_at>=now())
+       order by j.priority,j.run_after,j.id limit 48 for update skip locked
+     ), leased as (
+       update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now() from claim where j.id=claim.id returning j.id as job_id,j.document_id,j.host_class,j.priority
+     )
+     select leased.job_id::text,d.id,d.opportunity_id,d.filename,d.storage_key,leased.host_class,leased.priority from leased join opportunity_documents d on d.id=leased.document_id`,[owner]
   ) as FetchedDocumentRow[];
 
-  if (!rows.length) return NextResponse.json({ ok:true, processed:0, message:"No fetched PDFs are waiting for text extraction" });
-
+  if (!rows.length) return NextResponse.json({ ok:true, processed:0, message:"No extraction jobs are waiting" });
   const results=[] as Array<Record<string,unknown>>;
-  const concurrency=3;
-  for(let i=0;i<rows.length;i+=concurrency){
-    results.push(...await Promise.all(rows.slice(i,i+concurrency).map(extractOne)));
-  }
+  const concurrency=4;
+  for(let i=0;i<rows.length;i+=concurrency) results.push(...await Promise.all(rows.slice(i,i+concurrency).map(extractOne)));
   const extracted=results.filter(result=>result.ok).length;
-  return NextResponse.json({ ok:true, processed:results.length, extracted, failed:results.length-extracted, results });
+  return NextResponse.json({ ok:true, processed:results.length, extracted, failed:results.length-extracted });
 }
