@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
 const osp = "https://webprocure.proactiscloud.com/wp-web-public/";
-const searchUrl = "https://www.purchasing.ri.gov/bidding/ExternalBidSearch.aspx";
-const listingUrl = "https://www.purchasing.ri.gov/bidding/ExternalBidListing.aspx";
+const searchUrl = "https://purchasing.ri.gov/bidding/ExternalBidSearch.aspx";
+const listingUrl = "https://purchasing.ri.gov/bidding/ExternalBidListing.aspx";
 function compact(value: string) { return value.replace(/\s+/g, " ").trim(); }
 
 function buildPost(html: string) {
@@ -33,10 +33,10 @@ function inspect(html: string) {
     i,
     cells: $(row).find("th,td").toArray().map(cell => compact($(cell).text())),
     links: $(row).find("a[href]").toArray().map(a => ({ text: compact($(a).text()), href: $(a).attr("href") || "" })),
-  })).filter(r => r.links.length || r.cells.some(c => /solicitation|opening|entity|status|description|bid/i.test(c))).slice(0, 180);
-  const links = $("a[href]").toArray().map(a => ({ text: compact($(a).text()), href: $(a).attr("href") || "" })).filter(x => /bid|solicitation|detail|external|pdf/i.test(`${x.text} ${x.href}`)).slice(0, 160);
-  const pager = $("a[href],input,span").toArray().map(el => ({ id: $(el).attr("id") || "", text: compact($(el).text() || $(el).attr("value") || ""), href: $(el).attr("href") || "" })).filter(x => /next|prev|page|last|first|grid/i.test(`${x.id} ${x.text} ${x.href}`)).slice(0, 80);
-  return { title: compact($("title").text()), rows, links, pager, body: compact($("body").text()).slice(0, 12000) };
+  })).filter(r => r.links.length || r.cells.some(c => /solicitation|opening|entity|status|description|bid/i.test(c))).slice(0, 220);
+  const links = $("a[href]").toArray().map(a => ({ text: compact($(a).text()), href: $(a).attr("href") || "" })).filter(x => /bid|solicitation|detail|external|pdf/i.test(`${x.text} ${x.href}`)).slice(0, 200);
+  const pager = $("a[href],input,span").toArray().map(el => ({ id: $(el).attr("id") || "", text: compact($(el).text() || $(el).attr("value") || ""), href: $(el).attr("href") || "" })).filter(x => /next|prev|page|last|first|grid/i.test(`${x.id} ${x.text} ${x.href}`)).slice(0, 100);
+  return { title: compact($("title").text()), rows, links, pager, body: compact($("body").text()).slice(0, 16000) };
 }
 
 export async function GET() {
@@ -49,9 +49,9 @@ export async function GET() {
     const first = await fetch(searchUrl, { redirect: "follow", headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, cache: "no-store" });
     const firstHtml = await first.text();
     const body = buildPost(firstHtml);
-    const second = await fetch(listingUrl, { method: "POST", redirect: "follow", headers: { accept: "text/html,application/xhtml+xml", "content-type": "application/x-www-form-urlencoded", origin: "https://www.purchasing.ri.gov", referer: first.url, "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, body: body.toString(), cache: "no-store" });
+    const second = await fetch(listingUrl, { method: "POST", redirect: "manual", headers: { accept: "text/html,application/xhtml+xml", "content-type": "application/x-www-form-urlencoded", origin: "https://purchasing.ri.gov", referer: first.url, "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, body: body.toString(), cache: "no-store" });
     const html = await second.text();
-    results.push({ name: "RIVIP", firstStatus: first.status, postStatus: second.status, postedEntities: body.getAll("ctl00$ContentPlaceHolder1$lstbox_ExBiddingEntities").length, finalUrl: second.url, length: html.length, inspection: inspect(html) });
+    results.push({ name: "RIVIP", firstStatus: first.status, postStatus: second.status, postedEntities: body.getAll("ctl00$ContentPlaceHolder1$lstbox_ExBiddingEntities").length, finalUrl: second.url, location: second.headers.get("location"), length: html.length, inspection: inspect(html) });
   } catch (error) { results.push({ name: "RIVIP", error: error instanceof Error ? error.message : String(error) }); }
   return NextResponse.json({ results });
 }
