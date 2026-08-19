@@ -3,17 +3,23 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
-const BASE = "https://vendor.myfloridamarketplace.com/";
+const CHUNK = "https://vendor.myfloridamarketplace.com/18.6aaad639f698801615ce.js";
 
 export async function GET() {
   try {
-    const index = await fetch(BASE, { cache: "no-store" }).then(r=>r.text());
-    const runtimeName = index.match(/src="(runtime\.[^"]+\.js)"/)?.[1];
-    if (!runtimeName) throw new Error("runtime bundle not found");
-    const runtime = await fetch(BASE + runtimeName, { cache: "no-store" }).then(r=>r.text());
-    const mappings = [...new Set((runtime.match(/18[^,;}]{0,160}/g) || []))].slice(0,80);
-    const jsNames = [...new Set((runtime.match(/[A-Za-z0-9._-]+\.js/g) || []))].slice(0,300);
-    return NextResponse.json({ok:true,runtimeName,runtimeLength:runtime.length,mappings,jsNames,runtime});
+    const response = await fetch(CHUNK, { cache: "no-store" });
+    const js = await response.text();
+    const quoted = js.match(/["'`]([^"'`]{1,300})["'`]/g) || [];
+    const strings = [...new Set(quoted.map(v=>v.slice(1,-1)).filter(v=>/api|bid|solicit|advert|search|agency|status|page|sort|publish/i.test(v)))].slice(0,700);
+    const contexts=[];
+    for (const pattern of ["http.get","http.post","solicit","advert","search","api/"]) {
+      let i=0;
+      while ((i=js.toLowerCase().indexOf(pattern.toLowerCase(),i))>=0 && contexts.length<180) {
+        contexts.push(js.slice(Math.max(0,i-260),Math.min(js.length,i+520)));
+        i+=pattern.length;
+      }
+    }
+    return NextResponse.json({ok:response.ok,status:response.status,length:js.length,strings,contexts});
   } catch (error) {
     return NextResponse.json({ok:false,error:error instanceof Error ? error.message : String(error)}, {status:500});
   }
