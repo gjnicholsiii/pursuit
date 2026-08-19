@@ -4,22 +4,28 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
 const uid = "3444a404-3818-494f-84c5-2a850acd7779";
-const endpoint = `https://postingboard.esmsolutions.com/api/postingBoard/${uid}/currentevents`;
+const base = `https://postingboard.esmsolutions.com/api/postingBoard/${uid}`;
+
+function url(path: string, params: Record<string,string>) {
+  const u = new URL(`${base}/${path}`);
+  for (const [k,v] of Object.entries(params)) u.searchParams.set(k,v);
+  u.searchParams.set("browserGlobalTimeZoneNameId", "Central Standard Time");
+  u.searchParams.set("browserGlobalTimeZoneName", "America/Chicago");
+  u.searchParams.set("browserOffset", "-05:00:00");
+  return u;
+}
+
+async function get(path: string, params: Record<string,string>) {
+  const r = await fetch(url(path, params), { cache: "no-store", headers: { accept: "application/json", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
+  const t = await r.text();
+  let p: unknown = null; try { p = JSON.parse(t); } catch {}
+  return { status: r.status, parsed: p, sample: t.slice(0, 5000) };
+}
 
 export async function GET() {
-  const url = new URL(endpoint);
-  url.searchParams.set("pageNo", "0");
-  url.searchParams.set("recordsPerPage", "1000");
-  url.searchParams.set("browserGlobalTimeZoneNameId", "Central Standard Time");
-  url.searchParams.set("browserGlobalTimeZoneName", "America/Chicago");
-  url.searchParams.set("browserOffset", "-05:00:00");
-  try {
-    const response = await fetch(url, { cache: "no-store", headers: { accept: "application/json", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
-    const text = await response.text();
-    let parsed: unknown = null;
-    try { parsed = JSON.parse(text); } catch {}
-    return NextResponse.json({ status: response.status, contentType: response.headers.get("content-type"), length: text.length, parsed, sample: text.slice(0, 6000) });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
-  }
+  return NextResponse.json({
+    header: await get("headereventdetails", { eventId: "19895" }),
+    general: await get("generaleventdetails", { eventId: "19895" }),
+    commodities: await get("eventcommodities", { eventId: "19895", pageNo: "0", recordsPerPage: "50" }),
+  });
 }
