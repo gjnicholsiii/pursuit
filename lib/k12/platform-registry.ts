@@ -38,4 +38,22 @@ export const K12_PLATFORM_REGISTRY: K12PlatformRecord[] = [
     status: "classified",
     notes: "OCPS states VendorLink is used for solicitation notifications, solicitation documents, and award notifications. Facilities and construction contracting has additional district pages and should be treated as a separate coverage lane.",
   },
+  {
+    stateCode: "TX",
+    districtName: "Dallas Independent School District",
+    procurementPlatform: "Bonfire",
+    procurementUrl: "https://www.dallasisd.org/departments/procurement/vendor-opportunities",
+    scope: "goods, services, and district procurement solicitations; construction/bond also references Bonfire with district publication pages",
+    status: "classified",
+    notes: "Dallas ISD states that bids are issued through Bonfire and its procurement site publishes current opportunity summaries. Construction and bond opportunities are also published on district pages and direct bidders to the same Bonfire portal.",
+  },
+  {
+    stateCode: "CA",
+    districtName: "Los Angeles Unified School District",
+    procurementPlatform: "SAP Ariba + district solicitation site",
+    procurementUrl: "https://procurement.lausd.org/apps/pages/Solicitations",
+    scope: "purchasing and contracting opportunities across professional services, goods/general services, A&E, and public works",
+    status: "classified",
+    notes: "LAUSD states that procurement activities have migrated to SAP Ariba while its Procurement Services Division maintains a consolidated solicitation website for purchasing and contracting opportunities. Treat Ariba and the district solicitation site as complementary sources until a production connector is verified.",
+  },
 ];
