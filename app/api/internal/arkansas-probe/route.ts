@@ -4,28 +4,25 @@ import { load } from "cheerio";
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
-const TARGETS = [
-  "https://sas.arkansas.gov/procurement/",
-  "https://sas.arkansas.gov/procurement/bid-opportunities/",
-  "https://sas.arkansas.gov/procurement/vendor-registration-resources/",
-  "https://arbuy.arkansas.gov/bso/",
-];
+const URL = "https://sas.arkansas.gov/procurement/bid-opportunities/";
 
 export async function GET() {
-  const results = [];
-  for (const url of TARGETS) {
-    try {
-      const response = await fetch(url, { headers: { accept: "text/html", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, redirect: "follow", cache: "no-store" });
-      const html = await response.text();
-      const $ = load(html);
-      const links = $("a[href]").map((_, el) => ({ text: $(el).text().replace(/\s+/g, " ").trim(), href: $(el).attr("href") || "" })).get()
-        .filter(link => /ariba|bid|solicit|procure|supplier|vendor|business network/i.test(`${link.text} ${link.href}`))
-        .slice(0, 120);
-      const bodyText = $("body").text().replace(/\s+/g, " ").trim().slice(0, 6000);
-      results.push({ url, status: response.status, finalUrl: response.url, title: $("title").text().trim(), links, bodyText });
-    } catch (error) {
-      results.push({ url, error: error instanceof Error ? error.message : String(error) });
-    }
+  try {
+    const response = await fetch(URL, { headers: { accept: "text/html", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, redirect: "follow", cache: "no-store" });
+    const html = await response.text();
+    const $ = load(html);
+    const entries = $("a[href*='RfxEvent/preview/']").map((_, el) => {
+      const link = $(el);
+      const ancestors = link.parents().toArray().slice(0, 8).map(node => ({
+        tag: node.tagName,
+        id: $(node).attr("id") || null,
+        className: $(node).attr("class") || null,
+        text: $(node).text().replace(/\s+/g, " ").trim().slice(0, 1200),
+      }));
+      return { href: link.attr("href") || "", text: link.text().trim(), ancestors };
+    }).get();
+    return NextResponse.json({ ok: response.ok, status: response.status, count: entries.length, entries });
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, results });
 }
