@@ -1,31 +1,27 @@
 import { NextResponse } from "next/server";
+import { load } from "cheerio";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
-const uid = "3444a404-3818-494f-84c5-2a850acd7779";
-const base = `https://postingboard.esmsolutions.com/api/postingBoard/${uid}`;
+const ose = "https://www.sd.gov/bhra?id=kb_article_view&sysparm_article=KB0044739";
+const dot = "https://apps.sd.gov/HC65BidLetting/ebslettings1.aspx";
+function compact(v: string) { return v.replace(/\s+/g, " ").trim(); }
 
-function url(path: string, params: Record<string,string>) {
-  const u = new URL(`${base}/${path}`);
-  for (const [k,v] of Object.entries(params)) u.searchParams.set(k,v);
-  u.searchParams.set("browserGlobalTimeZoneNameId", "Central Standard Time");
-  u.searchParams.set("browserGlobalTimeZoneName", "America/Chicago");
-  u.searchParams.set("browserOffset", "-05:00:00");
-  return u;
-}
-
-async function get(path: string, params: Record<string,string>) {
-  const r = await fetch(url(path, params), { cache: "no-store", headers: { accept: "application/json", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
-  const t = await r.text();
-  let p: unknown = null; try { p = JSON.parse(t); } catch {}
-  return { status: r.status, parsed: p, sample: t.slice(0, 5000) };
+async function inspect(url: string) {
+  const r = await fetch(url, { redirect: "follow", cache: "no-store", headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
+  const html = await r.text();
+  const $ = load(html);
+  const rows = $("tr").toArray().map((row,i)=>({ i, cells: $(row).find("th,td").toArray().map(c=>compact($(c).text())), links: $(row).find("a[href]").toArray().map(a=>({text:compact($(a).text()),href:$(a).attr("href")||""})) })).filter(x=>x.cells.some(Boolean)||x.links.length).slice(0,200);
+  const links = $("a[href]").toArray().map(a=>({text:compact($(a).text()),href:$(a).attr("href")||""})).filter(x=>/bid|letting|proposal|advert|pdf|project|2026/i.test(`${x.text} ${x.href}`)).slice(0,200);
+  return { status:r.status, finalUrl:r.url, length:html.length, title:compact($("title").text()), rows, links, body:compact($("body").text()).slice(0,20000) };
 }
 
 export async function GET() {
-  return NextResponse.json({
-    header: await get("headereventdetails", { eventId: "19895" }),
-    general: await get("generaleventdetails", { eventId: "19895" }),
-    commodities: await get("eventcommodities", { eventId: "19895", pageNo: "0", recordsPerPage: "50" }),
-  });
+  const results: Record<string, unknown> = {};
+  for (const [name,url] of [["ose",ose],["dot",dot]] as const) {
+    try { results[name] = await inspect(url); }
+    catch (error) { results[name] = { error: error instanceof Error ? error.message : String(error) }; }
+  }
+  return NextResponse.json(results);
 }
