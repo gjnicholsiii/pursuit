@@ -9,4 +9,5 @@ export const VERIFIED_K12_IONWAVE_PORTALS: IonWavePortal[] = [
   { key: "fort_worth_isd_tx", agencyName: "Fort Worth Independent School District", baseUrl: "https://fwisd.ionwave.net", stateCode: "TX", city: "Fort Worth", county: "Tarrant" },
   { key: "leander_isd_tx", agencyName: "Leander Independent School District", baseUrl: "https://leanderisd.ionwave.net", stateCode: "TX", city: "Leander", county: "Williamson" },
   { key: "new_caney_isd_tx", agencyName: "New Caney Independent School District", baseUrl: "https://newcaneyisd.ionwave.net", stateCode: "TX", city: "New Caney", county: "Montgomery" },
+  { key: "arlington_isd_tx", agencyName: "Arlington Independent School District", baseUrl: "https://aisd.ionwave.net", stateCode: "TX", city: "Arlington", county: "Tarrant" },
 ];
