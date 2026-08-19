@@ -179,6 +179,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "Pursuit reproduces the public eVP Power Pages grid session and Open solicitation metafilter, reconciles all grid pages to the portal-reported total, and closes records that leave the live set. Production validation reconciled all 280 open solicitations.",
   },
+  ND: {
+    connectorFamily: "ivalua",
+    platformLabel: "NDBuys / Ivalua",
+    officialUrl: "https://public.ndbuys.nd.gov/",
+    status: "blocked",
+    notes: "North Dakota OMB states that all publicly available NDBuys opportunities for the State and North Dakota University System can be viewed without an account, but CAPTCHA may be required. Production probing confirms the anonymous public solicitation route redirects to Ivalua's browser-check gate, which loads Google reCAPTCHA Enterprise before procurement content is exposed. Pursuit cannot claim deterministic server-side ingestion until an official structured feed or server-accessible public route is available.",
+  },
   OR: {
     officialUrl: "https://oregonbuys.gov/bso/",
     status: "live",
