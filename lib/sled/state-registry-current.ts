@@ -55,6 +55,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "partial",
     notes: "Official statewide Open Bids dataset has a direct structured connector and authoritative live bid-detail links. The open-data mirror refreshes weekly, so Pursuit treats it as verified but not yet real-time complete.",
   },
+  FL: {
+    connectorFamily: "custom",
+    platformLabel: "MyFloridaMarketPlace Vendor Information Portal (VIP)",
+    officialUrl: "https://vendor.myfloridamarketplace.com/search/bids",
+    status: "live",
+    notes: "Pursuit queries Florida VIP's anonymous public OPEN board for competitive procurement advertisements (ITB, ITN, RFP, RFI, and RFSQ), reconciles the API-reported total to every fetched page, and closes records that leave the verified live set. Production validation reconciled all 106 current actionable advertisements across 2 pages with zero stale rows, followed by a stable repeat with no changes.",
+  },
   GA: {
     connectorFamily: "jaggaer",
     platformLabel: "GA@WORK Marketplace / JAGGAER",
