@@ -112,18 +112,25 @@ export async function GET() {
      from opportunity_documents d
      join opportunities o on o.id=d.opportunity_id
      join sources s on s.id=o.source_id
+     join agencies a on a.id=o.agency_id
      where d.extraction_status='pending'
        and d.is_missing=false
        and d.storage_key is null
-     order by case when d.document_type='ionwave_attachment' then 0 when s.source_family='sled' then 1 else 2 end,
+       and o.status='open'
+       and (o.due_at is null or o.due_at >= now())
+     order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 when d.document_type='opengov_attachment' then 2 when s.source_family='sled' then 3 else 4 end,
               o.due_at asc nulls last, d.id
-     limit 10`,
+     limit 80`,
   ) as PendingDocumentRow[];
 
   if (!rows.length) return NextResponse.json({ ok:true, processed:0, message:"No pending documents remain" });
 
   const results=[] as Array<Record<string,unknown>>;
-  for (const document of rows) results.push(await acquireOne(document));
+  const concurrency = 8;
+  for (let i=0;i<rows.length;i+=concurrency) {
+    const batch = rows.slice(i, i + concurrency);
+    results.push(...await Promise.all(batch.map(acquireOne)));
+  }
 
   const fetched=results.filter(result=>result.ok).length;
   return NextResponse.json({ ok:true, processed:results.length, fetched, failed:results.length-fetched, results });
