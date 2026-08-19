@@ -63,7 +63,16 @@ export async function getStateCoverageSnapshot(): Promise<StateCoverageSnapshot[
             status: "live" as const,
             notes: "Oklahoma OMES identifies this public Bidding Opportunities page as the statewide source for all current open solicitations, including statewide contract opportunities. Pursuit establishes the anonymous PeopleSoft supplier session, parses the complete public Bidding Event Information grid, reconciles the portal-reported row count before writes, and closes records only after a complete sweep. Production validation reconciled 16 of 16 current bidding events, followed by a stable repeat with no changes.",
           }
-        : registryState;
+        : registryState.stateCode === "RI"
+          ? {
+              ...registryState,
+              connectorFamily: "proactis_webprocure" as const,
+              platformLabel: "Ocean State Procures / Proactis WebProcure + RIVIP external solicitations",
+              officialUrl: "https://ridop.ri.gov/bidding-opportunities",
+              status: "blocked" as const,
+              notes: "Rhode Island uses Ocean State Procures for centralized State Agency and RIDOT solicitations and RIVIP for municipalities, school districts, quasi-public agencies, higher education, and delegated-authority or grant solicitations. Production cannot reach the public OSP WebProcure backend before an HTTP response. Pursuit reproduced the RIVIP legacy search and listing workflow across all 129 listed external entities; both the Active(Scheduled) query and an all-status control returned zero records. With no usable RIVIP records and the current centralized OSP board unreachable from Vercel, Rhode Island is blocked until OSP becomes server-accessible or another official structured source is available.",
+            }
+          : registryState;
     const matching = rows.filter(row => sourceMatchesState(String(row.adapter_key), state.stateCode));
     const sourceCount = matching.length;
     const openRecords = matching.reduce((sum, row) => sum + Number(row.open_records || 0), 0);
