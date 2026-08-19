@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/state-heavy",
       "schedule": "45 */4 * * *"
+    },
+    {
+      "path": "/api/cron/documents",
+      "schedule": "5 */2 * * *"
     }
   ]
 }
