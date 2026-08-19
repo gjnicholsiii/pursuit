@@ -5,22 +5,20 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
 const osp = "https://webprocure.proactiscloud.com/wp-web-public/";
-const rivip = "https://www.purchasing.ri.gov/bidding/ExternalBidSearch.aspx";
+const searchUrl = "https://www.purchasing.ri.gov/bidding/ExternalBidSearch.aspx";
+const listingUrl = "https://www.purchasing.ri.gov/bidding/ExternalBidListing.aspx";
 function compact(value: string) { return value.replace(/\s+/g, " ").trim(); }
 
 function buildPost(html: string) {
   const $ = load(html);
   const body = new URLSearchParams();
   $("input[type=hidden][name]").each((_, el) => body.append($(el).attr("name")!, $(el).attr("value") || ""));
-  body.set("ctl00$ContentPlaceHolder1$SM_ExternalbidSearch", "ctl00$ContentPlaceHolder1$updpan_ExternalbidSearch|ctl00$ContentPlaceHolder1$btn_ExSearch");
-  body.set("__ASYNCPOST", "true");
+  body.delete("__ASYNCPOST");
   body.set("__EVENTTARGET", "");
   body.set("__EVENTARGUMENT", "");
   body.set("ctl00$ContentPlaceHolder1$ddl_ExBiddingGroup", "All External Bidding Groups");
-  body.set("ctl00$ContentPlaceHolder1$chkbox_ExSelectAll", "on");
   $("#ctl00_ContentPlaceHolder1_lstbox_ExBiddingEntities option").each((_, el) => body.append("ctl00$ContentPlaceHolder1$lstbox_ExBiddingEntities", $(el).attr("value") || compact($(el).text())));
   body.set("ctl00$ContentPlaceHolder1$txtbox_ExBidNumber", "");
-  body.set("ctl00$ContentPlaceHolder1$chk_SelectAll_ExBidStatus", "on");
   body.append("ctl00$ContentPlaceHolder1$lstbox_ExBidStatus", "Active(Scheduled)");
   body.set("ctl00$ContentPlaceHolder1$txtbox_ExKeywords", "");
   body.set("ctl00$ContentPlaceHolder1$txtbox_ExOpeningAfter", "");
@@ -29,16 +27,16 @@ function buildPost(html: string) {
   return body;
 }
 
-function inspect(text: string) {
-  const $ = load(text);
-  const messages = $("span,div,label").toArray().map(el => compact($(el).text())).filter(v => /please|required|select|no records|no solicitations|found|result/i.test(v) && v.length < 500).slice(0, 80);
+function inspect(html: string) {
+  const $ = load(html);
   const rows = $("tr").toArray().map((row, i) => ({
     i,
     cells: $(row).find("th,td").toArray().map(cell => compact($(cell).text())),
     links: $(row).find("a[href]").toArray().map(a => ({ text: compact($(a).text()), href: $(a).attr("href") || "" })),
-  })).filter(r => r.links.length || r.cells.some(c => /solicitation|opening|bid number|status|description/i.test(c))).slice(-120);
-  const links = $("a[href]").toArray().map(a => ({ text: compact($(a).text()), href: $(a).attr("href") || "" })).filter(x => /bid|solicitation|detail|view|external/i.test(`${x.text} ${x.href}`)).slice(0, 120);
-  return { messages, rows, links, tail: compact(text.slice(-18000)) };
+  })).filter(r => r.links.length || r.cells.some(c => /solicitation|opening|entity|status|description|bid/i.test(c))).slice(0, 180);
+  const links = $("a[href]").toArray().map(a => ({ text: compact($(a).text()), href: $(a).attr("href") || "" })).filter(x => /bid|solicitation|detail|external|pdf/i.test(`${x.text} ${x.href}`)).slice(0, 160);
+  const pager = $("a[href],input,span").toArray().map(el => ({ id: $(el).attr("id") || "", text: compact($(el).text() || $(el).attr("value") || ""), href: $(el).attr("href") || "" })).filter(x => /next|prev|page|last|first|grid/i.test(`${x.id} ${x.text} ${x.href}`)).slice(0, 80);
+  return { title: compact($("title").text()), rows, links, pager, body: compact($("body").text()).slice(0, 12000) };
 }
 
 export async function GET() {
@@ -48,12 +46,12 @@ export async function GET() {
     results.push({ name: "OSP", status: response.status, finalUrl: response.url, length: (await response.text()).length });
   } catch (error) { results.push({ name: "OSP", error: error instanceof Error ? error.message : String(error) }); }
   try {
-    const first = await fetch(rivip, { redirect: "follow", headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, cache: "no-store" });
+    const first = await fetch(searchUrl, { redirect: "follow", headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, cache: "no-store" });
     const firstHtml = await first.text();
     const body = buildPost(firstHtml);
-    const second = await fetch(first.url, { method: "POST", redirect: "manual", headers: { accept: "*/*", "content-type": "application/x-www-form-urlencoded; charset=UTF-8", "x-microsoftajax": "Delta=true", "x-requested-with": "XMLHttpRequest", origin: "https://purchasing.ri.gov", referer: first.url, "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, body: body.toString(), cache: "no-store" });
-    const text = await second.text();
-    results.push({ name: "RIVIP", firstStatus: first.status, postStatus: second.status, postedEntities: body.getAll("ctl00$ContentPlaceHolder1$lstbox_ExBiddingEntities").length, length: text.length, hasDelta: /\|updatePanel\|/i.test(text), inspection: inspect(text) });
+    const second = await fetch(listingUrl, { method: "POST", redirect: "follow", headers: { accept: "text/html,application/xhtml+xml", "content-type": "application/x-www-form-urlencoded", origin: "https://www.purchasing.ri.gov", referer: first.url, "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" }, body: body.toString(), cache: "no-store" });
+    const html = await second.text();
+    results.push({ name: "RIVIP", firstStatus: first.status, postStatus: second.status, postedEntities: body.getAll("ctl00$ContentPlaceHolder1$lstbox_ExBiddingEntities").length, finalUrl: second.url, length: html.length, inspection: inspect(html) });
   } catch (error) { results.push({ name: "RIVIP", error: error instanceof Error ? error.message : String(error) }); }
   return NextResponse.json({ results });
 }
