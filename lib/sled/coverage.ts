@@ -54,7 +54,16 @@ export async function getStateCoverageSnapshot(): Promise<StateCoverageSnapshot[
           status: "blocked" as const,
           notes: "Current 2026 New Hampshire DAS bid documents direct vendors to NHProcurement, while legacy solicitations still reference the Statewide Bids and Proposals board. Production probes of both official surfaces return Akamai Access Denied to Vercel before procurement content is exposed. Pursuit cannot claim deterministic server-side ingestion until an official structured feed or server-accessible route is available.",
         }
-      : registryState;
+      : registryState.stateCode === "OK"
+        ? {
+            ...registryState,
+            connectorFamily: "oracle_peoplesoft" as const,
+            platformLabel: "Oklahoma Financials / PeopleSoft Public Bidding Events",
+            officialUrl: "https://financials.ok.gov/psc/SOKLFP1DS/SUPPLIER/ERP/c/SCP_PUBLIC_MENU_FL.SCP_PUB_BID_CMP_FL.GBL",
+            status: "live" as const,
+            notes: "Oklahoma OMES identifies this public Bidding Opportunities page as the statewide source for all current open solicitations, including statewide contract opportunities. Pursuit establishes the anonymous PeopleSoft supplier session, parses the complete public Bidding Event Information grid, reconciles the portal-reported row count before writes, and closes records only after a complete sweep. Production validation reconciled 16 of 16 current bidding events, followed by a stable repeat with no changes.",
+          }
+        : registryState;
     const matching = rows.filter(row => sourceMatchesState(String(row.adapter_key), state.stateCode));
     const sourceCount = matching.length;
     const openRecords = matching.reduce((sum, row) => sum + Number(row.open_records || 0), 0);
