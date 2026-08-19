@@ -16,6 +16,7 @@ const JAGGAER_STATES: JaggaerStateConfig[] = [
   { stateCode: "MT", stateName: "Montana", customerOrg: "StateOfMontana", sourceName: "Montana eMACS", agencyName: "State of Montana" },
   { stateCode: "UT", stateName: "Utah", customerOrg: "StateOfUtah", sourceName: "Utah Public Procurement Place", agencyName: "State of Utah" },
   { stateCode: "PA", stateName: "Pennsylvania", customerOrg: "CommonwealthPA", sourceName: "Pennsylvania JAGGAER Public Events", agencyName: "Commonwealth of Pennsylvania" },
+  { stateCode: "NM", stateName: "New Mexico", customerOrg: "StateOfNewMexico", sourceName: "New Mexico eProNM Public Events", agencyName: "State of New Mexico" },
 ];
 
 export interface JaggaerProbeResult {
