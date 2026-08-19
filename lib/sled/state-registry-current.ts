@@ -151,11 +151,11 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     notes: "Pursuit verified the complete current Nebraska DAS bid table end-to-end and closes opportunities that disappear from the public board.",
   },
   NM: {
-    connectorFamily: "custom",
-    platformLabel: "eProNM/JAGGAER transition to new procurement platform",
-    officialUrl: "https://generalservices.state.nm.us/state-purchasing/",
-    status: "planned",
-    notes: "New Mexico says eProNM/JAGGAER is being replaced in summer 2026. Pursuit will not promote the legacy JAGGAER route until the current replacement platform is identified and verified.",
+    connectorFamily: "jaggaer",
+    platformLabel: "eProNM / JAGGAER (Euna/Bonfire cutover September 1, 2026)",
+    officialUrl: "https://bids.sciquest.com/apps/Router/PublicEvent?CustomerOrg=StateOfNewMexico",
+    status: "live",
+    notes: "New Mexico SPD confirms eProNM/JAGGAER remains the current solicitation platform through September 1, 2026, when all new solicitations move exclusively to the Euna/NM-SPD Procurement Portal. Pursuit currently ingests the complete anonymous eProNM Open for Bid board and closes records only after portal-total reconciliation. Production validation reconciled 7 of 7 open solicitations, followed by a stable repeat with no changes. The Euna/Bonfire connector must replace or supplement this source at the September 1 cutover.",
   },
   NV: {
     status: "live",
