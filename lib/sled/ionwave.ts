@@ -57,12 +57,6 @@ function parseIonWaveDate(value: string) {
   return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
 }
 
-function absoluteUrl(baseUrl: string, href?: string) {
-  if (!href) return `${baseUrl}/SourcingEvents.aspx?SourceType=1`;
-  try { return new URL(href, baseUrl).toString(); }
-  catch { return `${baseUrl}/SourcingEvents.aspx?SourceType=1`; }
-}
-
 function parseBidIds(html: string) {
   const marker = html.indexOf('"_clientKeyValues"');
   const scope = marker >= 0 ? html.slice(marker, marker + 12000) : html;
@@ -98,8 +92,9 @@ export async function discoverIonWavePortal(portal: IonWavePortal): Promise<Sled
     const rowIndexMatch = rowId.match(/rgBidList_ctl00__(\d+)$/);
     const rowIndex = rowIndexMatch ? Number(rowIndexMatch[1]) : null;
     const bidId = rowIndex === null ? null : bidIds.get(rowIndex) || null;
-    const anchor = $(row).find("a[href]").first();
-    const sourceUrl = absoluteUrl(portal.baseUrl, anchor.attr("href"));
+    const sourceUrl = bidId
+      ? `${portal.baseUrl}/PublicDetail.aspx?bidID=${encodeURIComponent(bidId)}&SourceType=1`
+      : listUrl;
     const dueAt = parseIonWaveTimestamp(closeDateText);
     const issueDate = parseIonWaveDate(issueDateText);
 
