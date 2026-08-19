@@ -10,26 +10,22 @@ export async function GET() {
   const html = await initial.text();
   const $ = cheerio.load(html);
   const srcs = $("script[src]").map((_,el)=>$(el).attr("src")).get().filter(Boolean) as string[];
-  const results = [];
+  const matches = [];
   for (const src of srcs) {
     let absolute = src;
     try { absolute = new URL(src, pageUrl).toString(); } catch {}
-    if (!/WebResource|ScriptResource|Telerik|Sourcing/i.test(absolute)) continue;
+    if (!/ScriptResource|WebResource/i.test(absolute)) continue;
     try {
       const r = await fetch(absolute, { cache:"no-store", headers:{"user-agent":"Mozilla/5.0"} });
       const body = await r.text();
-      const hits = ["RowClick","EnablePostBackOnRowClick","fireCommand","postBack","_postBack"].filter(n=>body.includes(n));
-      if (hits.length) {
-        const snippets: Record<string,string> = {};
-        for (const hit of hits) {
-          const at = body.indexOf(hit);
-          snippets[hit] = body.slice(Math.max(0,at-800), at+2200);
-        }
-        results.push({ absolute, status:r.status, length:body.length, hits, snippets });
+      let start = 0;
+      while (matches.length < 30) {
+        const at = body.indexOf("RowClick", start);
+        if (at < 0) break;
+        matches.push({ absolute, at, snippet:body.slice(Math.max(0, at-1600), at+2400) });
+        start = at + 8;
       }
-    } catch (error) {
-      results.push({ absolute, error:error instanceof Error ? error.message : String(error) });
-    }
+    } catch {}
   }
-  return NextResponse.json({ scriptCount:srcs.length, results });
+  return NextResponse.json({ count:matches.length, matches });
 }
