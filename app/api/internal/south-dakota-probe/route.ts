@@ -3,27 +3,23 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
-const bundleUrl = "https://postingboard.esmsolutions.com/ng/lib/main.3de34ba34fb9f04d.js";
-
-function pieces(text: string, needle: string) {
-  const out: string[] = [];
-  let at = 0;
-  while ((at = text.indexOf(needle, at)) >= 0 && out.length < 20) {
-    out.push(text.slice(Math.max(0, at - 900), Math.min(text.length, at + 1400)).replace(/\s+/g, " "));
-    at += needle.length;
-  }
-  return out;
-}
+const uid = "3444a404-3818-494f-84c5-2a850acd7779";
+const endpoint = `https://postingboard.esmsolutions.com/api/postingBoard/${uid}/currentevents`;
 
 export async function GET() {
-  const response = await fetch(bundleUrl, { cache: "no-store", headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
-  const text = await response.text();
-  return NextResponse.json({
-    status: response.status,
-    currentevents: pieces(text, "currentevents"),
-    pastevents: pieces(text, "pastevents"),
-    controllerName: pieces(text, "controllerName=\"event"),
-    getCurrent: pieces(text, "getCurrentOpportunitiesEventsGrid"),
-    getImpl: pieces(text, "get(e,i,r=null)"),
-  });
+  const url = new URL(endpoint);
+  url.searchParams.set("pageNo", "0");
+  url.searchParams.set("recordsPerPage", "1000");
+  url.searchParams.set("browserGlobalTimeZoneNameId", "Central Standard Time");
+  url.searchParams.set("browserGlobalTimeZoneName", "America/Chicago");
+  url.searchParams.set("browserOffset", "-05:00:00");
+  try {
+    const response = await fetch(url, { cache: "no-store", headers: { accept: "application/json", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
+    const text = await response.text();
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(text); } catch {}
+    return NextResponse.json({ status: response.status, contentType: response.headers.get("content-type"), length: text.length, parsed, sample: text.slice(0, 6000) });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
 }
