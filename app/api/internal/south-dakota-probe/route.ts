@@ -3,22 +3,24 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
-const urls = [
-  "https://www.sd.gov/api/now/table/kb_knowledge?sysparm_query=number%3DKB0044739&sysparm_fields=number%2Cshort_description%2Ctext%2Csys_id&sysparm_limit=1",
-  "https://www.sd.gov/api/now/sp/page?id=kb_article_view&sysparm_article=KB0044739",
-  "https://www.sd.gov/bhra/api/now/table/kb_knowledge?sysparm_query=number%3DKB0044739&sysparm_fields=number%2Cshort_description%2Ctext%2Csys_id&sysparm_limit=1",
-];
+const url = "https://www.sd.gov/api/now/sp/page?id=kb_article_view&sysparm_article=KB0044739";
+
+function walk(value: unknown, path = "$", out: unknown[] = []) {
+  if (out.length >= 100) return out;
+  if (typeof value === "string") {
+    if (/Campus, Windows and Doors Replacement|Veterans Cemetery|Advertisements for Bids|W2526--02XSWMR|N1826--06X|8\/20\/26|08\/20\/26/i.test(value)) {
+      out.push({ path, length:value.length, sample:value.slice(0,20000) });
+    }
+  } else if (Array.isArray(value)) {
+    value.forEach((item,i)=>walk(item,`${path}[${i}]`,out));
+  } else if (value && typeof value === "object") {
+    for (const [key,item] of Object.entries(value as Record<string,unknown>)) walk(item,`${path}.${key}`,out);
+  }
+  return out;
+}
 
 export async function GET() {
-  const results = [];
-  for (const url of urls) {
-    try {
-      const r = await fetch(url, { redirect: "follow", cache: "no-store", headers: { accept: "application/json,text/plain,*/*", "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
-      const text = await r.text();
-      results.push({ url, status:r.status, finalUrl:r.url, contentType:r.headers.get("content-type"), length:text.length, sample:text.slice(0,12000) });
-    } catch (error) {
-      results.push({ url, error:error instanceof Error ? error.message : String(error) });
-    }
-  }
-  return NextResponse.json({ results });
+  const r = await fetch(url, { cache:"no-store", headers:{ accept:"application/json", "user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0" } });
+  const payload = await r.json();
+  return NextResponse.json({ status:r.status, matches:walk(payload) });
 }
