@@ -44,7 +44,17 @@ export async function getStateCoverageSnapshot(): Promise<StateCoverageSnapshot[
     group by s.id, s.adapter_key, s.last_success_at, s.last_failure_at, s.last_error
   `;
 
-  return CURRENT_STATE_PROCUREMENT_REGISTRY.map(state => {
+  return CURRENT_STATE_PROCUREMENT_REGISTRY.map(registryState => {
+    const state = registryState.stateCode === "NH"
+      ? {
+          ...registryState,
+          connectorFamily: "infor" as const,
+          platformLabel: "NHProcurement / New Hampshire Statewide Bids and Proposals",
+          officialUrl: "https://apps.das.nh.gov/NHProcurement",
+          status: "blocked" as const,
+          notes: "Current 2026 New Hampshire DAS bid documents direct vendors to NHProcurement, while legacy solicitations still reference the Statewide Bids and Proposals board. Production probes of both official surfaces return Akamai Access Denied to Vercel before procurement content is exposed. Pursuit cannot claim deterministic server-side ingestion until an official structured feed or server-accessible route is available.",
+        }
+      : registryState;
     const matching = rows.filter(row => sourceMatchesState(String(row.adapter_key), state.stateCode));
     const sourceCount = matching.length;
     const openRecords = matching.reduce((sum, row) => sum + Number(row.open_records || 0), 0);
