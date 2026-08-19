@@ -132,6 +132,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "partial",
     notes: "Official Minnesota OSP public SWIFT solicitation postings verified. Goods/services feed is directly readable; professional/technical feed is additive when available.",
   },
+  MS: {
+    connectorFamily: "custom",
+    platformLabel: "Mississippi MAGIC / MS.gov Procurement Opportunity Search",
+    officialUrl: "https://www.ms.gov/dfa/contract_bid_search/Bid?autoloadGrid=true",
+    status: "live",
+    notes: "Mississippi DFA states that all public active RFxs published in MAGIC are available through its public procurement search, which requires no login. Pursuit queries the anonymous server-side open-bid grid, reconciles the portal-reported total before writes, retains official MAGIC attachment links, and closes records only after a complete sweep. Production validation reconciled 169 of 169 current open records with zero stale rows, followed by a stable repeat with no changes. The public search also contains participating university, city, county, school, utility, authority and other public-sector notices.",
+  },
   MT: {
     status: "live",
     notes: "Reusable JAGGAER connector verified against Montana eMACS with a complete result sweep matching the portal-reported total.",
