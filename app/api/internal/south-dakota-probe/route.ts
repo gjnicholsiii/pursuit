@@ -8,8 +8,8 @@ const bundleUrl = "https://postingboard.esmsolutions.com/ng/lib/main.3de34ba34fb
 function pieces(text: string, needle: string) {
   const out: string[] = [];
   let at = 0;
-  while ((at = text.indexOf(needle, at)) >= 0 && out.length < 30) {
-    out.push(text.slice(Math.max(0, at - 300), Math.min(text.length, at + 700)).replace(/\s+/g, " "));
+  while ((at = text.indexOf(needle, at)) >= 0 && out.length < 20) {
+    out.push(text.slice(Math.max(0, at - 900), Math.min(text.length, at + 1400)).replace(/\s+/g, " "));
     at += needle.length;
   }
   return out;
@@ -20,10 +20,10 @@ export async function GET() {
   const text = await response.text();
   return NextResponse.json({
     status: response.status,
-    length: text.length,
-    api: pieces(text, "postingboard.esmsolutions.com/api/"),
-    events: pieces(text, "/events"),
-    entities: pieces(text, "/entities"),
-    getEvents: pieces(text, "getEvents"),
+    currentevents: pieces(text, "currentevents"),
+    pastevents: pieces(text, "pastevents"),
+    controllerName: pieces(text, "controllerName=\"event"),
+    getCurrent: pieces(text, "getCurrentOpportunitiesEventsGrid"),
+    getImpl: pieces(text, "get(e,i,r=null)"),
   });
 }
