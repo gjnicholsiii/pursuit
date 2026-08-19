@@ -84,8 +84,8 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     connectorFamily: "infor_luma",
     platformLabel: "IPRO powered by Luma / Infor CloudSuite Public Sector",
     officialUrl: "https://purchasing.idaho.gov/",
-    status: "planned",
-    notes: "Idaho replaced its former JAGGAER eProcurement path with IPRO powered by Luma. Luma procurement uses Infor CloudSuite Public Sector and Infor Supplier Portal/Strategic Sourcing.",
+    status: "blocked",
+    notes: "Idaho's current official bid system is IPRO powered by Luma. State guidance says vendors must register in IPRO before they can view bid opportunities, and production probing of the official supplier route confirms it cycles through Infor SSO rather than exposing an anonymous solicitation board. Idaho also directs suppliers to separate agency sites for specialized construction, highway, education, and banking opportunities. Pursuit cannot claim server-side statewide ingestion without authenticated supplier access or an alternate official public feed.",
   },
   IL: {
     status: "live",
