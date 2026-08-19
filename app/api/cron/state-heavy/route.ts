@@ -16,6 +16,7 @@ import { syncMississippiProcurement } from "@/lib/sled/mississippi";
 import { syncOklahomaPublicBids } from "@/lib/sled/oklahoma";
 import { syncSouthDakotaEsm } from "@/lib/sled/south-dakota";
 import { syncSouthDakotaDot } from "@/lib/sled/south-dakota-dot";
+import { syncWashingtonWebs } from "@/lib/sled/washington";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii, mississippi, oklahoma, southDakotaEsm, southDakotaDot] = await Promise.all([
+  const [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii, mississippi, oklahoma, southDakotaEsm, southDakotaDot, washington] = await Promise.all([
     syncNebraskaBoard(false),
     syncLouisianaLapac(false),
     syncSouthCarolinaScbo(false),
@@ -45,13 +46,14 @@ export async function GET(request: NextRequest) {
     syncOklahomaPublicBids(),
     syncSouthDakotaEsm(),
     syncSouthDakotaDot(),
+    syncWashingtonWebs(),
   ]);
 
-  const results = [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii, mississippi, oklahoma, southDakotaEsm, southDakotaDot];
+  const results = [nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii, mississippi, oklahoma, southDakotaEsm, southDakotaDot, washington];
   const failures = results.filter(result => !result.ok);
   return NextResponse.json({
     ok: failures.length === 0,
-    sync: { nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii, mississippi, oklahoma, southDakotaEsm, southDakotaDot },
+    sync: { nebraska, louisiana, southCarolina, texas, newYork, california, northCarolina, virginia, alabama, arizona, arkansas, florida, hawaii, mississippi, oklahoma, southDakotaEsm, southDakotaDot, washington },
     failures,
   }, { status: failures.length === 0 ? 200 : 207 });
 }
