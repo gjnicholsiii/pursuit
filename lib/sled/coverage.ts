@@ -99,7 +99,16 @@ export async function getStateCoverageSnapshot(): Promise<StateCoverageSnapshot[
                     status: "partial" as const,
                     notes: "Pursuit has a verified production connector for the anonymous Washington Electronic Business Solution (WEBS) bid calendar. Production parsed and stored 25 current solicitations, followed by a stable repeat with no changes and Neon verification. Washington DES requires state agencies to post goods and services solicitations in WEBS, but DES also maintains separate public-works construction and consultant opportunities through Euna Procurement and related public-works pages. Washington remains partial until those separate public-works channels are ingested.",
                   }
-                : registryState;
+                : registryState.stateCode === "WY"
+                  ? {
+                      ...registryState,
+                      connectorFamily: "public_purchase" as const,
+                      platformLabel: "Wyoming A&I Public Purchase + FY27 released-bids public sheet + separate construction/WYDOT channels",
+                      officialUrl: "https://ai.wyo.gov/divisions/general-services/purchasing/bid-opportunities",
+                      status: "partial" as const,
+                      notes: "Wyoming A&I uses Public Purchase for online bid distribution and receipt, and vendor registration is required for the portal. Pursuit therefore ingests the separate official A&I FY27 released-bids public sheet, which production currently reconciles to 11 open state-agency bids with a stable repeat and Neon verification. Wyoming remains partial because construction is handled separately by the State Construction Department, while WYDOT separately publishes highway and bridge construction, procurement services, consulting, airport, and local-government opportunities.",
+                    }
+                  : registryState;
     const matching = rows.filter(row => sourceMatchesState(String(row.adapter_key), state.stateCode));
     const sourceCount = matching.length;
     const openRecords = matching.reduce((sum, row) => sum + Number(row.open_records || 0), 0);
