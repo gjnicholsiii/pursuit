@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 type Row = { id:string; opportunity_id:string; filename:string; text_storage_key:string };
 type Req = { category:string; text:string; line:number };
@@ -31,25 +31,11 @@ function collectRequirements(lines:string[]):Req[] {
   return out.slice(0,30);
 }
 
-export async function GET(){
+async function analyzeOne(document:Row){
   const sql=getSql();
-  const rows=await sql.query(
-    `select d.id,d.opportunity_id,d.filename,ef.normalized_value->>'text_storage_key' as text_storage_key
-     from opportunity_documents d
-     join extracted_facts ef on ef.document_id=d.id and ef.fact_type='document_text_extract'
-     join opportunities o on o.id=d.opportunity_id
-     join sources s on s.id=o.source_id
-     where d.extraction_status='text_extracted'
-       and ef.normalized_value->>'text_storage_key' is not null
-     order by case when s.source_family='sled' then 0 else 1 end,d.fetched_at asc nulls last,d.id
-     limit 1`
-  ) as Row[];
-  const document=rows[0];
-  if(!document) return NextResponse.json({ok:true,message:"No extracted documents are waiting for evidence analysis"});
-
   try{
     const blob=await get(document.text_storage_key,{access:"private"});
-    if(!blob || blob.statusCode!==200 || !blob.stream) return NextResponse.json({ok:false,documentId:document.id,error:"Extracted text unavailable"},{status:502});
+    if(!blob || blob.statusCode!==200 || !blob.stream) return {ok:false,documentId:document.id,reason:"extracted_text_unavailable"};
     const text=await new Response(blob.stream).text();
     const requirements=collectRequirements(text.split(/\r?\n/));
 
@@ -65,8 +51,30 @@ export async function GET(){
     }
 
     await sql.query(`update opportunity_documents set extraction_status='analyzed' where id=$1::uuid`,[document.id]);
-    return NextResponse.json({ok:true,documentId:document.id,opportunityId:document.opportunity_id,filename:document.filename,requirementsFound:requirements.length,requirements,extractionStatus:"analyzed"});
+    return {ok:true,documentId:document.id,opportunityId:document.opportunity_id,filename:document.filename,requirementsFound:requirements.length};
   }catch(error){
-    return NextResponse.json({ok:false,documentId:document.id,error:error instanceof Error?error.message:"Evidence analysis failed"},{status:502});
+    return {ok:false,documentId:document.id,reason:error instanceof Error?error.message:"evidence_analysis_failed"};
   }
+}
+
+export async function GET(){
+  const sql=getSql();
+  const rows=await sql.query(
+    `select d.id,d.opportunity_id,d.filename,ef.normalized_value->>'text_storage_key' as text_storage_key
+     from opportunity_documents d
+     join extracted_facts ef on ef.document_id=d.id and ef.fact_type='document_text_extract'
+     join opportunities o on o.id=d.opportunity_id
+     join sources s on s.id=o.source_id
+     where d.extraction_status='text_extracted'
+       and ef.normalized_value->>'text_storage_key' is not null
+     order by case when d.document_type='ionwave_attachment' then 0 when s.source_family='sled' then 1 else 2 end,
+              d.fetched_at asc nulls last,d.id
+     limit 5`
+  ) as Row[];
+
+  if(!rows.length) return NextResponse.json({ok:true,processed:0,message:"No extracted documents are waiting for evidence analysis"});
+  const results=[] as Array<Record<string,unknown>>;
+  for(const document of rows) results.push(await analyzeOne(document));
+  const analyzed=results.filter(result=>result.ok).length;
+  return NextResponse.json({ok:true,processed:results.length,analyzed,failed:results.length-analyzed,requirementsFound:results.reduce((sum,result)=>sum+Number(result.requirementsFound||0),0),results});
 }
