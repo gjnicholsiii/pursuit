@@ -23,6 +23,7 @@ type DistrictRow = {
 
 function text(v: unknown) { return String(v ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim(); }
 function parseNumber(v: string) { const n = Number(v.replace(/,/g, "")); return Number.isFinite(n) ? n : null; }
+function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function pageUrl(fips: string, page: number) {
   const u = new URL(NCES_BASE);
@@ -32,11 +33,32 @@ function pageUrl(fips: string, page: number) {
   return u.toString();
 }
 
+async function fetchHtmlWithRetry(url: string, attempts = 4) {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        headers: {
+          "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
+          accept: "text/html,application/xhtml+xml",
+        },
+      });
+      if (!response.ok) throw new Error(`NCES returned ${response.status}`);
+      const html = await response.text();
+      if (!html.includes("resultList") && !html.includes("Search Results:")) throw new Error("NCES returned unexpected HTML");
+      return html;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await sleep(500 * attempt);
+    }
+  }
+  throw new Error(`NCES fetch failed after ${attempts} attempts for ${url}: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
 async function fetchPage(fips: string, page: number) {
   const url = pageUrl(fips, page);
-  const response = await fetch(url, { cache: "no-store", headers: { "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0", accept: "text/html" } });
-  if (!response.ok) throw new Error(`NCES returned ${response.status} for ${url}`);
-  const html = await response.text();
+  const html = await fetchHtmlWithRetry(url);
   const $ = load(html);
   const bodyText = text($("body").text());
   const total = Number(bodyText.match(/Search Results:\s*([\d,]+)/i)?.[1]?.replace(/,/g, "") || 0);
