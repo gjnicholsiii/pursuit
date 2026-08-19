@@ -41,6 +41,13 @@ const CURRENT_OVERRIDES: Record<string, StateOverride> = {
     status: "live",
     notes: "Reusable CGI Advantage connector verified end-to-end against Colorado VSS with a complete public solicitation sweep and live records stored in Pursuit.",
   },
+  CT: {
+    connectorFamily: "proactis_webprocure",
+    platformLabel: "CTsource / Proactis WebProcure",
+    officialUrl: "https://portal.ct.gov/das/ctsource/bidboard",
+    status: "blocked",
+    notes: "Connecticut states that CTsource is its statewide executive-branch contracting portal and that the Bid Board is publicly viewable without registration. The state wrapper resolves the anonymous board to webprocure.proactiscloud.com/wp-web-public, but repeated production server-side fetches from Vercel fail before an HTTP response is returned. Pursuit cannot claim live ingestion until that public WebProcure surface is reachable from the runtime or an alternate official structured source is identified.",
+  },
   DE: {
     connectorFamily: "socrata_open_data",
     platformLabel: "Delaware MyMarketplace + Delaware Open Data",
