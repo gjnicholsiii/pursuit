@@ -85,54 +85,90 @@ async function fetchPage(fips: string, page: number) {
   return { total, maxPages, rows:[...new Map(rows.map(r => [r.ncesId, r])).values()] };
 }
 
+async function fetchStatePages(fips: string) {
+  const first = await fetchPage(fips, 1);
+  if (first.maxPages === 1) return [first];
+  const pages = [first];
+  const remaining = Array.from({ length:first.maxPages - 1 }, (_, i) => i + 2);
+  for (let i = 0; i < remaining.length; i += 8) {
+    pages.push(...await Promise.all(remaining.slice(i, i + 8).map(page => fetchPage(fips, page))));
+  }
+  return pages;
+}
+
 export async function syncNcesDistrictState(stateCode: string) {
   const code = stateCode.toUpperCase();
   const fips = STATE_FIPS[code];
   if (!fips) throw new Error(`Unsupported state ${stateCode}`);
-  const first = await fetchPage(fips, 1);
-  const pages = [first];
-  for (let page = 2; page <= first.maxPages; page++) pages.push(await fetchPage(fips, page));
+
+  const pages = await fetchStatePages(fips);
+  const first = pages[0];
   const rows = [...new Map(pages.flatMap(p => p.rows).map(r => [r.ncesId, r])).values()];
   if (first.total && rows.length !== first.total) throw new Error(`NCES ${code} reconciliation failed: expected ${first.total}, parsed ${rows.length}`);
+
   const sql = getSql();
-  let inserted = 0;
-  let existing = 0;
-  for (const row of rows) {
-    // NCES ID is the durable identity. Names are not unique across districts and can change.
-    const foundByNcesId = await sql`
-      select id from agencies
-      where state_code=${code}
-        and agency_type='k12'
-        and website like ${`%${row.ncesId}%`}
-      limit 1
-    `;
-    if (foundByNcesId.length) { existing++; continue; }
+  const payload = JSON.stringify(rows.map(row => ({
+    nces_id: row.ncesId,
+    name: row.name,
+    city: row.city,
+    county: row.county,
+    source_url: row.sourceUrl,
+  })));
 
-    // Preserve already-imported records where the source URL predates this identity fix,
-    // but only when the name match is unambiguous within the state.
-    const nameMatches = await sql`
-      select id, website from agencies
-      where state_code=${code} and agency_type='k12' and lower(canonical_name)=lower(${row.name})
-      order by created_at asc
-      limit 2
-    `;
-    if (nameMatches.length === 1 && !nameMatches[0].website) {
-      await sql`update agencies set website=${row.sourceUrl}, city=coalesce(city,${row.city}), county=coalesce(county,${row.county}) where id=${nameMatches[0].id}`;
-      existing++;
-      continue;
-    }
+  const updated = await sql.query(`
+    with input as (
+      select * from jsonb_to_recordset($1::jsonb)
+      as x(nces_id text, name text, city text, county text, source_url text)
+    ), unique_legacy as (
+      select i.*, a.id
+      from input i
+      join agencies a on a.state_code=$2 and a.agency_type='k12'
+        and lower(a.canonical_name)=lower(i.name) and a.website is null
+      where (select count(*) from agencies a2 where a2.state_code=$2 and a2.agency_type='k12' and lower(a2.canonical_name)=lower(i.name))=1
+    )
+    update agencies a
+    set website=u.source_url, city=coalesce(a.city,u.city), county=coalesce(a.county,u.county)
+    from unique_legacy u
+    where a.id=u.id
+    returning a.id
+  `, [payload, code]);
 
-    await sql`
-      insert into agencies (canonical_name, agency_type, jurisdiction_level, state_code, city, county, website)
-      values (${row.name}, 'k12', 'local', ${code}, ${row.city}, ${row.county}, ${row.sourceUrl})
-    `;
-    inserted++;
-  }
-  return { stateCode:code, ncesTotal:first.total, rowsParsed:rows.length, pages:first.maxPages, inserted, existing };
+  const inserted = await sql.query(`
+    with input as (
+      select * from jsonb_to_recordset($1::jsonb)
+      as x(nces_id text, name text, city text, county text, source_url text)
+    )
+    insert into agencies (canonical_name, agency_type, jurisdiction_level, state_code, city, county, website)
+    select i.name, 'k12', 'local', $2, i.city, i.county, i.source_url
+    from input i
+    where not exists (
+      select 1 from agencies a
+      where a.state_code=$2 and a.agency_type='k12' and a.website like ('%' || i.nces_id || '%')
+    )
+      and not exists (
+        select 1 from agencies a
+        where a.state_code=$2 and a.agency_type='k12' and lower(a.canonical_name)=lower(i.name) and a.website is null
+      )
+    returning id
+  `, [payload, code]);
+
+  const insertedCount = inserted.length;
+  const updatedCount = updated.length;
+  return {
+    stateCode: code,
+    ncesTotal: first.total,
+    rowsParsed: rows.length,
+    pages: first.maxPages,
+    inserted: insertedCount,
+    updated: updatedCount,
+    existing: rows.length - insertedCount - updatedCount,
+  };
 }
 
 export async function syncNcesDistrictBatch(states: string[]) {
-  const results = [];
-  for (const state of states) results.push(await syncNcesDistrictState(state));
+  const results: Awaited<ReturnType<typeof syncNcesDistrictState>>[] = [];
+  for (let i = 0; i < states.length; i += 3) {
+    results.push(...await Promise.all(states.slice(i, i + 3).map(syncNcesDistrictState)));
+  }
   return results;
 }
