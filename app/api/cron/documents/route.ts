@@ -24,9 +24,12 @@ export async function GET(request: NextRequest) {
   results.push(await run(origin, "/api/documents/opengov-sync", secret));
   results.push(await run(origin, "/api/documents/ionwave-sync", secret));
   results.push(await run(origin, "/api/documents/discover", secret));
-  for (let i=0;i<4;i++) results.push(await run(origin, "/api/documents/acquire", secret));
-  for (let i=0;i<5;i++) results.push(await run(origin, "/api/documents/extract", secret));
-  for (let i=0;i<5;i++) results.push(await run(origin, "/api/documents/analyze-all", secret));
+
+  // Acquisition is the dominant live backlog, so bias each cron cycle toward fetches
+  // while retaining enough downstream capacity to prevent extraction/analysis starvation.
+  for (let i=0;i<6;i++) results.push(await run(origin, "/api/documents/acquire", secret));
+  for (let i=0;i<4;i++) results.push(await run(origin, "/api/documents/extract", secret));
+  for (let i=0;i<3;i++) results.push(await run(origin, "/api/documents/analyze-all", secret));
 
   return NextResponse.json({ ok:true, steps:results.length, results });
 }
