@@ -4,7 +4,7 @@ import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 type Row = { job_id:string; id:string; opportunity_id:string; filename:string; text_storage_key:string };
 type Req = { category:string; text:string; line:number };
@@ -98,7 +98,7 @@ export async function GET(request:NextRequest){
          and d.extraction_status='text_extracted' and o.status='open'
          and (o.due_at is null or o.due_at>=now())
        order by j.priority,j.run_after,j.id
-       limit 80 for update skip locked
+       limit 24 for update skip locked
      ), leased as (
        update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now()
        from claim where j.id=claim.id returning j.id as job_id,j.document_id
@@ -111,7 +111,7 @@ export async function GET(request:NextRequest){
 
   if(!rows.length) return NextResponse.json({ok:true,processed:0,message:"No analysis jobs are waiting"});
   const results=[] as Array<Record<string,unknown>>;
-  const concurrency=12;
+  const concurrency=6;
   for(let i=0;i<rows.length;i+=concurrency) results.push(...await Promise.all(rows.slice(i,i+concurrency).map(analyzeOne)));
   const analyzed=results.filter(result=>result.ok).length;
   return NextResponse.json({ok:true,processed:results.length,analyzed,failed:results.length-analyzed,requirementsFound:results.reduce((sum,result)=>sum+Number(result.requirementsFound||0),0)});

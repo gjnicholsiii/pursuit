@@ -22,11 +22,7 @@
     },
     {
       "path": "/api/cron/documents",
-      "schedule": "5 * * * *"
-    },
-    {
-      "path": "/api/cron/documents-drain",
-      "schedule": "35 * * * *"
+      "schedule": "5 */2 * * *"
     }
   ]
 }

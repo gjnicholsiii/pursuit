@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 120;
 
 function workerOrigin(request: NextRequest) {
   const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
@@ -18,28 +18,27 @@ async function run(origin:string, path:string, secret:string) {
   return { path, status:response.status, ok:response.ok, body };
 }
 
-async function batch(origin:string, path:string, secret:string, count:number) {
-  return Promise.all(Array.from({length:count},()=>run(origin,path,secret)));
-}
-
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return NextResponse.json({ ok:false, error:"CRON_SECRET is not configured" }, { status:503 });
   if (request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ ok:false, error:"Unauthorized" }, { status:401 });
 
   const origin = workerOrigin(request);
-  const results=[] as Array<Record<string,unknown>>;
 
-  results.push(await run(origin, "/api/documents/opengov-sync", secret));
-  results.push(await run(origin, "/api/documents/ionwave-sync", secret));
-  results.push(await run(origin, "/api/documents/discover", secret));
+  // Cost-controlled document maintenance. Keep current opportunity discovery fresh,
+  // acquire newly discovered live documents, and advance downstream intelligence in
+  // small bounded batches. Historical backlog is allowed to wait in Neon.
+  const syncResults=await Promise.all([
+    run(origin, "/api/documents/opengov-sync", secret),
+    run(origin, "/api/documents/ionwave-sync", secret),
+    run(origin, "/api/documents/discover", secret),
+  ]);
+  const workerResults=await Promise.all([
+    run(origin, "/api/documents/acquire", secret),
+    run(origin, "/api/documents/extract", secret),
+    run(origin, "/api/documents/analyze-all", secret),
+  ]);
+  const results=[...syncResults,...workerResults];
 
-  // Keep one acquisition worker available for newly discovered live documents. The current
-  // acquisition queue is otherwise dominated by closed/expired opportunities, so devote
-  // worker capacity to the active downstream extraction and analysis backlog.
-  results.push(...await batch(origin, "/api/documents/acquire", secret, 1));
-  results.push(...await batch(origin, "/api/documents/extract", secret, 4));
-  results.push(...await batch(origin, "/api/documents/analyze-all", secret, 4));
-
-  return NextResponse.json({ ok:true, steps:results.length, results });
+  return NextResponse.json({ ok:results.every(result=>result.ok!==false), steps:results.length, results });
 }
