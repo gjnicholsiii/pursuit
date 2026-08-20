@@ -13,6 +13,15 @@ async function run(origin:string, path:string, secret:string) {
   return { path, status:response.status, ok:response.ok, body };
 }
 
+async function runMany(origin:string, path:string, secret:string, count:number, concurrency:number) {
+  const results=[] as Array<Record<string,unknown>>;
+  for (let offset=0; offset<count; offset+=concurrency) {
+    const size=Math.min(concurrency,count-offset);
+    results.push(...await Promise.all(Array.from({length:size},()=>run(origin,path,secret))));
+  }
+  return results;
+}
+
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return NextResponse.json({ ok:false, error:"CRON_SECRET is not configured" }, { status:503 });
@@ -25,11 +34,11 @@ export async function GET(request: NextRequest) {
   results.push(await run(origin, "/api/documents/ionwave-sync", secret));
   results.push(await run(origin, "/api/documents/discover", secret));
 
-  // Acquisition is the dominant live backlog, so bias each cron cycle toward fetches
-  // while retaining enough downstream capacity to prevent extraction/analysis starvation.
-  for (let i=0;i<6;i++) results.push(await run(origin, "/api/documents/acquire", secret));
-  for (let i=0;i<4;i++) results.push(await run(origin, "/api/documents/extract", secret));
-  for (let i=0;i<3;i++) results.push(await run(origin, "/api/documents/analyze-all", secret));
+  // Workers claim with SKIP LOCKED, so parallel invocations safely increase throughput
+  // without duplicate processing. Acquisition remains the dominant live backlog.
+  results.push(...await runMany(origin, "/api/documents/acquire", secret, 6, 3));
+  results.push(...await runMany(origin, "/api/documents/extract", secret, 4, 2));
+  results.push(...await runMany(origin, "/api/documents/analyze-all", secret, 3, 2));
 
   return NextResponse.json({ ok:true, steps:results.length, results });
 }
