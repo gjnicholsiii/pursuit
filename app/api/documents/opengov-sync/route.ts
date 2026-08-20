@@ -93,7 +93,24 @@ export async function GET() {
        and o.status='open'
        and (o.due_at is null or o.due_at >= now())
        and o.raw_payload->'project'->>'id' is not null
-       and o.raw_payload->>'_pursuitDocumentSyncAt' is null
+       and (
+         o.raw_payload->>'_pursuitDocumentSyncAt' is null
+         or exists (
+           select 1
+           from opportunity_documents d
+           left join document_jobs j on j.document_id=d.id and j.stage='acquire'
+           where d.opportunity_id=o.id
+             and d.document_type='opengov_attachment'
+             and d.storage_key is null
+             and (
+               (j.state='failed' and j.last_error='http_403')
+               or (
+                 d.source_url ilike '%X-Amz-Date=%'
+                 and coalesce((o.raw_payload->>'_pursuitDocumentSyncAt')::timestamptz, 'epoch'::timestamptz) < now()-interval '12 hours'
+               )
+             )
+         )
+       )
      order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 else 2 end,
               o.due_at asc nulls last,
               o.id
@@ -101,6 +118,8 @@ export async function GET() {
   ) as OppRow[];
 
   let attachmentsRegistered = 0;
+  let attachmentUrlsRefreshed = 0;
+  let acquisitionJobsRevived = 0;
   let requirementsRegistered = 0;
   let evaluationFactsRegistered = 0;
   const processed: Array<Record<string, unknown>> = [];
@@ -125,6 +144,37 @@ export async function GET() {
 
       for (const a of attachments.values()) {
         const filename = a.filename || a.name || a.title || `opengov-${a.id || "document"}.${a.fileExtension || "bin"}`;
+
+        const refreshed = await sql.query(
+          `update opportunity_documents
+           set source_url=$3::text,
+               extraction_status=case when storage_key is null then 'pending' else extraction_status end
+           where opportunity_id=$1::uuid
+             and document_type='opengov_attachment'
+             and filename=$2::text
+             and source_url is distinct from $3::text
+           returning id`,
+          [opp.id, filename, a.url],
+        ) as Array<{id:string}>;
+
+        if (refreshed.length) {
+          attachmentUrlsRefreshed += refreshed.length;
+          for (const document of refreshed) {
+            const revived = await sql.query(
+              `update document_jobs
+               set state='pending', attempts=0, run_after=now(), leased_until=null, lease_owner=null,
+                   last_error=null, updated_at=now()
+               where document_id=$1::uuid
+                 and stage='acquire'
+                 and state in ('failed','dead','pending')
+               returning id`,
+              [document.id],
+            ) as Array<{id:string}>;
+            acquisitionJobsRevived += revived.length;
+          }
+          continue;
+        }
+
         const result = await sql.query(
           `insert into opportunity_documents
              (opportunity_id, document_type, filename, source_url, referenced_by, extraction_status)
@@ -133,7 +183,7 @@ export async function GET() {
              select 1 from opportunity_documents
              where opportunity_id=$1::uuid
                and document_type='opengov_attachment'
-               and (filename=$2::text or source_url=$3::text)
+               and filename=$2::text
            )
            returning id`,
           [opp.id, filename, a.url],
@@ -226,6 +276,8 @@ export async function GET() {
     ok: true,
     opportunitiesProcessed: processed.length,
     attachmentsRegistered,
+    attachmentUrlsRefreshed,
+    acquisitionJobsRevived,
     requirementsRegistered,
     evaluationFactsRegistered,
     processed,
