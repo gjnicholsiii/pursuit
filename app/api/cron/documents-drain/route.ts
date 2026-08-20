@@ -1,25 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { GET as acquireDocuments } from "@/app/api/documents/acquire/route";
+import { GET as extractDocuments } from "@/app/api/documents/extract/route";
+import { GET as analyzeDocuments } from "@/app/api/documents/analyze-all/route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-function workerOrigin(request: NextRequest) {
-  const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  return productionHost ? `https://${productionHost}` : request.nextUrl.origin;
+async function capture(path:string, worker:()=>Promise<Response>) {
+  try {
+    const response=await worker();
+    let body:unknown=null;
+    try { body=await response.json(); } catch { body={status:response.status}; }
+    return {path,status:response.status,ok:response.ok,body};
+  } catch (error) {
+    return {path,status:500,ok:false,body:{error:error instanceof Error?error.message:"worker_failed"}};
+  }
 }
 
-async function run(origin:string, path:string, secret:string) {
-  const response = await fetch(new URL(path, origin), {
-    cache:"no-store",
-    headers:{ authorization:`Bearer ${secret}` },
-  });
-  let body: unknown = null;
-  try { body = await response.json(); } catch { body = { status:response.status }; }
-  return { path, status:response.status, ok:response.ok, body };
-}
-
-async function batch(origin:string, path:string, secret:string, count:number) {
-  return Promise.all(Array.from({length:count},()=>run(origin,path,secret)));
+async function batch(path:string,count:number,worker:()=>Promise<Response>) {
+  return Promise.all(Array.from({length:count},()=>capture(path,worker)));
 }
 
 export async function GET(request:NextRequest) {
@@ -27,12 +26,13 @@ export async function GET(request:NextRequest) {
   if(!secret) return NextResponse.json({ok:false,error:"CRON_SECRET is not configured"},{status:503});
   if(request.headers.get("authorization")!==`Bearer ${secret}`) return NextResponse.json({ok:false,error:"Unauthorized"},{status:401});
 
-  const origin=workerOrigin(request);
   const results=[] as Array<Record<string,unknown>>;
 
-  results.push(...await batch(origin,"/api/documents/acquire",secret,4));
-  results.push(...await batch(origin,"/api/documents/extract",secret,3));
-  results.push(...await batch(origin,"/api/documents/analyze-all",secret,2));
+  // Invoke workers in-process. This avoids self-HTTP calls being intercepted by
+  // Vercel Deployment Protection before they can reach the application routes.
+  results.push(...await batch("/api/documents/acquire",4,()=>acquireDocuments(request)));
+  results.push(...await batch("/api/documents/extract",3,()=>extractDocuments()));
+  results.push(...await batch("/api/documents/analyze-all",2,()=>analyzeDocuments()));
 
-  return NextResponse.json({ok:true,steps:results.length,results});
+  return NextResponse.json({ok:results.every(result=>result.ok!==false),steps:results.length,results});
 }
