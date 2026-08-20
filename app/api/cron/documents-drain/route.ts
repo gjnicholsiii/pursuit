@@ -30,11 +30,11 @@ export async function GET(request:NextRequest) {
 
   // Invoke workers in-process. This avoids self-HTTP calls being intercepted by
   // Vercel Deployment Protection before they can reach the application routes.
-  // Extraction is now materially larger than acquisition, so bias this dedicated
-  // drain toward extraction while keeping acquisition and analysis moving.
+  // Extraction is draining faster now and analysis is accumulating behind it,
+  // so increase analysis capacity while preserving acquisition/extraction flow.
   results.push(...await batch("/api/documents/acquire",4,()=>acquireDocuments(request)));
   results.push(...await batch("/api/documents/extract",8,()=>extractDocuments()));
-  results.push(...await batch("/api/documents/analyze-all",2,()=>analyzeDocuments()));
+  results.push(...await batch("/api/documents/analyze-all",5,()=>analyzeDocuments()));
 
   return NextResponse.json({ok:results.every(result=>result.ok!==false),steps:results.length,results});
 }
