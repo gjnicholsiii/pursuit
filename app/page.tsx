@@ -3,7 +3,6 @@ import { Search } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
-import { opportunities as demoOpportunities } from "@/lib/mock-data";
 import {
   getStoredFederalCount,
   getStoredFederalOpportunities,
@@ -44,9 +43,8 @@ export default async function Home() {
     dataError = error instanceof Error ? error.message : "Unable to read the live opportunity inventory";
   }
 
-  const liveOpportunities = [...federalOpportunities, ...sledOpportunities];
-  const isLive = liveOpportunities.length > 0;
-  const opportunities = isLive ? liveOpportunities : demoOpportunities;
+  const opportunities = [...federalOpportunities, ...sledOpportunities];
+  const hasLiveData = !dataError;
   const totalCount = federalCount + sledCount;
 
   return (
@@ -63,7 +61,7 @@ export default async function Home() {
           </div>
 
           <div className="metrics">
-            <MetricCard label="Live opportunities" value={isLive ? totalCount.toLocaleString() : "Waiting"} detail={isLive ? "Current government opportunity inventory in Pursuit" : "Opportunity inventory is unavailable"} accent />
+            <MetricCard label="Live opportunities" value={hasLiveData ? totalCount.toLocaleString() : "Unavailable"} detail={hasLiveData ? "Current government opportunity inventory in Pursuit" : "Live inventory connection needs attention"} accent />
             <MetricCard label="Federal" value={federalCount.toLocaleString()} detail="Current SAM.gov opportunities" />
             <MetricCard label="K-12" value={k12Count.toLocaleString()} detail="School districts and public K-12 buyers" />
             <MetricCard label="Higher Education" value={higherEdCount.toLocaleString()} detail="Public colleges and universities" />
@@ -81,11 +79,11 @@ export default async function Home() {
             </div>
           </section>
 
-          {dataError && <section className="readiness-panel"><div className="readiness-copy"><span className="eyebrow">LIVE DATA</span><h2>Opportunity inventory connection needs attention.</h2><p>{dataError}. Pursuit is showing clearly marked preview records while the connection is checked.</p></div></section>}
+          {dataError && <section className="readiness-panel"><div className="readiness-copy"><span className="eyebrow">LIVE DATA</span><h2>Opportunity inventory connection needs attention.</h2><p>{dataError}. No substitute or demo records are being shown.</p></div></section>}
 
           <section className="section-block">
-            <div className="section-heading"><div><span>{isLive ? "LIVE INVENTORY" : "PREVIEW"}</span><h2>{isLive ? "Federal + SLED opportunities" : "Preview opportunities"}</h2></div><Link href="/opportunities" className="section-link">View all opportunities</Link></div>
-            <div className="opportunity-list">{opportunities.map(o => <OpportunityCard key={o.id} opportunity={o} />)}</div>
+            <div className="section-heading"><div><span>LIVE INVENTORY</span><h2>Federal + SLED opportunities</h2></div><Link href="/opportunities" className="section-link">View all opportunities</Link></div>
+            {opportunities.length > 0 ? <div className="opportunity-list">{opportunities.map(o => <OpportunityCard key={o.id} opportunity={o} />)}</div> : <div className="readiness-panel"><div className="readiness-copy"><h2>No live opportunities are available to display.</h2><p>Pursuit will show live records here when the inventory is available.</p></div></div>}
           </section>
 
           <section className="path-panel section-block"><div className="path-heading"><span className="eyebrow">PATH TO AWARD</span><h2>Choose an opportunity.</h2><p>Pursuit shows how the agency is buying, the requirements found in source documents, source evidence and the next action.</p></div></section>
