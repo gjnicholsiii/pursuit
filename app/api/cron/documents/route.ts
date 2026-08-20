@@ -34,9 +34,12 @@ export async function GET(request: NextRequest) {
   results.push(await run(origin, "/api/documents/ionwave-sync", secret));
   results.push(await run(origin, "/api/documents/discover", secret));
 
-  results.push(...await batch(origin, "/api/documents/acquire", secret, 3));
-  results.push(...await batch(origin, "/api/documents/extract", secret, 2));
-  results.push(...await batch(origin, "/api/documents/analyze-all", secret, 2));
+  // Keep one acquisition worker available for newly discovered live documents. The current
+  // acquisition queue is otherwise dominated by closed/expired opportunities, so devote
+  // worker capacity to the active downstream extraction and analysis backlog.
+  results.push(...await batch(origin, "/api/documents/acquire", secret, 1));
+  results.push(...await batch(origin, "/api/documents/extract", secret, 4));
+  results.push(...await batch(origin, "/api/documents/analyze-all", secret, 4));
 
   return NextResponse.json({ ok:true, steps:results.length, results });
 }
