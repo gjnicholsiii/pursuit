@@ -3,8 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-async function run(origin:string, path:string) {
-  const response = await fetch(new URL(path, origin), { cache:"no-store" });
+async function run(origin:string, path:string, secret:string) {
+  const response = await fetch(new URL(path, origin), {
+    cache:"no-store",
+    headers:{ authorization:`Bearer ${secret}` },
+  });
   let body: unknown = null;
   try { body = await response.json(); } catch { body = { status:response.status }; }
   return { path, status:response.status, ok:response.ok, body };
@@ -18,12 +21,12 @@ export async function GET(request: NextRequest) {
   const origin = request.nextUrl.origin;
   const results=[] as Array<Record<string,unknown>>;
 
-  results.push(await run(origin, "/api/documents/opengov-sync"));
-  results.push(await run(origin, "/api/documents/ionwave-sync"));
-  results.push(await run(origin, "/api/documents/discover"));
-  for (let i=0;i<4;i++) results.push(await run(origin, "/api/documents/acquire"));
-  for (let i=0;i<5;i++) results.push(await run(origin, "/api/documents/extract"));
-  for (let i=0;i<5;i++) results.push(await run(origin, "/api/documents/analyze-all"));
+  results.push(await run(origin, "/api/documents/opengov-sync", secret));
+  results.push(await run(origin, "/api/documents/ionwave-sync", secret));
+  results.push(await run(origin, "/api/documents/discover", secret));
+  for (let i=0;i<4;i++) results.push(await run(origin, "/api/documents/acquire", secret));
+  for (let i=0;i<5;i++) results.push(await run(origin, "/api/documents/extract", secret));
+  for (let i=0;i<5;i++) results.push(await run(origin, "/api/documents/analyze-all", secret));
 
   return NextResponse.json({ ok:true, steps:results.length, results });
 }
