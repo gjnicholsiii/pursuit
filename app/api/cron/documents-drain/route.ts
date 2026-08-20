@@ -28,13 +28,12 @@ export async function GET(request:NextRequest) {
 
   const results=[] as Array<Record<string,unknown>>;
 
-  // Invoke workers in-process. This avoids self-HTTP calls being intercepted by
-  // Vercel Deployment Protection before they can reach the application routes.
-  // Extraction is draining faster now and analysis is accumulating behind it,
-  // so increase analysis capacity while preserving acquisition/extraction flow.
-  results.push(...await batch("/api/documents/acquire",4,()=>acquireDocuments(request)));
-  results.push(...await batch("/api/documents/extract",8,()=>extractDocuments()));
-  results.push(...await batch("/api/documents/analyze-all",5,()=>analyzeDocuments()));
+  // Invoke workers in-process to avoid deployment-protection interception. The live
+  // acquisition queue is currently stale/closed-opportunity work, while extraction
+  // and analysis still contain active opportunity jobs, so prioritize downstream work.
+  results.push(...await batch("/api/documents/acquire",1,()=>acquireDocuments(request)));
+  results.push(...await batch("/api/documents/extract",8,()=>extractDocuments(request)));
+  results.push(...await batch("/api/documents/analyze-all",5,()=>analyzeDocuments(request)));
 
   return NextResponse.json({ok:results.every(result=>result.ok!==false),steps:results.length,results});
 }
