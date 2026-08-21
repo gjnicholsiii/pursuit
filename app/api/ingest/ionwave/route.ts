@@ -1,12 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { discoverIonWaveK12, IONWAVE_SOURCE } from "@/lib/sled/ionwave";
 import { VERIFIED_K12_IONWAVE_PORTALS } from "@/lib/k12/ionwave-portals";
 import { persistSledOpportunities } from "@/lib/sled/persistence";
+import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = requireInternalAuth(request);
+  if (auth) return auth;
+
   try {
     const discovered = await discoverIonWaveK12(VERIFIED_K12_IONWAVE_PORTALS);
     const persistence = await persistSledOpportunities(
