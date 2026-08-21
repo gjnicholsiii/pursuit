@@ -9,6 +9,8 @@ export interface Opportunity {
   value: number | null;
   due: string;
   confidence: number;
+  matchScore?: number;
+  matchReasons?: string[];
   eligibility: EligibilityStatus;
   procurementPath: string;
   stage: OpportunityStage;
