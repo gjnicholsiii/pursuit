@@ -38,11 +38,11 @@
     },
     {
       "path": "/api/documents/extract",
-      "schedule": "20,50 * * * *"
+      "schedule": "0,10,20,30,40,50 * * * *"
     },
     {
       "path": "/api/documents/analyze-all",
-      "schedule": "35,55 * * * *"
+      "schedule": "5,15,25,35,45,55 * * * *"
     }
   ]
 }
