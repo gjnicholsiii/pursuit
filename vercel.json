@@ -26,15 +26,15 @@
     },
     {
       "path": "/api/documents/acquire",
-      "schedule": "20 */4 * * *"
+      "schedule": "10 * * * *"
     },
     {
       "path": "/api/documents/extract",
-      "schedule": "35 */6 * * *"
+      "schedule": "25 * * * *"
     },
     {
       "path": "/api/documents/analyze-all",
-      "schedule": "50 */6 * * *"
+      "schedule": "40 * * * *"
     }
   ]
 }
