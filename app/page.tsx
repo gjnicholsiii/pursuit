@@ -30,7 +30,7 @@ export default async function Home() {
     if (profile) {
       opportunities = await getCustomerMatches(profile, { limit: 12, threshold: 45 });
     } else {
-      const [federal, sled, proofRows] = await Promise.all([
+      const [federal, sled, proofRowsRaw] = await Promise.all([
         getStoredFederalOpportunities(2),
         getStoredSledOpportunities(3),
         getSql().query(`
@@ -41,8 +41,9 @@ export default async function Home() {
             (select count(*)::int from agencies where agency_type = 'k12') as k12_agencies
           from opportunities o
           join sources s on s.id = o.source_id
-        `) as Promise<ProofRow[]>,
+        `),
       ]);
+      const proofRows = proofRowsRaw as unknown as ProofRow[];
       demoOpportunities = [...federal, ...sled].slice(0, 5);
       proof = proofRows[0] || proof;
     }
