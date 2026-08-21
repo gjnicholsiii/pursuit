@@ -52,7 +52,7 @@ export default async function Home() {
       <Sidebar />
       <section className="workspace">
         <header className="topbar">
-          <Link href="/opportunities" className="searchbox"><Search size={17} /><span>Search federal, state, local, K-12, higher ed...</span><kbd>⌘ K</kbd></Link>
+          <Link href="/opportunities" className="searchbox"><Search size={17} /><span>Search federal, state, local, K-12, higher ed...</span></Link>
         </header>
 
         <div className="content">
