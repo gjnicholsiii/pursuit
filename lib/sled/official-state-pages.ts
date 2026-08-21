@@ -7,276 +7,30 @@ const INDIANA_URL = "https://www.in.gov/idoa/procurement/current-business-opport
 const TENNESSEE_RFP_URL = "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information/request-for-proposals--rfp--opportunities1.html";
 const TENNESSEE_ITB_URL = "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information/invitations-to-bid--itb-.html";
 
-const INDIANA_SOURCE: SledSourceConfig = {
-  adapterKey: "indiana_idoa",
-  sourceName: "Indiana IDOA Current Business Opportunities",
-  baseUrl: INDIANA_URL,
-  jurisdiction: "Indiana",
-  sourceType: "website",
-};
+const INDIANA_SOURCE: SledSourceConfig = { adapterKey: "indiana_idoa", sourceName: "Indiana IDOA Current Business Opportunities", baseUrl: INDIANA_URL, jurisdiction: "Indiana", sourceType: "website" };
+const TENNESSEE_SOURCE: SledSourceConfig = { adapterKey: "tennessee_cpo_public", sourceName: "Tennessee Central Procurement Office Public Solicitations", baseUrl: "https://www.tn.gov/generalservices/procurement.html", jurisdiction: "Tennessee", sourceType: "website" };
 
-const TENNESSEE_SOURCE: SledSourceConfig = {
-  adapterKey: "tennessee_cpo_public",
-  sourceName: "Tennessee Central Procurement Office Public Solicitations",
-  baseUrl: "https://www.tn.gov/generalservices/procurement.html",
-  jurisdiction: "Tennessee",
-  sourceType: "website",
-};
+export interface StatePageSyncResult { source:string; adapterKey:string; rowsFound:number; stored:number; newRecords:number; changedRecords:number; ok:boolean; error?:string }
+function text(value:string){return value.replace(/\u00a0/g," ").replace(/\s+/g," ").trim()}
+function absolute(base:string,href?:string){if(!href||href.startsWith("javascript:"))return base;try{return new URL(href,base).toString()}catch{return base}}
+function isoDate(value:string){const normalized=value.replace(/\bEST\b/g,"GMT-0500").replace(/\bEDT\b/g,"GMT-0400").replace(/\bCST\b/g,"GMT-0600").replace(/\bCDT\b/g,"GMT-0500");const date=new Date(normalized);return Number.isNaN(date.getTime())?null:date.toISOString()}
+function dateOnlyIso(value:string,endOfDay=false){const match=value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(!match)return isoDate(value);const[,month,day,year]=match;return new Date(Date.UTC(Number(year),Number(month)-1,Number(day),endOfDay?23:0,endOfDay?59:0,endOfDay?59:0)).toISOString()}
 
-export interface StatePageSyncResult {
-  source: string;
-  adapterKey: string;
-  rowsFound: number;
-  stored: number;
-  newRecords: number;
-  changedRecords: number;
-  ok: boolean;
-  error?: string;
+async function fetchHtml(url:string){
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),30000);
+  try{
+    const response=await fetch(url,{headers:{accept:"text/html,application/xhtml+xml","user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0"},redirect:"follow",cache:"no-store",signal:controller.signal});
+    if(!response.ok)throw new Error(`${url} returned ${response.status}`);
+    return {html:await response.text(),finalUrl:response.url};
+  }catch(error){if(error instanceof Error&&error.name==="AbortError")throw new Error(`${url} timed out after 30s`);throw error}finally{clearTimeout(timeout)}
 }
 
-function text(value: string) {
-  return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-}
+function parseIndiana(html:string):SledOpportunityRecord[]{const $=load(html);const records:SledOpportunityRecord[]=[];$("table tr").each((_,row)=>{const cells=$(row).find("td");if(cells.length<6)return;const cell=(index:number)=>text($(cells[index]).text());const eventId=cell(2),agency=cell(1),description=cell(3),dueText=cell(4);if(!eventId||!agency||!dueText||!/\d/.test(eventId))return;const eventCell=$(cells[0]);const links=eventCell.find("a").toArray();const titleAnchor=links.find(a=>!/bid documents?/i.test(text($(a).text())));const title=text(titleAnchor?$(titleAnchor).text():eventCell.clone().find("a").remove().end().text())||cell(0);if(!title||/event name/i.test(title))return;const href=titleAnchor?$(titleAnchor).attr("href"):eventCell.find("a").first().attr("href");records.push({externalId:eventId,agency:{key:`indiana:${agency}`,name:`State of Indiana - ${agency}`,agencyType:"state_agency",jurisdictionLevel:"state",stateCode:"IN",city:"Indianapolis",website:"https://www.in.gov/"},title,description:description||null,solicitationType:/^RFP|^RFQ|^RFS|^IFB|^ITB/i.test(title)?title.split(/\s+/)[0]:"State solicitation",procurementMechanism:"Indiana state solicitation",status:"open",dueAt:isoDate(dueText),stateCode:"IN",city:"Indianapolis",sourceUrl:absolute(INDIANA_URL,href),rawPayload:{platform:"Indiana IDOA",eventId,title,agency,description,responseDueBy:dueText,contact:cell(5),sourcePage:INDIANA_URL}})});return [...new Map(records.map(record=>[record.externalId,record])).values()]}
 
-function absolute(base: string, href?: string) {
-  if (!href || href.startsWith("javascript:")) return base;
-  try { return new URL(href, base).toString(); } catch { return base; }
-}
+function parseTennesseePage(html:string,pageUrl:string,defaultType:"RFP"|"ITB"):SledOpportunityRecord[]{const $=load(html);const records:SledOpportunityRecord[]=[];$("table tr").each((_,row)=>{const cells=$(row).find("td");if(cells.length<3)return;const firstCell=$(cells[0]),firstText=text(firstCell.text()),dateText=text($(cells[1]).text()),title=text($(cells[2]).text());if(!firstText||!title||/event name|document id/i.test(firstText))return;const idMatch=firstText.match(/\b(RFP|RFQ|RFI|Event|Solicitation)[\s_:-]*([A-Z0-9-]+)/i);if(!idMatch)return;const typeToken=idMatch[1].toUpperCase(),number=idMatch[2].replace(/[^A-Z0-9-]/gi,""),externalId=`${typeToken}:${number}`;const dates=dateText.match(/\d{1,2}\/\d{1,2}\/\d{4}/g)||[];if(dates.length<2)return;const issueDate=dateOnlyIso(dates[0]!),dueAt=dateOnlyIso(dates[1]!,true);if(!dueAt||new Date(dueAt).getTime()<Date.now())return;const documents=firstCell.find("a").toArray().map(anchor=>({label:text($(anchor).text()),url:absolute(pageUrl,$(anchor).attr("href"))})).filter(item=>item.label&&item.url!==pageUrl).slice(0,30);const primary=documents[0]?.url||pageUrl,lastUpdated=cells.length>3?text($(cells[3]).text()):"",solicitationType=typeToken==="EVENT"?defaultType:typeToken;records.push({externalId,agency:{key:"tennessee:cpo",name:"State of Tennessee - Central Procurement Office",agencyType:"state_agency",jurisdictionLevel:"state",stateCode:"TN",city:"Nashville",website:"https://www.tn.gov/generalservices/procurement.html"},title,solicitationType,procurementMechanism:defaultType==="ITB"?"Tennessee Invitation to Bid":"Tennessee professional services solicitation",status:"open",issueDate,dueAt,stateCode:"TN",city:"Nashville",sourceUrl:primary,rawPayload:{platform:"Tennessee CPO",solicitationId:`${idMatch[1]} ${number}`,solicitationType,title,startDate:dates[0],responseDue:dates[1],lastUpdated:lastUpdated||null,documents,sourcePage:pageUrl}})});return records}
 
-function isoDate(value: string) {
-  const normalized = value.replace(/\bEST\b/g, "GMT-0500").replace(/\bEDT\b/g, "GMT-0400").replace(/\bCST\b/g, "GMT-0600").replace(/\bCDT\b/g, "GMT-0500");
-  const date = new Date(normalized);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function dateOnlyIso(value: string, endOfDay = false) {
-  const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!match) return isoDate(value);
-  const [, month, day, year] = match;
-  const hour = endOfDay ? 23 : 0;
-  const minute = endOfDay ? 59 : 0;
-  const second = endOfDay ? 59 : 0;
-  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), hour, minute, second));
-  return date.toISOString();
-}
-
-async function fetchHtml(url: string) {
-  const response = await fetch(url, {
-    headers: {
-      accept: "text/html,application/xhtml+xml",
-      "user-agent": "Mozilla/5.0 PursuitGovernmentRevenue/1.0",
-    },
-    redirect: "follow",
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
-  const html = await response.text();
-  return { html, finalUrl: response.url };
-}
-
-function parseIndiana(html: string): SledOpportunityRecord[] {
-  const $ = load(html);
-  const records: SledOpportunityRecord[] = [];
-
-  $("table tr").each((_, row) => {
-    const cells = $(row).find("td");
-    if (cells.length < 6) return;
-    const cell = (index: number) => text($(cells[index]).text());
-    const eventId = cell(2);
-    const agency = cell(1);
-    const description = cell(3);
-    const dueText = cell(4);
-    if (!eventId || !agency || !dueText || !/\d/.test(eventId)) return;
-
-    const eventCell = $(cells[0]);
-    const links = eventCell.find("a").toArray();
-    const titleAnchor = links.find(a => !/bid documents?/i.test(text($(a).text())));
-    const title = text(titleAnchor ? $(titleAnchor).text() : eventCell.clone().find("a").remove().end().text()) || cell(0);
-    if (!title || /event name/i.test(title)) return;
-
-    const href = titleAnchor ? $(titleAnchor).attr("href") : eventCell.find("a").first().attr("href");
-    records.push({
-      externalId: eventId,
-      agency: {
-        key: `indiana:${agency}`,
-        name: `State of Indiana - ${agency}`,
-        agencyType: "state_agency",
-        jurisdictionLevel: "state",
-        stateCode: "IN",
-        city: "Indianapolis",
-        website: "https://www.in.gov/",
-      },
-      title,
-      description: description || null,
-      solicitationType: /^RFP|^RFQ|^RFS|^IFB|^ITB/i.test(title) ? title.split(/\s+/)[0] : "State solicitation",
-      procurementMechanism: "Indiana state solicitation",
-      status: "open",
-      dueAt: isoDate(dueText),
-      stateCode: "IN",
-      city: "Indianapolis",
-      sourceUrl: absolute(INDIANA_URL, href),
-      rawPayload: {
-        platform: "Indiana IDOA",
-        eventId,
-        title,
-        agency,
-        description,
-        responseDueBy: dueText,
-        contact: cell(5),
-        sourcePage: INDIANA_URL,
-      },
-    });
-  });
-
-  return [...new Map(records.map(record => [record.externalId, record])).values()];
-}
-
-function parseTennesseePage(html: string, pageUrl: string, defaultType: "RFP" | "ITB"): SledOpportunityRecord[] {
-  const $ = load(html);
-  const records: SledOpportunityRecord[] = [];
-
-  $("table tr").each((_, row) => {
-    const cells = $(row).find("td");
-    if (cells.length < 3) return;
-    const firstCell = $(cells[0]);
-    const firstText = text(firstCell.text());
-    const dateText = text($(cells[1]).text());
-    const title = text($(cells[2]).text());
-    if (!firstText || !title || /event name|document id/i.test(firstText)) return;
-
-    const idMatch = firstText.match(/\b(RFP|RFQ|RFI|Event|Solicitation)[\s_:-]*([A-Z0-9-]+)/i);
-    if (!idMatch) return;
-    const typeToken = idMatch[1].toUpperCase();
-    const number = idMatch[2].replace(/[^A-Z0-9-]/gi, "");
-    const externalId = `${typeToken}:${number}`;
-    const dates = dateText.match(/\d{1,2}\/\d{1,2}\/\d{4}/g) || [];
-    if (dates.length < 2) return;
-    const issueDate = dateOnlyIso(dates[0]!);
-    const dueAt = dateOnlyIso(dates[1]!, true);
-    if (!dueAt || new Date(dueAt).getTime() < Date.now()) return;
-
-    const documents = firstCell.find("a").toArray().map(anchor => ({
-      label: text($(anchor).text()),
-      url: absolute(pageUrl, $(anchor).attr("href")),
-    })).filter(item => item.label && item.url !== pageUrl).slice(0, 30);
-    const primary = documents[0]?.url || pageUrl;
-    const lastUpdated = cells.length > 3 ? text($(cells[3]).text()) : "";
-    const solicitationType = typeToken === "EVENT" ? defaultType : typeToken;
-
-    records.push({
-      externalId,
-      agency: {
-        key: "tennessee:cpo",
-        name: "State of Tennessee - Central Procurement Office",
-        agencyType: "state_agency",
-        jurisdictionLevel: "state",
-        stateCode: "TN",
-        city: "Nashville",
-        website: "https://www.tn.gov/generalservices/procurement.html",
-      },
-      title,
-      solicitationType,
-      procurementMechanism: defaultType === "ITB" ? "Tennessee Invitation to Bid" : "Tennessee professional services solicitation",
-      status: "open",
-      issueDate,
-      dueAt,
-      stateCode: "TN",
-      city: "Nashville",
-      sourceUrl: primary,
-      rawPayload: {
-        platform: "Tennessee CPO",
-        solicitationId: `${idMatch[1]} ${number}`,
-        solicitationType,
-        title,
-        startDate: dates[0],
-        responseDue: dates[1],
-        lastUpdated: lastUpdated || null,
-        documents,
-        sourcePage: pageUrl,
-      },
-    });
-  });
-
-  return records;
-}
-
-async function closeMissing(adapterKey: string, startedAt: string) {
-  const sql = getSql();
-  await sql.query(
-    `update opportunities o set status='closed'
-     from sources s
-     where o.source_id=s.id and s.adapter_key=$1 and o.status='open' and o.last_seen_at < $2::timestamptz`,
-    [adapterKey, startedAt],
-  );
-}
-
-async function syncOne(
-  source: SledSourceConfig,
-  url: string,
-  parser: (html: string) => SledOpportunityRecord[],
-  bootstrap: boolean,
-): Promise<StatePageSyncResult> {
-  const startedAt = new Date().toISOString();
-  try {
-    const { html, finalUrl } = await fetchHtml(url);
-    if (/identity\.oraclecloud\.com|\/oauth2\/v1\/authorize/i.test(finalUrl)) {
-      throw new Error(`Public source redirected to authentication: ${new URL(finalUrl).hostname}`);
-    }
-    const records = parser(html);
-    if (!records.length) throw new Error("No current solicitation rows were parsed from the public page");
-    const result = await persistSledOpportunities(source, records, {
-      mode: bootstrap ? "state_page_bootstrap" : "state_page_daily",
-      recordChanges: !bootstrap,
-    });
-    await closeMissing(source.adapterKey, startedAt);
-    return { source: source.sourceName, adapterKey: source.adapterKey, rowsFound: records.length, ...result, ok: true };
-  } catch (error) {
-    return {
-      source: source.sourceName,
-      adapterKey: source.adapterKey,
-      rowsFound: 0,
-      stored: 0,
-      newRecords: 0,
-      changedRecords: 0,
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-async function syncTennessee(bootstrap: boolean): Promise<StatePageSyncResult> {
-  const startedAt = new Date().toISOString();
-  try {
-    const [rfp, itb] = await Promise.all([fetchHtml(TENNESSEE_RFP_URL), fetchHtml(TENNESSEE_ITB_URL)]);
-    const records = [
-      ...parseTennesseePage(rfp.html, TENNESSEE_RFP_URL, "RFP"),
-      ...parseTennesseePage(itb.html, TENNESSEE_ITB_URL, "ITB"),
-    ];
-    const deduped = [...new Map(records.map(record => [record.externalId, record])).values()];
-    if (!deduped.length) throw new Error("No current Tennessee CPO solicitations were parsed");
-    const result = await persistSledOpportunities(TENNESSEE_SOURCE, deduped, {
-      mode: bootstrap ? "tennessee_cpo_bootstrap" : "tennessee_cpo_daily",
-      recordChanges: !bootstrap,
-    });
-    await closeMissing(TENNESSEE_SOURCE.adapterKey, startedAt);
-    return { source: TENNESSEE_SOURCE.sourceName, adapterKey: TENNESSEE_SOURCE.adapterKey, rowsFound: deduped.length, ...result, ok: true };
-  } catch (error) {
-    return {
-      source: TENNESSEE_SOURCE.sourceName,
-      adapterKey: TENNESSEE_SOURCE.adapterKey,
-      rowsFound: 0,
-      stored: 0,
-      newRecords: 0,
-      changedRecords: 0,
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-export async function syncOfficialStatePages(bootstrap = false) {
-  return Promise.all([
-    syncOne(INDIANA_SOURCE, INDIANA_URL, parseIndiana, bootstrap),
-    syncTennessee(bootstrap),
-  ]);
-}
+async function closeMissing(adapterKey:string,startedAt:string){const sql=getSql();await sql.query(`update opportunities o set status='closed' from sources s where o.source_id=s.id and s.adapter_key=$1 and o.status='open' and o.last_seen_at < $2::timestamptz`,[adapterKey,startedAt])}
+async function syncOne(source:SledSourceConfig,url:string,parser:(html:string)=>SledOpportunityRecord[],bootstrap:boolean):Promise<StatePageSyncResult>{const startedAt=new Date().toISOString();try{const{html,finalUrl}=await fetchHtml(url);if(/identity\.oraclecloud\.com|\/oauth2\/v1\/authorize/i.test(finalUrl))throw new Error(`Public source redirected to authentication: ${new URL(finalUrl).hostname}`);const records=parser(html);if(!records.length)throw new Error("No current solicitation rows were parsed from the public page");const result=await persistSledOpportunities(source,records,{mode:bootstrap?"state_page_bootstrap":"state_page_daily",recordChanges:!bootstrap});await closeMissing(source.adapterKey,startedAt);return{source:source.sourceName,adapterKey:source.adapterKey,rowsFound:records.length,...result,ok:true}}catch(error){return{source:source.sourceName,adapterKey:source.adapterKey,rowsFound:0,stored:0,newRecords:0,changedRecords:0,ok:false,error:error instanceof Error?error.message:String(error)}}}
+async function syncTennessee(bootstrap:boolean):Promise<StatePageSyncResult>{const startedAt=new Date().toISOString();try{const[rfp,itb]=await Promise.all([fetchHtml(TENNESSEE_RFP_URL),fetchHtml(TENNESSEE_ITB_URL)]);const records=[...parseTennesseePage(rfp.html,TENNESSEE_RFP_URL,"RFP"),...parseTennesseePage(itb.html,TENNESSEE_ITB_URL,"ITB")];const deduped=[...new Map(records.map(record=>[record.externalId,record])).values()];if(!deduped.length)throw new Error("No current Tennessee CPO solicitations were parsed");const result=await persistSledOpportunities(TENNESSEE_SOURCE,deduped,{mode:bootstrap?"tennessee_cpo_bootstrap":"tennessee_cpo_daily",recordChanges:!bootstrap});await closeMissing(TENNESSEE_SOURCE.adapterKey,startedAt);return{source:TENNESSEE_SOURCE.sourceName,adapterKey:TENNESSEE_SOURCE.adapterKey,rowsFound:deduped.length,...result,ok:true}}catch(error){return{source:TENNESSEE_SOURCE.sourceName,adapterKey:TENNESSEE_SOURCE.adapterKey,rowsFound:0,stored:0,newRecords:0,changedRecords:0,ok:false,error:error instanceof Error?error.message:String(error)}}}
+export async function syncOfficialStatePages(bootstrap=false){return Promise.all([syncOne(INDIANA_SOURCE,INDIANA_URL,parseIndiana,bootstrap),syncTennessee(bootstrap)])}
