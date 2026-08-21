@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { Activity, Target } from "lucide-react";
+import { Activity, Settings2, Target } from "lucide-react";
 
 const items = [
   { label: "Revenue Today", icon: Activity, href: "/" },
   { label: "Opportunities", icon: Target, href: "/opportunities" },
+  { label: "Profile", icon: Settings2, href: "/profile" },
 ];
 
 export function Sidebar({ active = "Revenue Today" }: { active?: string }) {
