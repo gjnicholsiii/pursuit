@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { getSql } from "@/lib/db";
+import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -87,7 +88,8 @@ async function scanOne(opp: OpportunityRow): Promise<ScanResult> {
   return { opportunityId:opp.id, agencyType:opp.agency_type, sourceName:opp.source_name, discovered:discovered.size, inserted, status };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth=requireInternalAuth(request); if(auth)return auth;
   const sql = getSql();
   const rows = await sql.query(
     `select o.id, o.source_url, a.agency_type, s.source_name
