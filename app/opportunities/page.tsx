@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bell, ChevronDown, Search, SlidersHorizontal } from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
 import { getStoredFederalOpportunities, getStoredSledOpportunities } from "@/lib/opportunity-store";
@@ -70,8 +70,7 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
       <Sidebar active="Opportunities" />
       <section className="workspace">
         <header className="topbar">
-          <Link href="/opportunities" className="searchbox"><Search size={17} /><span>Search federal, state, local, K-12, higher ed...</span><kbd>⌘ K</kbd></Link>
-          <div className="top-actions"><button className="icon-button"><Bell size={18} /></button><button className="company-button">Set up company <ChevronDown size={15} /></button></div>
+          <Link href="/opportunities" className="searchbox"><Search size={17} /><span>Search federal, state, local, K-12, higher ed...</span></Link>
         </header>
 
         <div className="content">
