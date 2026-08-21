@@ -5,9 +5,10 @@ import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
-const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+const STANDARD_DOCUMENT_BYTES = 50 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = 200 * 1024 * 1024;
 
 type PendingDocumentRow = {
   job_id: string;
@@ -19,6 +20,7 @@ type PendingDocumentRow = {
   source_family: string;
   host_class: string;
   priority: number;
+  last_error: string | null;
 };
 
 function filenameFromDisposition(value: string | null) {
@@ -137,8 +139,9 @@ async function fetchDocument(document: PendingDocumentRow, signal: AbortSignal) 
 
 async function acquireOne(document: PendingDocumentRow) {
   const sql = getSql();
+  const isOversizedRetry = document.last_error === "too_large_50mb";
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), isOversizedRetry ? 45000 : 15000);
   try {
     const response = await fetchDocument(document, controller.signal);
     if (!response.ok) {
@@ -151,14 +154,14 @@ async function acquireOne(document: PendingDocumentRow) {
     const contentLength = Number(response.headers.get("content-length") || 0);
     if (contentLength > MAX_DOCUMENT_BYTES) {
       await sql.query(`update opportunity_documents set extraction_status='fetch_too_large' where id=$1`, [document.id]);
-      await failJob(document.job_id, "too_large_50mb", true);
+      await failJob(document.job_id, "too_large_200mb", true);
       return { ok: false, documentId: document.id, status: 413 };
     }
 
     const bytes = await response.arrayBuffer();
     if (bytes.byteLength > MAX_DOCUMENT_BYTES) {
       await sql.query(`update opportunity_documents set extraction_status='fetch_too_large' where id=$1`, [document.id]);
-      await failJob(document.job_id, "too_large_50mb", true);
+      await failJob(document.job_id, "too_large_200mb", true);
       return { ok: false, documentId: document.id, status: 413 };
     }
 
@@ -172,13 +175,13 @@ async function acquireOne(document: PendingDocumentRow) {
 
     const family = document.source_family === "sled" ? "sled" : "sam";
     const pathname = `${family}/${document.opportunity_id}/${document.id}/${filename}`;
-    const blob = await put(pathname, bytes, { access: "private", contentType, addRandomSuffix: false, allowOverwrite: true });
+    const blob = await put(pathname, bytes, { access: "private", contentType, addRandomSuffix: false, allowOverwrite: true, multipart: bytes.byteLength > STANDARD_DOCUMENT_BYTES });
     await sql.query(`update opportunity_documents set filename=$2,storage_key=$3,fetched_at=now(),extraction_status='fetched' where id=$1`, [document.id, filename, blob.pathname]);
     if (/\.pdf$/i.test(filename)) {
       await sql.query(
-        `insert into document_jobs(document_id,stage,host_class,priority) values($1::uuid,'extract',$2,$3)
-         on conflict(document_id,stage) do update set priority=least(document_jobs.priority,excluded.priority),state=case when document_jobs.state in ('done','leased') then document_jobs.state else 'pending' end,updated_at=now()`,
-        [document.id, document.host_class, Math.max(0, document.priority - 10)],
+        `insert into document_jobs(document_id,stage,host_class,priority,meta) values($1::uuid,'extract',$2,$3,jsonb_build_object('bytes',$4::bigint))
+         on conflict(document_id,stage) do update set priority=least(document_jobs.priority,excluded.priority),meta=coalesce(document_jobs.meta,'{}'::jsonb)||excluded.meta,state=case when document_jobs.state in ('done','leased') then document_jobs.state else 'pending' end,updated_at=now()`,
+        [document.id, document.host_class, Math.max(0, document.priority - 10), bytes.byteLength],
       );
     }
     await finishJob(document.job_id);
@@ -214,17 +217,20 @@ export async function GET(request: NextRequest) {
       order by j.priority,j.run_after,j.id limit 24 for update skip locked
     ), leased as (
       update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now()
-      from claim where j.id=claim.id returning j.id as job_id,j.document_id,j.host_class,j.priority
+      from claim where j.id=claim.id returning j.id as job_id,j.document_id,j.host_class,j.priority,j.last_error
     )
-    select leased.job_id::text,d.id,d.opportunity_id,d.source_url,o.source_url as opportunity_source_url,d.filename,s.source_family,leased.host_class,leased.priority
+    select leased.job_id::text,d.id,d.opportunity_id,d.source_url,o.source_url as opportunity_source_url,d.filename,s.source_family,leased.host_class,leased.priority,leased.last_error
     from leased join opportunity_documents d on d.id=leased.document_id join opportunities o on o.id=d.opportunity_id join sources s on s.id=o.source_id`, [owner]) as PendingDocumentRow[];
 
   if (!rows.length) return NextResponse.json({ ok: true, processed: 0, message: "No acquisition jobs are waiting" });
   const results: Array<Record<string, unknown>> = [];
-  const fast = rows.filter(r => r.host_class !== "ionwave");
-  const slow = rows.filter(r => r.host_class === "ionwave");
+  const oversized = rows.filter(r => r.last_error === "too_large_50mb");
+  const ordinary = rows.filter(r => r.last_error !== "too_large_50mb");
+  const fast = ordinary.filter(r => r.host_class !== "ionwave");
+  const slow = ordinary.filter(r => r.host_class === "ionwave");
   for (let i = 0; i < fast.length; i += 8) results.push(...await Promise.all(fast.slice(i, i + 8).map(acquireOne)));
   for (let i = 0; i < slow.length; i += 2) results.push(...await Promise.all(slow.slice(i, i + 2).map(acquireOne)));
+  for (const document of oversized) results.push(await acquireOne(document));
   const fetched = results.filter(r => r.ok).length;
   return NextResponse.json({ ok: true, processed: results.length, fetched, failed: results.length - fetched });
 }
