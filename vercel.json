@@ -34,7 +34,7 @@
     },
     {
       "path": "/api/documents/acquire",
-      "schedule": "10 * * * *"
+      "schedule": "10,30,50 * * * *"
     },
     {
       "path": "/api/documents/extract",
