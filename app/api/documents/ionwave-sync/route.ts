@@ -1,13 +1,15 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { getSql } from "@/lib/db";
+import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 function clean(value:string){ return value.replace(/\s+/g," ").trim(); }
 
-export async function GET(){
+export async function GET(request:NextRequest){
+  const auth=requireInternalAuth(request); if(auth)return auth;
   const sql=getSql();
   const opps=await sql.query(`
     select o.id,o.external_id,o.source_url
