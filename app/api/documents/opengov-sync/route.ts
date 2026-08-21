@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
 const API_BASE = "https://api.procurement.opengov.com/api/v1";
-const BATCH_SIZE = 25;
+const BATCH_SIZE = 40;
 
 type OppRow = {
   id: string;
@@ -115,7 +115,13 @@ export async function GET(request: NextRequest) {
              )
          )
        )
-     order by case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 else 2 end,
+     order by case when exists (
+                select 1 from opportunity_documents d
+                join document_jobs j on j.document_id=d.id and j.stage='acquire'
+                where d.opportunity_id=o.id and d.storage_key is null
+                  and j.state in ('failed','dead') and j.last_error='http_403'
+              ) then 0 else 1 end,
+              case when a.agency_type='k12' then 0 when a.agency_type='higher_ed' then 1 else 2 end,
               o.due_at asc nulls last,
               o.id
      limit ${BATCH_SIZE}`,
