@@ -107,7 +107,7 @@ export async function GET(request: NextRequest) {
              and d.document_type='opengov_attachment'
              and d.storage_key is null
              and (
-               (j.state='failed' and j.last_error='http_403')
+               (j.state in ('failed','dead') and j.last_error='http_403')
                or (
                  d.source_url ilike '%X-Amz-Date=%'
                  and coalesce((o.raw_payload->>'_pursuitDocumentSyncAt')::timestamptz, 'epoch'::timestamptz) < now()-interval '12 hours'
