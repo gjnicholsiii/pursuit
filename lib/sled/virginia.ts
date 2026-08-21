@@ -58,6 +58,16 @@ function classifyAgency(name: string) {
   return { agencyType: "state_agency", jurisdictionLevel: "state" };
 }
 
+function detailUrl(doc: EvaDoc) {
+  const lot = value(doc.internalid) || value(doc.externalid) || value(doc.id);
+  if (!lot) return BOARD;
+  const url = new URL("IVDetails.jsp", ROOT);
+  url.searchParams.set("PageTitle", "SO Details");
+  url.searchParams.set("rfp_id_lot", lot);
+  url.searchParams.set("rfp_id_round", "0");
+  return url.toString();
+}
+
 async function fetchOpenDocs() {
   const landing = await fetch(BOARD, {
     headers: { accept: "text/html,application/xhtml+xml", "user-agent": UA },
@@ -109,6 +119,7 @@ function toRecord(doc: EvaDoc): SledOpportunityRecord | null {
   const commCodes = Array.isArray(doc.commcode) ? doc.commcode.map(value).filter(Boolean) : [];
   const commDescriptions = Array.isArray(doc.commdesc) ? doc.commdesc.map(value).filter(Boolean) : [];
   const location = value(doc.workloc);
+  const sourceUrl = detailUrl(doc);
 
   return {
     externalId,
@@ -128,7 +139,7 @@ function toRecord(doc: EvaDoc): SledOpportunityRecord | null {
     issueDate,
     dueAt,
     stateCode: "VA",
-    sourceUrl: BOARD,
+    sourceUrl,
     rawPayload: {
       platform: "Virginia eVA Vendor Bulletin Board",
       app: value(doc.app) || null,
@@ -144,6 +155,7 @@ function toRecord(doc: EvaDoc): SledOpportunityRecord | null {
       sourceStatus: value(doc.status) || null,
       lastUpdatedAt: iso(doc.lastupdatedate),
       sourcePage: BOARD,
+      detailUrl: sourceUrl,
     },
   };
 }
