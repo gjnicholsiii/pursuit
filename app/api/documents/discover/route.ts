@@ -27,4 +27,42 @@ async function fetchAndInspect(url:string,opp:OpportunityRow,discovered:Set<stri
 
 async function scanOne(opp:OpportunityRow):Promise<ScanResult>{const sql=getSql();const discovered=new Set<string>();const follow=new Set<string>();let status=0;const targets=scanUrls(opp);for(const url of targets){const current=await fetchAndInspect(url,opp,discovered,follow);if(!status&&current)status=current}const origins=new Set(targets.map(url=>{try{return new URL(url).origin}catch{return ""}}).filter(Boolean));let followed=0;for(const url of follow){if(followed>=12)break;try{if(!origins.has(new URL(url).origin))continue}catch{continue}followed++;const secondHop=new Set<string>();await fetchAndInspect(url,opp,discovered,secondHop,8000);for(const deep of secondHop){if(followed>=16)break;try{if(!origins.has(new URL(deep).origin))continue}catch{continue}followed++;await fetchAndInspect(deep,opp,discovered,new Set<string>(),7000)}}let inserted=0;for(const url of [...discovered].slice(0,60)){const result=await sql.query(`insert into opportunity_documents (opportunity_id, document_type, filename, source_url, referenced_by, extraction_status) select $1,'sled_resource',$2,$3,$4,'pending' where not exists (select 1 from opportunity_documents where opportunity_id=$1 and source_url=$3) returning id`,[opp.id,safeName(url,`${opp.agency_type}-document`),url,`${opp.source_name} source discovery`]) as Array<{id:string}>;inserted+=result.length}return{opportunityId:opp.id,agencyType:opp.agency_type,sourceName:opp.source_name,discovered:discovered.size,inserted,status}}
 
-export async function GET(request:NextRequest){const auth=requireInternalAuth(request);if(auth)return auth;const sql=getSql();const rows=await sql.query(`select o.id,o.title,o.source_url,o.external_id,o.raw_payload,a.agency_type,s.source_name,s.adapter_key from opportunities o join agencies a on a.id=o.agency_id join sources s on s.id=o.source_id where s.source_family='sled' and s.adapter_key <> 'opengov_public' and o.status='open' and (o.due_at is null or o.due_at >= now()) and not exists (select 1 from opportunity_documents d where d.opportunity_id=o.id) order by case when s.adapter_key like 'periscope_%' then 0 when s.adapter_key in ('eva_vbo_va','nyscr_ny','peoplesoft_ca','texas_esbd_tx','powerpages_nc') then 1 when a.agency_type='k12' then 2 when a.agency_type='higher_ed' then 3 else 4 end,o.due_at asc nulls last,o.last_seen_at desc limit 240`) as OpportunityRow[];if(!rows.length)return NextResponse.json({ok:true,scannedCount:0,message:"No undiscovered open non-OpenGov SLED opportunities remain"});const scanned:ScanResult[]=[];const concurrency=6;for(let i=0;i<rows.length;i+=concurrency)scanned.push(...await Promise.all(rows.slice(i,i+concurrency).map(scanOne)));const totalInserted=scanned.reduce((sum,row)=>sum+row.inserted,0);const withDocuments=scanned.filter(row=>row.inserted>0).length;return NextResponse.json({ok:true,scannedCount:scanned.length,withDocuments,totalInserted,scanned})}
+export async function GET(request:NextRequest){
+  const auth=requireInternalAuth(request);if(auth)return auth;
+  const sql=getSql();
+  const rows=await sql.query(`
+    with candidates as (
+      select o.id,o.title,o.source_url,o.external_id,o.raw_payload,a.agency_type,s.source_name,s.adapter_key,
+        row_number() over (partition by s.adapter_key order by o.due_at asc nulls last,o.last_seen_at desc) as family_rank,
+        case
+          when s.adapter_key='eva_vbo_va' then 0
+          when s.adapter_key like 'periscope_%' then 1
+          when s.adapter_key in ('nyscr_ny','peoplesoft_ca','texas_esbd_tx','powerpages_nc') then 2
+          when a.agency_type='k12' then 3
+          when a.agency_type='higher_ed' then 4
+          else 5
+        end as priority
+      from opportunities o
+      join agencies a on a.id=o.agency_id
+      join sources s on s.id=o.source_id
+      where s.source_family='sled'
+        and s.adapter_key <> 'opengov_public'
+        and o.status='open'
+        and (o.due_at is null or o.due_at >= now())
+        and not exists (select 1 from opportunity_documents d where d.opportunity_id=o.id)
+    )
+    select id,title,source_url,external_id,raw_payload,agency_type,source_name,adapter_key
+    from candidates
+    where family_rank <= 30
+    order by priority,family_rank,due_at asc nulls last
+    limit 240
+  `) as OpportunityRow[];
+  if(!rows.length)return NextResponse.json({ok:true,scannedCount:0,message:"No undiscovered open non-OpenGov SLED opportunities remain"});
+  const scanned:ScanResult[]=[];
+  const concurrency=6;
+  for(let i=0;i<rows.length;i+=concurrency)scanned.push(...await Promise.all(rows.slice(i,i+concurrency).map(scanOne)));
+  const totalInserted=scanned.reduce((sum,row)=>sum+row.inserted,0);
+  const withDocuments=scanned.filter(row=>row.inserted>0).length;
+  const bySource=Object.values(scanned.reduce((acc,row)=>{const key=row.sourceName;const current=acc[key]||{sourceName:key,scanned:0,withDocuments:0,inserted:0};current.scanned++;if(row.inserted>0)current.withDocuments++;current.inserted+=row.inserted;acc[key]=current;return acc},{} as Record<string,{sourceName:string;scanned:number;withDocuments:number;inserted:number}>));
+  return NextResponse.json({ok:true,scannedCount:scanned.length,withDocuments,totalInserted,bySource,scanned});
+}
