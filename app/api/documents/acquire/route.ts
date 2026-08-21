@@ -26,6 +26,15 @@ function cookieHeader(headers:Headers){
 }
 async function fetchDocument(document:PendingDocumentRow,signal:AbortSignal){
   const baseHeaders={"User-Agent":"Pursuit/1.0 procurement document indexer",Accept:"*/*"};
+  if(document.host_class==="sam"){
+    const apiKey=process.env.SAM_GOV_API_KEY;
+    if(apiKey && /sam\.gov\/api\/prod\/opps\/v3\/opportunities\/resources\/files\//i.test(document.source_url)){
+      const url=new URL(document.source_url);
+      if(!url.searchParams.has("api_key"))url.searchParams.set("api_key",apiKey);
+      return fetch(url,{redirect:"follow",signal,headers:baseHeaders,cache:"no-store"});
+    }
+    return fetch(document.source_url,{redirect:"follow",signal,headers:baseHeaders,cache:"no-store"});
+  }
   if(document.host_class!=="ionwave") return fetch(document.source_url,{redirect:"follow",signal,headers:baseHeaders,cache:"no-store"});
 
   try{
