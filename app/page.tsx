@@ -4,13 +4,15 @@ import { MetricCard } from "@/components/metric-card";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
 import { getCurrentCustomerProfile, getCustomerMatches } from "@/lib/customer-profile";
+import type { CustomerProfile } from "@/lib/customer-profile";
+import type { Opportunity } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   let dataError: string | undefined;
-  let profile = null;
-  let opportunities = [];
+  let profile: CustomerProfile | null = null;
+  let opportunities: Opportunity[] = [];
 
   try {
     profile = await getCurrentCustomerProfile();
@@ -78,7 +80,7 @@ export default async function Home() {
                 <div className="readiness-copy">
                   <span className="eyebrow">HOW TO READ THE PERCENTAGES</span>
                   <h2>Match and Confidence answer different questions.</h2>
-                  <p><strong>Match</strong> measures fit to your company. <strong>Confidence</strong> measures how complete and reliable Pursuit's information is. Neither is a probability of winning.</p>
+                  <p><strong>Match</strong> measures fit to your company. <strong>Confidence</strong> measures how complete and reliable Pursuit&apos;s information is. Neither is a probability of winning.</p>
                 </div>
                 <div className="readiness-grid">
                   <div className="readiness-item"><div><strong>NAICS + PSC</strong><small>{[...profile.naicsCodes, ...profile.pscCodes].join(", ") || "Not configured"}</small></div></div>
