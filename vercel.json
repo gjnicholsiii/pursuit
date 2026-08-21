@@ -26,7 +26,7 @@
     },
     {
       "path": "/api/documents/ionwave-sync",
-      "schedule": "7 */4 * * *"
+      "schedule": "7 * * * *"
     },
     {
       "path": "/api/documents/discover",
