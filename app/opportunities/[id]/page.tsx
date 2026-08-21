@@ -172,11 +172,7 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
             <article className="brief-panel next-action-panel">
               <div className="brief-panel-heading"><ArrowUpRight size={18} /><div><span>NEXT ACTION</span><h2>What to do now</h2></div></div>
               <p className="next-action-copy">{nextAction}</p>
-              <div className="brief-decisions">
-                <button>Pursue</button>
-                <button>Watch</button>
-                <button>Walk</button>
-              </div>
+              {opportunity.sourceUrl && <a className="secondary-button" href={opportunity.sourceUrl} target="_blank" rel="noreferrer">Continue at original source <ArrowUpRight size={15} /></a>}
             </article>
           </section>
 
