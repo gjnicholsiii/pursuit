@@ -30,11 +30,11 @@
     },
     {
       "path": "/api/documents/extract",
-      "schedule": "25 * * * *"
+      "schedule": "20,50 * * * *"
     },
     {
       "path": "/api/documents/analyze-all",
-      "schedule": "40 * * * *"
+      "schedule": "35,55 * * * *"
     }
   ]
 }
