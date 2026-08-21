@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/documents/opengov-sync",
-      "schedule": "2 * * * *"
+      "schedule": "2,17,32,47 * * * *"
     },
     {
       "path": "/api/documents/ionwave-sync",
