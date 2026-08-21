@@ -5,7 +5,9 @@ import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 90;
+export const maxDuration = 180;
+
+const STANDARD_DOCUMENT_BYTES = 50 * 1024 * 1024;
 
 interface FetchedDocumentRow {
   job_id: string;
@@ -15,6 +17,7 @@ interface FetchedDocumentRow {
   storage_key: string;
   host_class: string;
   priority: number;
+  bytes: number;
 }
 
 async function finishJob(jobId:string){
@@ -75,15 +78,18 @@ export async function GET(request: NextRequest) {
        where j.stage='extract' and j.state='pending' and j.run_after<=now() and d.extraction_status='fetched' and d.storage_key is not null and lower(d.filename) like '%.pdf' and o.status='open' and (o.due_at is null or o.due_at>=now())
        order by j.priority,j.run_after,j.id limit 16 for update skip locked
      ), leased as (
-       update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now() from claim where j.id=claim.id returning j.id as job_id,j.document_id,j.host_class,j.priority
+       update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now() from claim where j.id=claim.id returning j.id as job_id,j.document_id,j.host_class,j.priority,j.meta
      )
-     select leased.job_id::text,d.id,d.opportunity_id,d.filename,d.storage_key,leased.host_class,leased.priority from leased join opportunity_documents d on d.id=leased.document_id`,[owner]
+     select leased.job_id::text,d.id,d.opportunity_id,d.filename,d.storage_key,leased.host_class,leased.priority,coalesce((leased.meta->>'bytes')::bigint,0)::bigint as bytes from leased join opportunity_documents d on d.id=leased.document_id`,[owner]
   ) as FetchedDocumentRow[];
 
   if (!rows.length) return NextResponse.json({ ok:true, processed:0, message:"No extraction jobs are waiting" });
   const results=[] as Array<Record<string,unknown>>;
+  const ordinary=rows.filter(row=>Number(row.bytes)<=STANDARD_DOCUMENT_BYTES);
+  const oversized=rows.filter(row=>Number(row.bytes)>STANDARD_DOCUMENT_BYTES);
   const concurrency=4;
-  for(let i=0;i<rows.length;i+=concurrency) results.push(...await Promise.all(rows.slice(i,i+concurrency).map(extractOne)));
+  for(let i=0;i<ordinary.length;i+=concurrency) results.push(...await Promise.all(ordinary.slice(i,i+concurrency).map(extractOne)));
+  for(const document of oversized) results.push(await extractOne(document));
   const extracted=results.filter(result=>result.ok).length;
   return NextResponse.json({ ok:true, processed:results.length, extracted, failed:results.length-extracted });
 }
