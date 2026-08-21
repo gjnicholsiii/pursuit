@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
+import { getCurrentCustomerProfile, getCustomerMatches } from "@/lib/customer-profile";
 import { getSql } from "@/lib/db";
 import { getStoredFederalCount, getStoredSledCount } from "@/lib/opportunity-store";
 import type { Opportunity } from "@/lib/types";
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 type InventorySource = "all" | "federal" | "sled";
+type SearchScope = "matches" | "all";
 
 type SearchRow = {
   id: string;
@@ -128,6 +130,7 @@ async function searchInventory(query: string, source: InventorySource, state: st
       or coalesce(o.external_id, '') ilike '%' || ${p} || '%'
       or coalesce(o.solicitation_type, '') ilike '%' || ${p} || '%'
       or array_to_string(o.naics_codes, ' ') ilike '%' || ${p} || '%'
+      or coalesce(o.raw_payload->>'classificationCode','') ilike '%' || ${p} || '%'
     )`);
   }
 
@@ -135,21 +138,9 @@ async function searchInventory(query: string, source: InventorySource, state: st
   const limitParam = `$${values.length}`;
   const rows = await sql.query(`
     select
-      o.id,
-      a.canonical_name as agency,
-      a.agency_type,
-      s.adapter_key,
-      s.source_name,
-      o.title,
-      o.solicitation_type,
-      o.due_at,
-      o.estimated_value,
-      o.state_code,
-      o.city,
-      o.naics_codes,
-      o.set_aside,
-      o.source_url,
-      o.external_id,
+      o.id, a.canonical_name as agency, a.agency_type, s.adapter_key, s.source_name,
+      o.title, o.solicitation_type, o.due_at, o.estimated_value, o.state_code, o.city,
+      o.naics_codes, o.set_aside, o.source_url, o.external_id,
       coalesce(ds.identified, 0)::int as document_identified,
       coalesce(ds.fetched, 0)::int as document_fetched,
       coalesce(ds.analyzed, 0)::int as document_analyzed,
@@ -159,24 +150,18 @@ async function searchInventory(query: string, source: InventorySource, state: st
     join agencies a on a.id = o.agency_id
     join sources s on s.id = o.source_id
     left join (
-      select
-        opportunity_id,
-        count(*)::int as identified,
+      select opportunity_id, count(*)::int as identified,
         count(*) filter (where fetched_at is not null)::int as fetched,
         count(*) filter (where extraction_status in ('complete', 'extracted', 'analyzed'))::int as analyzed,
         count(*) filter (where is_missing)::int as missing
-      from opportunity_documents
-      group by opportunity_id
+      from opportunity_documents group by opportunity_id
     ) ds on ds.opportunity_id = o.id
     where ${clauses.join(" and ")}
     order by o.due_at asc nulls last, o.last_seen_at desc
     limit ${limitParam}
   `, values) as SearchRow[];
 
-  return {
-    opportunities: rows.map(toOpportunity),
-    total: Number(rows[0]?.matching_count || 0),
-  };
+  return { opportunities: rows.map(toOpportunity), total: Number(rows[0]?.matching_count || 0) };
 }
 
 export default async function OpportunitiesPage({ searchParams }: { searchParams: SearchParams }) {
@@ -185,6 +170,11 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
   const rawSource = first(params.source);
   const source: InventorySource = rawSource === "federal" || rawSource === "sled" ? rawSource : "all";
   const state = first(params.state).toUpperCase();
+  const profile = await getCurrentCustomerProfile();
+  const requestedScope = first(params.scope);
+  const scope: SearchScope = profile && requestedScope !== "all" ? "matches" : "all";
+  const thresholdInput = Number(first(params.match) || "45");
+  const threshold = Number.isFinite(thresholdInput) ? Math.max(0, Math.min(100, thresholdInput)) : 45;
 
   let opportunities: Opportunity[] = [];
   let matchingCount = 0;
@@ -194,7 +184,9 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
 
   try {
     const [results, federalTotal, sledTotal] = await Promise.all([
-      searchInventory(query, source, state),
+      scope === "matches" && profile
+        ? getCustomerMatches(profile, { limit: 500, threshold, query, source, state: STATE_CODES.includes(state) ? state : "" }).then(items => ({ opportunities: items, total: items.length }))
+        : searchInventory(query, source, state),
       getStoredFederalCount(),
       getStoredSledCount(),
     ]);
@@ -207,30 +199,39 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
   }
 
   const totalLive = federalCount + sledCount;
-  const capped = matchingCount > opportunities.length;
+  const capped = scope === "all" && matchingCount > opportunities.length;
 
   return (
     <main className="shell">
       <Sidebar active="Opportunities" />
       <section className="workspace">
         <header className="topbar">
-          <Link href="/opportunities" className="searchbox"><Search size={17} /><span>Search federal, state, local, K-12, higher ed...</span></Link>
+          <Link href={profile ? "/opportunities?scope=matches" : "/opportunities"} className="searchbox"><Search size={17} /><span>{profile ? "Search your matches or all Pursuit..." : "Search federal, state, local, K-12, higher ed..."}</span></Link>
         </header>
 
         <div className="content">
           <div className="hero-row inventory-hero">
             <div>
-              <span className="eyebrow">LIVE INVENTORY</span>
-              <h1>OPPORTUNITIES</h1>
-              <p>{totalLive.toLocaleString()} current federal + SLED opportunities searchable in Pursuit.</p>
+              <span className="eyebrow">{scope === "matches" ? "YOUR SEARCH" : "LIVE INVENTORY"}</span>
+              <h1>{scope === "matches" ? "MY MATCHES" : "ALL OPPORTUNITIES"}</h1>
+              <p>{scope === "matches" ? `Ranked against ${profile?.organizationName}'s selling profile.` : `${totalLive.toLocaleString()} current federal + SLED opportunities searchable in Pursuit.`}</p>
             </div>
             <Link href="/" className="secondary-button">Revenue Today</Link>
           </div>
 
+          {profile && (
+            <div className="inventory-summary">
+              <div><strong>{scope === "matches" ? "My Matches" : "All Pursuit"}</strong><span>current search scope</span></div>
+              <Link href={scope === "matches" ? "/opportunities?scope=all" : "/opportunities?scope=matches"}>{scope === "matches" ? "Search all Pursuit" : "Return to my matches"}</Link>
+              <Link href="/profile">Edit selling profile</Link>
+            </div>
+          )}
+
           <form className="opportunity-filters" action="/opportunities" method="get">
+            <input type="hidden" name="scope" value={scope} />
             <label className="filter-search">
               <Search size={16} />
-              <input name="q" defaultValue={query} placeholder="Agency, keyword, NAICS, solicitation..." />
+              <input name="q" defaultValue={query} placeholder="Agency, keyword, NAICS, PSC, solicitation..." />
             </label>
             <label>
               <span>Source</span>
@@ -247,40 +248,40 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
                 {STATE_CODES.map(code => <option key={code} value={code}>{code}</option>)}
               </select>
             </label>
+            {scope === "matches" && (
+              <label>
+                <span>Minimum match</span>
+                <select name="match" defaultValue={String(threshold)}>
+                  <option value="80">80%+ excellent fits</option>
+                  <option value="60">60%+ strong fits</option>
+                  <option value="45">45%+ relevant</option>
+                  <option value="25">25%+ broad</option>
+                  <option value="0">Any profile match</option>
+                </select>
+              </label>
+            )}
             <button type="submit" className="filter-button"><SlidersHorizontal size={15} />Filter</button>
           </form>
 
           <div className="inventory-summary">
-            <div><strong>{matchingCount.toLocaleString()}</strong><span>matching opportunities</span></div>
+            <div><strong>{matchingCount.toLocaleString()}</strong><span>{scope === "matches" ? "ranked matches shown" : "matching opportunities"}</span></div>
             <div><strong>{federalCount.toLocaleString()}</strong><span>federal live</span></div>
             <div><strong>{sledCount.toLocaleString()}</strong><span>SLED live</span></div>
-            {(query || source !== "all" || state) && <Link href="/opportunities">Clear filters</Link>}
+            {(query || source !== "all" || state || (scope === "matches" && threshold !== 45)) && <Link href={scope === "matches" ? "/opportunities?scope=matches" : "/opportunities?scope=all"}>Clear filters</Link>}
           </div>
 
           {capped && <p className="inventory-note">Showing the first 500 matches. Refine the filters to narrow the result set.</p>}
 
           {dataError && (
-            <section className="readiness-panel">
-              <div className="readiness-copy">
-                <span className="eyebrow">LIVE DATA</span>
-                <h2>Opportunity inventory connection needs attention.</h2>
-                <p>{dataError}</p>
-              </div>
-            </section>
+            <section className="readiness-panel"><div className="readiness-copy"><span className="eyebrow">LIVE DATA</span><h2>Opportunity inventory connection needs attention.</h2><p>{dataError}</p></div></section>
           )}
 
           <section className="section-block inventory-results">
-            <div className="section-heading">
-              <div><span>SEARCH RESULTS</span><h2>{opportunities.length ? "Current opportunities" : "No matching opportunities"}</h2></div>
-            </div>
+            <div className="section-heading"><div><span>SEARCH RESULTS</span><h2>{opportunities.length ? scope === "matches" ? "Ranked for your company" : "Current opportunities" : "No matching opportunities"}</h2></div></div>
             {opportunities.length > 0 ? (
               <div className="opportunity-list">{opportunities.map(item => <OpportunityCard key={item.id} opportunity={item} />)}</div>
             ) : (
-              <div className="empty-state">
-                <Search size={20} />
-                <strong>Nothing matches those filters.</strong>
-                <p>Clear one or more filters to widen the live inventory.</p>
-              </div>
+              <div className="empty-state"><Search size={20} /><strong>Nothing matches those filters.</strong><p>{scope === "matches" ? "Lower the match threshold, edit your profile, or deliberately search all Pursuit." : "Clear one or more filters to widen the live inventory."}</p></div>
             )}
           </section>
         </div>
