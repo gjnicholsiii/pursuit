@@ -1,12 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { getSql } from "@/lib/db";
+import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 90;
 
 const API_BASE = "https://api.procurement.opengov.com/api/v1";
-const BATCH_SIZE = 100;
+const BATCH_SIZE = 25;
 
 type OppRow = {
   id: string;
@@ -78,7 +79,10 @@ function attachmentKey(a: Attachment) {
   return a.path || (a.id ? `attachment:${a.id}` : a.url || a.filename || "");
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = requireInternalAuth(request);
+  if (auth) return auth;
+
   const sql = getSql();
   const opportunities = await sql.query(
     `select o.id,
@@ -128,48 +132,44 @@ export async function GET() {
     try {
       const response = await fetch(`${API_BASE}/project/${opp.project_id}`, {
         headers: { accept: "application/json" },
-        cache: "no-store",
+        signal: AbortSignal.timeout(10000),
       });
-      if (!response.ok) {
-        processed.push({ opportunityId: opp.id, status: response.status, error: "OpenGov project detail failed" });
-        continue;
-      }
-
+      if (!response.ok) throw new Error(`OpenGov API returned ${response.status}`);
       const detail = await response.json() as ProjectDetail;
       const attachments = new Map<string, Attachment>();
-      for (const a of detail.attachments || []) if (a.url && attachmentKey(a)) attachments.set(attachmentKey(a), a);
+      for (const a of detail.attachments || []) {
+        const key = attachmentKey(a);
+        if (key) attachments.set(key, a);
+      }
       for (const q of detail.questionnaires || []) {
-        for (const a of q.attachments || []) if (a.url && attachmentKey(a)) attachments.set(attachmentKey(a), a);
+        for (const a of q.attachments || []) {
+          const key = attachmentKey(a);
+          if (key) attachments.set(key, a);
+        }
       }
 
       for (const a of attachments.values()) {
-        const filename = a.filename || a.name || a.title || `opengov-${a.id || "document"}.${a.fileExtension || "bin"}`;
+        if (!a.url) continue;
+        const filename = a.filename || a.name || a.title || `opengov-${a.id || "attachment"}${a.fileExtension || ""}`;
+        const existing = await sql.query(
+          `select id, source_url, storage_key
+           from opportunity_documents
+           where opportunity_id=$1::uuid and document_type='opengov_attachment' and filename=$2::text
+           limit 1`,
+          [opp.id, filename],
+        ) as Array<{id:string;source_url:string;storage_key:string|null}>;
 
-        const refreshed = await sql.query(
-          `update opportunity_documents
-           set source_url=$3::text,
-               extraction_status=case when storage_key is null then 'pending' else extraction_status end
-           where opportunity_id=$1::uuid
-             and document_type='opengov_attachment'
-             and filename=$2::text
-             and source_url is distinct from $3::text
-           returning id`,
-          [opp.id, filename, a.url],
-        ) as Array<{id:string}>;
-
-        if (refreshed.length) {
-          attachmentUrlsRefreshed += refreshed.length;
-          for (const document of refreshed) {
+        if (existing[0]) {
+          if (!existing[0].storage_key && existing[0].source_url !== a.url) {
+            await sql.query(`update opportunity_documents set source_url=$2::text where id=$1::uuid`, [existing[0].id, a.url]);
+            attachmentUrlsRefreshed++;
             const revived = await sql.query(
               `update document_jobs
-               set state='pending', attempts=0, run_after=now(), leased_until=null, lease_owner=null,
-                   last_error=null, updated_at=now()
-               where document_id=$1::uuid
-                 and stage='acquire'
-                 and state in ('failed','dead','pending')
+               set state='pending', attempts=0, run_after=now(), leased_until=null, lease_owner=null, last_error=null, updated_at=now()
+               where document_id=$1::uuid and stage='acquire' and state in ('failed','dead')
                returning id`,
-              [document.id],
-            ) as Array<{id:string}>;
+              [existing[0].id],
+            ) as Array<{id:number}>;
             acquisitionJobsRevived += revived.length;
           }
           continue;
