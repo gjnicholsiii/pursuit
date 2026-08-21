@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Sidebar } from "@/components/sidebar";
 import { getCurrentCustomerProfile } from "@/lib/customer-profile";
 import { saveProfileAction } from "./actions";
+import "./profile.css";
 
 export const dynamic = "force-dynamic";
 
