@@ -25,6 +25,10 @@
       "schedule": "45 */4 * * *"
     },
     {
+      "path": "/api/cron/k12-nces",
+      "schedule": "25 * * * *"
+    },
+    {
       "path": "/api/documents/opengov-sync",
       "schedule": "2,17,32,47 * * * *"
     },
