@@ -42,6 +42,12 @@ export async function GET(request: NextRequest) {
     maine,
   ].filter(result => !result.ok);
 
+  // Keep partial SLED failures visible in Vercel runtime logs so the next sweep can
+  // repair the specific connector/source instead of treating every 207 as opaque.
+  if (failures.length > 0) {
+    console.warn("SLED_STATE_PAGES_PARTIAL", JSON.stringify(failures));
+  }
+
   return NextResponse.json({
     ok: failures.length === 0,
     sync: { official, periscope, jaggaer, cgiAdvantage, peoplesoft, kansas, delaware, maine },
