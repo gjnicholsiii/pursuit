@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncNcesDistrictBatch, STATE_FIPS } from "@/lib/k12/nces-districts";
+import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 120;
 
 export async function GET(request: NextRequest) {
+  const auth = requireInternalAuth(request);
+  if (auth) return auth;
+
   const statesParam = request.nextUrl.searchParams.get("states") || "AL";
   const requested = statesParam.split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
   const states = requested.filter(s => STATE_FIPS[s]);
