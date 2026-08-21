@@ -70,6 +70,11 @@ function changedFields(before: Record<string, unknown>, after: Record<string, un
   return Object.keys(after).filter(key => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
 }
 
+function isCancelledTitle(title?: string | null) {
+  const normalized = title?.toLowerCase() || "";
+  return normalized.includes("cancelled") || normalized.includes("canceled");
+}
+
 export async function persistSamOpportunities(
   rawOpportunities: SamOpportunityRaw[],
   context: SamPersistenceContext = {},
@@ -145,7 +150,7 @@ export async function persistSamOpportunities(
       description: rawForStorage.description || null,
       solicitation_type: rawForStorage.type || rawForStorage.baseType || null,
       procurement_mechanism: rawForStorage.type || rawForStorage.baseType || null,
-      status: rawForStorage.active === "No" ? "closed" : "open",
+      status: rawForStorage.active === "No" || isCancelledTitle(rawForStorage.title) ? "closed" : "open",
       issue_date: safeDate(rawForStorage.postedDate),
       due_at: safeTimestamp(rawForStorage.responseDeadLine),
       state_code: stateCode && stateCode.length === 2 ? stateCode : null,
