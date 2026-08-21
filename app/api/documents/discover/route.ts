@@ -32,7 +32,7 @@ export async function GET(request:NextRequest){
   const sql=getSql();
   const rows=await sql.query(`
     with candidates as (
-      select o.id,o.title,o.source_url,o.external_id,o.raw_payload,a.agency_type,s.source_name,s.adapter_key,
+      select o.id,o.title,o.source_url,o.external_id,o.raw_payload,o.due_at,a.agency_type,s.source_name,s.adapter_key,
         row_number() over (partition by s.adapter_key order by o.due_at asc nulls last,o.last_seen_at desc) as family_rank,
         case
           when s.adapter_key='eva_vbo_va' then 0
