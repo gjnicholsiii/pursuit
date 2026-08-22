@@ -5,7 +5,7 @@ import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 const STANDARD_DOCUMENT_BYTES = 50 * 1024 * 1024;
 
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
     `with claim as (
        select j.id from document_jobs j join opportunity_documents d on d.id=j.document_id join opportunities o on o.id=d.opportunity_id
        where j.stage='extract' and j.state='pending' and j.run_after<=now() and d.extraction_status='fetched' and d.storage_key is not null and lower(d.filename) like '%.pdf' and o.status='open' and (o.due_at is null or o.due_at>=now())
-       order by j.priority,j.run_after,j.id limit 16 for update skip locked
+       order by j.priority,j.run_after,j.id limit 24 for update skip locked
      ), leased as (
        update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now() from claim where j.id=claim.id returning j.id as job_id,j.document_id,j.host_class,j.priority,j.meta
      )
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
   const results=[] as Array<Record<string,unknown>>;
   const ordinary=rows.filter(row=>Number(row.bytes)<=STANDARD_DOCUMENT_BYTES);
   const oversized=rows.filter(row=>Number(row.bytes)>STANDARD_DOCUMENT_BYTES);
-  const concurrency=4;
+  const concurrency=3;
   for(let i=0;i<ordinary.length;i+=concurrency) results.push(...await Promise.all(ordinary.slice(i,i+concurrency).map(extractOne)));
   for(const document of oversized) results.push(await extractOne(document));
   const extracted=results.filter(result=>result.ok).length;
