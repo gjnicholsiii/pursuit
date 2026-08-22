@@ -228,7 +228,10 @@ export async function GET(request: NextRequest) {
   const ordinary = rows.filter(r => r.last_error !== "too_large_50mb");
   const fast = ordinary.filter(r => r.host_class !== "ionwave");
   const slow = ordinary.filter(r => r.host_class === "ionwave");
-  for (let i = 0; i < fast.length; i += 12) results.push(...await Promise.all(fast.slice(i, i + 12).map(acquireOne)));
+  // Keep full-document buffers bounded. A single file can be large, and Vercel
+  // isolates have finite memory; four concurrent ordinary documents keeps the
+  // worker well below the prior 12-buffer peak while preserving bulk throughput.
+  for (let i = 0; i < fast.length; i += 4) results.push(...await Promise.all(fast.slice(i, i + 4).map(acquireOne)));
   for (let i = 0; i < slow.length; i += 2) results.push(...await Promise.all(slow.slice(i, i + 2).map(acquireOne)));
   for (const document of oversized) results.push(await acquireOne(document));
   const fetched = results.filter(r => r.ok).length;
