@@ -5,7 +5,7 @@ import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const STANDARD_DOCUMENT_BYTES = 50 * 1024 * 1024;
 const MAX_DOCUMENT_BYTES = 200 * 1024 * 1024;
@@ -214,7 +214,7 @@ export async function GET(request: NextRequest) {
   const rows = await sql.query(`with claim as (
       select j.id from document_jobs j join opportunity_documents d on d.id=j.document_id join opportunities o on o.id=d.opportunity_id
       where j.stage='acquire' and j.state='pending' and j.run_after<=now() and d.storage_key is null and d.is_missing=false and o.status='open' and (o.due_at is null or o.due_at>=now())
-      order by j.priority,j.run_after,j.id limit 24 for update skip locked
+      order by j.priority,j.run_after,j.id limit 48 for update skip locked
     ), leased as (
       update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now()
       from claim where j.id=claim.id returning j.id as job_id,j.document_id,j.host_class,j.priority,j.last_error
@@ -228,7 +228,7 @@ export async function GET(request: NextRequest) {
   const ordinary = rows.filter(r => r.last_error !== "too_large_50mb");
   const fast = ordinary.filter(r => r.host_class !== "ionwave");
   const slow = ordinary.filter(r => r.host_class === "ionwave");
-  for (let i = 0; i < fast.length; i += 8) results.push(...await Promise.all(fast.slice(i, i + 8).map(acquireOne)));
+  for (let i = 0; i < fast.length; i += 12) results.push(...await Promise.all(fast.slice(i, i + 12).map(acquireOne)));
   for (let i = 0; i < slow.length; i += 2) results.push(...await Promise.all(slow.slice(i, i + 2).map(acquireOne)));
   for (const document of oversized) results.push(await acquireOne(document));
   const fetched = results.filter(r => r.ok).length;
