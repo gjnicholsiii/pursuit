@@ -14,7 +14,6 @@
     { "path": "/api/documents/opengov-sync", "schedule": "2,17,32,47 * * * *" },
     { "path": "/api/documents/ionwave-sync", "schedule": "7 * * * *" },
     { "path": "/api/documents/discover", "schedule": "8,38 * * * *" },
-    { "path": "/api/cron/documents-acquire-bulk", "schedule": "0,5,10,15,20,25,30,35,40,45,50,55 * * * *" },
-    { "path": "/api/cron/documents-drain", "schedule": "2,7,12,17,22,27,32,37,42,47,52,57 * * * *" }
+    { "path": "/api/cron/documents-drain", "schedule": "* * * * *" }
   ]
 }
