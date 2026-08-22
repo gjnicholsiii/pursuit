@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 function workerOrigin(request: NextRequest) {
   const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
@@ -25,9 +25,9 @@ export async function GET(request: NextRequest) {
 
   const origin = workerOrigin(request);
 
-  // Cost-controlled document maintenance. Keep current opportunity discovery fresh,
-  // acquire newly discovered live documents, and advance downstream intelligence in
-  // small bounded batches. Historical backlog is allowed to wait in Neon.
+  // Bulk document maintenance. Give discovery and acquisition enough wall-clock budget
+  // to traverse slow public procurement portals while individual workers retain their
+  // own bounded batches, retries, and source-specific throttling.
   const syncResults=await Promise.all([
     run(origin, "/api/documents/opengov-sync", secret),
     run(origin, "/api/documents/ionwave-sync", secret),
