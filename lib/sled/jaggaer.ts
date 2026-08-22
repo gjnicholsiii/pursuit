@@ -79,6 +79,10 @@ function parseJaggaerEvents(html: string, config: JaggaerStateConfig, complete: 
     const title = text($(anchor).text());
     if (!title) return;
 
+    const eventHref = $(anchor).attr("href") || "";
+    let eventUrl = base;
+    try { if (eventHref) eventUrl = new URL(eventHref, base).toString(); } catch {}
+
     const container = $(anchor).closest("td");
     if (!container.length) return;
     const block = text(container.text());
@@ -123,7 +127,7 @@ function parseJaggaerEvents(html: string, config: JaggaerStateConfig, complete: 
       issueDate,
       dueAt,
       stateCode: config.stateCode,
-      sourceUrl: base,
+      sourceUrl: eventUrl,
       rawPayload: {
         platform: "JAGGAER ONE",
         state: config.stateName,
@@ -137,6 +141,7 @@ function parseJaggaerEvents(html: string, config: JaggaerStateConfig, complete: 
         pdfDocumentKey: pdfKey,
         pdfAvailable: Boolean(pdfHref),
         sourcePage: base,
+        detailUrl: eventUrl,
         pageLimited: !complete,
       },
     });
