@@ -14,6 +14,7 @@
     { "path": "/api/documents/opengov-sync", "schedule": "2,17,32,47 * * * *" },
     { "path": "/api/documents/ionwave-sync", "schedule": "7 * * * *" },
     { "path": "/api/documents/discover", "schedule": "8,38 * * * *" },
+    { "path": "/api/documents/acquire", "schedule": "* * * * *" },
     { "path": "/api/cron/documents-drain", "schedule": "* * * * *" }
   ]
 }
