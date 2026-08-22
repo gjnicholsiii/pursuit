@@ -59,7 +59,7 @@ async function inspectHtml(html:string,pageUrl:string,opp:OpportunityRow,discove
     const oppSpecific=ids.some(id=>hay.includes(id))||titleWords.filter(word=>hay.includes(word)).length>=3;
     for(const raw of values){
       if(raw.startsWith("javascript:")){if(opp.adapter_key.startsWith("periscope_"))addPeriscopeDownload(pageUrl,raw,text,discovered);for(const extracted of extractQuotedUrls(raw,pageUrl)){if(FILE_EXT.test(extracted)||DOC_URL_HINT.test(extracted))discovered.add(extracted);else if(DOC_TEXT_HINT.test(text)||oppSpecific)follow.add(extracted)}continue}
-      const url=absolute(pageUrl,raw);if(!url)continue;if(FILE_EXT.test(url))discovered.add(url);else if(oppSpecific)follow.add(url);else if(DOC_URL_HINT.test(url)&&DOC_TEXT_HINT.test(text||url))follow.add(url);else if(DOC_TEXT_HINT.test(text))follow.add(url)
+      const url=absolute(pageUrl,raw);if(!url)continue;if(FILE_EXT.test(url))discovered.add(url);else if(oppSpecific)follow.add(url);else if(DOC_URL_HINT.test(url)&&(DOC_TEXT_HINT.test(text)||DOC_TEXT_HINT.test(url)))follow.add(url);else if(DOC_TEXT_HINT.test(text))follow.add(url)
     }
   });
   for(const match of html.matchAll(/https?:\/\/[^"'<>\s]+/g)){const url=match[0].replace(/&amp;/g,"&");if(FILE_EXT.test(url))discovered.add(url)}
