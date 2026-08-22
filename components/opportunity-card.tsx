@@ -8,23 +8,14 @@ export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
   const lowConfidence = opportunity.confidence < 75;
   const insight = opportunity.matchScore != null
     ? opportunity.matchReasons?.slice(0, 3).join(" · ") || "Profile criteria matched this opportunity."
-    : lowConfidence
-      ? opportunity.uncertainty?.[0]
-      : opportunity.verified[0];
+    : lowConfidence ? opportunity.uncertainty?.[0] : opportunity.verified[0];
 
   return (
     <article className="opportunity-card">
       <div className="opp-main">
-        <div className="opp-kicker">
-          <span className="agency">{opportunity.agency}</span>
-          <span className={`eligibility-pill ${opportunity.eligibility}`}>{opportunity.eligibility.toUpperCase()}</span>
-        </div>
+        <div className="opp-kicker"><span className="agency">{opportunity.agency}</span><span className={`eligibility-pill ${opportunity.eligibility}`}>{opportunity.eligibility.toUpperCase()}</span></div>
         <h3><Link href={`/opportunities/${opportunity.id}`}>{opportunity.title}</Link></h3>
-        <div className="opp-meta">
-          <span><MapPin size={14} />{opportunity.location}</span>
-          <span><DollarSign size={14} />{opportunity.value == null ? "Value not stated" : money(opportunity.value)}</span>
-          <span><Clock3 size={14} />Due {opportunity.due}</span>
-        </div>
+        <div className="opp-meta"><span><MapPin size={14} />{opportunity.location}</span><span><DollarSign size={14} />{opportunity.value == null ? "Value not stated" : money(opportunity.value)}</span><span><Clock3 size={14} />Due {opportunity.due}</span></div>
         <div className="tags"><span className="path-tag">{opportunity.procurementPath}</span>{opportunity.tags.map(tag => <span key={tag}>{tag}</span>)}</div>
       </div>
       <div className="opp-insight">
@@ -34,16 +25,7 @@ export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
       </div>
       <div className="opp-score">
         {opportunity.matchScore != null && <><span>Relevance</span><strong>{opportunity.matchScore}%</strong></>}
-        {opportunity.matchScore != null ? (
-          <form action={`/api/opportunities/${opportunity.id}/go-no-go`} method="post">
-            <button className="go-no-go-button" type="submit">GO / NO-GO</button>
-          </form>
-        ) : (
-          <>
-            <span>Confidence</span>
-            <strong>{opportunity.confidence}%</strong>
-          </>
-        )}
+        {opportunity.matchScore != null ? <form action={`/api/opportunities/${opportunity.id}/go-no-go`} method="post"><button className="filter-button" type="submit">GO / NO-GO</button></form> : <><span>Confidence</span><strong>{opportunity.confidence}%</strong></>}
         <Link href={`/opportunities/${opportunity.id}`} aria-label="Open opportunity brief"><ArrowUpRight size={18} /></Link>
       </div>
     </article>
