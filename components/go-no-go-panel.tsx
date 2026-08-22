@@ -1,9 +1,11 @@
 import { getSql } from "@/lib/db";
 import { getCurrentCustomerProfile } from "@/lib/customer-profile";
+import { AnalysisRefresh } from "@/components/analysis-refresh";
 
 type Requirement={id:string;category:string;requirement_text:string;filename:string;line:number|null};
 type ProfileDetail={bonding_limit:string|number|null;contract_vehicles:string[]|null;certifications:string[]|null;small_business_statuses:string[]|null;capability_terms:string[]|null};
 type Credential={credential_type:string;credential_value:string;status:string};
+type Decision={decision:string;reason:string|null;decided_at:string};
 
 function norm(value:string){return value.toLowerCase().replace(/[^a-z0-9]+/g," ").trim()}
 function moneyFrom(text:string){const m=text.match(/\$\s*([\d,.]+)\s*(million|m|thousand|k)?/i);if(!m)return null;let n=Number(m[1].replace(/,/g,""));if(!Number.isFinite(n))return null;const unit=(m[2]||"").toLowerCase();if(unit==="million"||unit==="m")n*=1_000_000;if(unit==="thousand"||unit==="k")n*=1_000;return n}
@@ -19,17 +21,20 @@ export async function GoNoGoPanel({opportunityId}:{opportunityId:string}){
     sql.query(`select bonding_limit,contract_vehicles,certifications,small_business_statuses,capability_terms from selling_profiles where organization_id=$1 order by updated_at desc limit 1`,[profile.organizationId]),
     sql.query(`select credential_type,credential_value,status from readiness_credentials where organization_id=$1 and status not in ('expired','revoked')`,[profile.organizationId]),
   ]);
-  const decision=(decisionRows as Array<{decision:string}>)[0];
+  const decision=(decisionRows as Decision[])[0];
   const jobs=(jobRows as Array<{active:number;dead:number}>)[0]||{active:0,dead:0};
   const requirements=reqRows as Requirement[];
   const detail=(profileRows as ProfileDetail[])[0];
   const readiness=credentialRows as Credential[];
   const requested=Boolean(decision);
   const active=Number(jobs.active||0);
+  const dead=Number(jobs.dead||0);
+  const requestedAt=decision?.decided_at?new Date(decision.decided_at).getTime():0;
+  const recentRequest=requestedAt>0&&Date.now()-requestedAt<10*60*1000;
 
-  if(requested&&active>0)return <section className="brief-panel"><div className="brief-panel-heading"><div><span>GO / NO-GO</span><h2>Analyzing qualification requirements</h2></div></div><p className="brief-explainer">Pursuit is reading the solicitation and qualification-bearing documents against your saved company profile. This page will show the evidence-backed result as the worker completes.</p></section>;
+  if(requested&&(active>0||(requirements.length===0&&recentRequest&&dead===0)))return <section className="brief-panel"><AnalysisRefresh/><div className="brief-panel-heading"><div><span>GO / NO-GO</span><h2>{active>0?"Analyzing qualification requirements":"Finding the bid package"}</h2></div></div><p className="brief-explainer">Pursuit is locating the solicitation, retrieving qualification-bearing documents and comparing the evidence against your saved company profile. This result updates automatically.</p></section>;
 
-  if(!requested||requirements.length===0)return <section className="brief-panel"><div className="brief-panel-heading"><div><span>GO / NO-GO</span><h2>{requested?"No qualification evidence extracted yet":"Run a deep qualification check"}</h2></div></div><p className="brief-explainer">Pursuit will retrieve the primary solicitation, specifications and relevant addenda only when you ask for this analysis.</p><form action={`/api/opportunities/${opportunityId}/go-no-go`} method="post"><button className="filter-button" type="submit">GO / NO-GO</button></form></section>;
+  if(!requested||requirements.length===0)return <section className="brief-panel"><div className="brief-panel-heading"><div><span>GO / NO-GO</span><h2>{requested&&dead>0?"Package analysis needs another attempt":requested?"No qualification evidence extracted":"Run a deep qualification check"}</h2></div></div><p className="brief-explainer">{requested&&dead>0?"One or more source documents could not be retrieved or processed. Re-run the check to retry available sources.":"Pursuit will retrieve the primary solicitation, specifications and relevant addenda only when you ask for this analysis."}</p><form action={`/api/opportunities/${opportunityId}/go-no-go`} method="post"><button className="filter-button" type="submit">{requested?"Re-run GO / NO-GO":"GO / NO-GO"}</button></form></section>;
 
   const profileTerms=[...(detail?.certifications||[]),...(detail?.contract_vehicles||[]),...(detail?.small_business_statuses||[]),...(detail?.capability_terms||[]),...readiness.map(r=>r.credential_value)].filter(Boolean);
   const normalizedTerms=profileTerms.map(norm).filter(v=>v.length>2);
