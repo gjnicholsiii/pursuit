@@ -2,66 +2,26 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowUpRight, BadgeCheck, CircleAlert, Clock3, DollarSign, FileCheck2, FileSearch, Files, MapPin, Route, ShieldCheck } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { GoNoGoPanel } from "@/components/go-no-go-panel";
 import { getStoredOpportunityById } from "@/lib/opportunity-store";
 import { getOpportunityDocumentSummary } from "@/lib/document-store";
 
 export const dynamic = "force-dynamic";
 
 const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
-
 const categoryLabel = (category: string) => category.replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
-
-const packageBoilerplate = new Set([
-  "Solicitation documents have not yet been acquired and analyzed by Pursuit",
-  "Participation, bonding and certification requirements still require package review",
-  "Full solicitation package has not yet been analyzed",
-  "Bid-package attachments have not yet been acquired by Pursuit",
-]);
 
 export default async function OpportunityBriefPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [opportunity, documents] = await Promise.all([
-    getStoredOpportunityById(id),
-    getOpportunityDocumentSummary(id),
-  ]);
+  const [opportunity, documents] = await Promise.all([getStoredOpportunityById(id), getOpportunityDocumentSummary(id)]);
   if (!opportunity) notFound();
 
-  const packageAnalyzed = documents.identified > 0 && documents.analyzed === documents.identified && documents.missing === 0;
-  const uncertainty = (opportunity.uncertainty || []).filter(item => !packageBoilerplate.has(item));
-
-  if (documents.identified === 0) {
-    uncertainty.push("No bid-package documents have been identified in the stored source record yet.");
-  } else {
-    const awaitingFetch = Math.max(0, documents.identified - documents.fetched - documents.missing);
-    const awaitingAnalysis = Math.max(0, documents.fetched - documents.analyzed);
-
-    if (documents.missing > 0) {
-      uncertainty.push(`${documents.missing} identified package document${documents.missing === 1 ? " is" : "s are"} currently unavailable from the source.`);
-    }
-    if (awaitingFetch > 0) {
-      uncertainty.push(`${awaitingFetch} identified package document${awaitingFetch === 1 ? " has" : "s have"} not yet been fetched by Pursuit.`);
-    }
-    if (awaitingAnalysis > 0) {
-      uncertainty.push(`${awaitingAnalysis} fetched package document${awaitingAnalysis === 1 ? " is" : "s are"} awaiting analysis.`);
-    }
-    if (packageAnalyzed) {
-      uncertainty.push("All identified package documents have been analyzed; requirements absent from those documents remain unknown until additional source evidence appears.");
-    }
+  const uncertainty = (opportunity.uncertainty || []).filter(item => !/package document|package review|solicitation package/i.test(item));
+  if (documents.identified === 0) uncertainty.push("No bid-package documents have been identified in the source record yet.");
+  else {
+    if (documents.missing > 0) uncertainty.push(`${documents.missing} identified package document${documents.missing === 1 ? " is" : "s are"} currently unavailable from the source.`);
+    if (documents.identified > documents.fetched) uncertainty.push(`${documents.identified - documents.fetched} additional package document${documents.identified - documents.fetched === 1 ? " is" : "s are"} cataloged and will be retrieved only when requested.`);
   }
-
-  const pathExplainer = packageAnalyzed
-    ? "Pursuit has analyzed every package document currently identified in the source record. Verified requirements above are evidence-backed; bonding, insurance, certifications, evaluation details or other requirements remain unknown when the analyzed material does not state them."
-    : documents.identified === 0
-      ? "Pursuit has the public opportunity record, but no bid-package documents are currently identified. Submission details and requirements remain unknown until source documents are found."
-      : "Pursuit has identified package documents and is tracking their acquisition and analysis state above. Only source-backed requirements are promoted as verified.";
-
-  const nextAction = packageAnalyzed
-    ? "Review the verified requirements and source evidence. Treat any requirement not found in the analyzed package as unknown rather than assumed."
-    : documents.identified === 0
-      ? "Open the original source and locate the bid package or solicitation documents."
-      : documents.fetched < documents.identified
-        ? "Acquire the remaining identified package documents before making a pursuit decision."
-        : "Analyze the fetched package documents and verify mandatory requirements before making a pursuit decision.";
 
   return (
     <main className="shell">
@@ -75,10 +35,10 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
         <div className="content brief-content">
           <section className="brief-hero">
             <div className="brief-title">
-              <span className="eyebrow">FIVE-MINUTE BRIEF</span>
+              <span className="eyebrow">PURSUIT BRIEF</span>
               <div className="opp-kicker brief-kicker"><span className="agency">{opportunity.agency}</span><span className={`eligibility-pill ${opportunity.eligibility}`}>{opportunity.eligibility.toUpperCase()}</span></div>
               <h1>{opportunity.title}</h1>
-              <p>What Pursuit can verify now, what still needs package review, and what you should do next.</p>
+              <p>See why this opportunity matched your company, then run a deep GO / NO-GO check only when it deserves your time.</p>
             </div>
             <div className="confidence-panel">
               <span>INFORMATION CONFIDENCE</span>
@@ -94,9 +54,11 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
             <div><FileSearch size={16} /><span>Solicitation</span><strong>{opportunity.solicitationNumber || "Not stated"}</strong></div>
           </section>
 
+          <GoNoGoPanel opportunityId={id} />
+
           <section className="brief-grid">
             <article className="brief-panel verified-panel">
-              <div className="brief-panel-heading"><BadgeCheck size={18} /><div><span>VERIFIED</span><h2>What the source actually says</h2></div></div>
+              <div className="brief-panel-heading"><BadgeCheck size={18} /><div><span>VERIFIED</span><h2>What the source already says</h2></div></div>
               <div className="brief-list">
                 {opportunity.verified.length ? opportunity.verified.map(item => <div key={item}><ShieldCheck size={15} /><p>{item}</p></div>) : <p className="muted-copy">No critical facts have been verified yet.</p>}
               </div>
@@ -112,22 +74,13 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
 
           {documents.requirements.length > 0 && (
             <section className="brief-panel requirement-panel">
-              <div className="brief-panel-heading"><ShieldCheck size={18} /><div><span>VERIFIED REQUIREMENTS</span><h2>Mandatory items found in the package</h2></div></div>
+              <div className="brief-panel-heading"><ShieldCheck size={18} /><div><span>QUALIFICATION EVIDENCE</span><h2>Mandatory items found during deep analysis</h2></div></div>
               <div className="requirement-list">
                 {documents.requirements.map(requirement => (
                   <article className="requirement-item" key={requirement.id}>
-                    <div className="requirement-meta">
-                      <span>{categoryLabel(requirement.category)}</span>
-                      <small>{requirement.line ? `Source line ${requirement.line}` : "Source located"}</small>
-                    </div>
+                    <div className="requirement-meta"><span>{categoryLabel(requirement.category)}</span><small>{requirement.line ? `Source line ${requirement.line}` : "Source located"}</small></div>
                     <p>{requirement.requirementText}</p>
-                    <div className="requirement-source">
-                      <div>
-                        <strong>{requirement.filename}</strong>
-                        <span>{requirement.confidence == null ? "Evidence-backed" : `${Math.round(requirement.confidence * 100)}% extraction confidence`}</span>
-                      </div>
-                      <a href={requirement.sourceUrl} target="_blank" rel="noreferrer">Open source document <ArrowUpRight size={14} /></a>
-                    </div>
+                    <div className="requirement-source"><div><strong>{requirement.filename}</strong><span>{requirement.confidence == null ? "Evidence-backed" : `${Math.round(requirement.confidence * 100)}% extraction confidence`}</span></div><a href={requirement.sourceUrl} target="_blank" rel="noreferrer">Open source document <ArrowUpRight size={14} /></a></div>
                   </article>
                 ))}
               </div>
@@ -135,50 +88,36 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
           )}
 
           <section className="brief-panel package-panel">
-            <div className="brief-panel-heading"><Files size={18} /><div><span>BID PACKAGE</span><h2>Document acquisition status</h2></div></div>
+            <div className="brief-panel-heading"><Files size={18} /><div><span>BID PACKAGE</span><h2>Cataloged documents</h2></div></div>
             <div className="package-stats">
               <div><span>IDENTIFIED</span><strong>{documents.identified}</strong></div>
-              <div><span>FETCHED</span><strong>{documents.fetched}</strong></div>
+              <div><span>RETRIEVED</span><strong>{documents.fetched}</strong></div>
               <div><span>ANALYZED</span><strong>{documents.analyzed}</strong></div>
-              <div><span>MISSING</span><strong>{documents.missing}</strong></div>
+              <div><span>UNAVAILABLE</span><strong>{documents.missing}</strong></div>
             </div>
-            {documents.documents.length > 0 ? (
-              <div className="package-list">
-                {documents.documents.map(document => (
-                  <a key={document.id} href={document.sourceUrl} target="_blank" rel="noreferrer">
-                    <FileCheck2 size={15} />
-                    <span>{document.filename}</span>
-                    <small>{document.fetchedAt ? document.extractionStatus : "identified · awaiting fetch"}</small>
-                    <ArrowUpRight size={14} />
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <p className="brief-explainer">No package links have been identified in the source record yet.</p>
-            )}
+            {documents.documents.length > 0 ? <div className="package-list">{documents.documents.map(document => (
+              <a key={document.id} href={document.sourceUrl} target="_blank" rel="noreferrer"><FileCheck2 size={15} /><span>{document.filename}</span><small>{document.fetchedAt ? document.extractionStatus : "cataloged · retrieve on request"}</small><ArrowUpRight size={14} /></a>
+            ))}</div> : <p className="brief-explainer">No package links have been identified in the source record yet.</p>}
+            {documents.identified > documents.fetched && <form action={`/api/opportunities/${id}/package`} method="post" className="profile-actions"><button className="secondary-button" type="submit">Get complete bid package</button></form>}
           </section>
 
           <section className="brief-grid lower-grid">
             <article className="brief-panel">
               <div className="brief-panel-heading"><Route size={18} /><div><span>PATH TO AWARD</span><h2>{opportunity.procurementPath}</h2></div></div>
-              <div className="brief-detail-list">
-                <div><span>NAICS</span><strong>{opportunity.naicsCode || "Not stated"}</strong></div>
-                <div><span>Set-aside</span><strong>{opportunity.setAside || "Not stated"}</strong></div>
-                <div><span>Source</span><strong>{opportunity.source}</strong></div>
-              </div>
-              <p className="brief-explainer">{pathExplainer}</p>
+              <div className="brief-detail-list"><div><span>NAICS</span><strong>{opportunity.naicsCode || "Not stated"}</strong></div><div><span>Set-aside</span><strong>{opportunity.setAside || "Not stated"}</strong></div><div><span>Source</span><strong>{opportunity.source}</strong></div></div>
+              <p className="brief-explainer">Pursuit catalogs the source package continuously. Qualification-bearing documents are read on demand; supporting files are retrieved only when you request the complete package.</p>
             </article>
 
             <article className="brief-panel next-action-panel">
-              <div className="brief-panel-heading"><ArrowUpRight size={18} /><div><span>NEXT ACTION</span><h2>What to do now</h2></div></div>
-              <p className="next-action-copy">{nextAction}</p>
-              {opportunity.sourceUrl && <a className="secondary-button" href={opportunity.sourceUrl} target="_blank" rel="noreferrer">Continue at original source <ArrowUpRight size={15} /></a>}
+              <div className="brief-panel-heading"><ArrowUpRight size={18} /><div><span>NEXT ACTION</span><h2>Decide whether this deserves pursuit time</h2></div></div>
+              <p className="next-action-copy">Run GO / NO-GO to compare the actual solicitation requirements against your saved company qualifications. Retrieve the full package only if you decide to proceed.</p>
+              <form action={`/api/opportunities/${id}/go-no-go`} method="post"><button className="filter-button" type="submit">GO / NO-GO</button></form>
             </article>
           </section>
 
           <section className="evidence-strip">
             <div><span>WHY THIS MATTERS</span><strong>Pursuit separates evidence from inference.</strong></div>
-            <p>When a requirement is missing, contradictory or still buried in an attachment, it remains visibly unresolved instead of being filled in from assumptions.</p>
+            <p>A strong match never becomes an invented qualification. Potential disqualifiers and unknowns stay visible with their source evidence.</p>
             {opportunity.sourceUrl && <a href={opportunity.sourceUrl} target="_blank" rel="noreferrer">Open source evidence <ArrowUpRight size={15} /></a>}
           </section>
         </div>
