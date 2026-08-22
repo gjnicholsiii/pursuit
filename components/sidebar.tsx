@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { Activity, Settings2, Target } from "lucide-react";
+import { Activity, Binoculars, Settings2, Target, Zap } from "lucide-react";
 
 const items = [
   { label: "Revenue Today", icon: Activity, href: "/" },
   { label: "Opportunities", icon: Target, href: "/opportunities" },
+  { label: "Raven", icon: Binoculars, href: "/raven" },
+  { label: "Wolf", icon: Zap, href: "/wolf" },
   { label: "Profile", icon: Settings2, href: "/profile" },
 ];
 
