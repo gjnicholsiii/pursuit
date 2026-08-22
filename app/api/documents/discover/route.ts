@@ -35,8 +35,8 @@ async function sessionFor(opp:OpportunityRow):Promise<SessionHeaders>{
   }catch{return {}}
 }
 
-function addPeriscopeDownload(pageUrl:string,onclick:string,text:string,discovered:Set<string>){
-  const match=onclick.match(/downloadFile\s*\(\s*['\"]?(\d+)['\"]?\s*\)/i);
+function addPeriscopeDownload(pageUrl:string,javascript:string,text:string,discovered:Set<string>){
+  const match=javascript.match(/downloadFile\s*\(\s*['\"]?(\d+)['\"]?\s*\)/i);
   if(!match)return;
   try{
     const url=new URL(pageUrl);
@@ -52,12 +52,13 @@ async function inspectHtml(html:string,pageUrl:string,opp:OpportunityRow,discove
   const $=cheerio.load(html);const ids=identifiers(opp).map(v=>v.toLowerCase());const titleWords=norm(opp.title).split(" ").filter(v=>v.length>4).slice(0,5);
   $("a,button,[onclick],[data-url],[data-href]").each((_,el)=>{
     const node=$(el);const text=node.text().replace(/\s+/g," ").trim();const onclick=node.attr("onclick")||"";
-    if(opp.adapter_key.startsWith("periscope_"))addPeriscopeDownload(pageUrl,onclick,text,discovered);
-    const hay=(text+" "+(node.attr("href")||"")+" "+onclick).toLowerCase();
-    const values=[node.attr("href"),node.attr("data-url"),node.attr("data-href")].filter((v):v is string=>Boolean(v));values.push(...extractQuotedUrls(onclick,pageUrl));
+    const href=node.attr("href")||"";
+    if(opp.adapter_key.startsWith("periscope_")){addPeriscopeDownload(pageUrl,onclick,text,discovered);addPeriscopeDownload(pageUrl,href,text,discovered)}
+    const hay=(text+" "+href+" "+onclick).toLowerCase();
+    const values=[href,node.attr("data-url"),node.attr("data-href")].filter((v):v is string=>Boolean(v));values.push(...extractQuotedUrls(onclick,pageUrl));
     const oppSpecific=ids.some(id=>hay.includes(id))||titleWords.filter(word=>hay.includes(word)).length>=3;
     for(const raw of values){
-      if(raw.startsWith("javascript:")){for(const extracted of extractQuotedUrls(raw,pageUrl)){if(FILE_EXT.test(extracted)||DOC_URL_HINT.test(extracted))discovered.add(extracted);else if(DOC_TEXT_HINT.test(text)||oppSpecific)follow.add(extracted)}continue}
+      if(raw.startsWith("javascript:")){if(opp.adapter_key.startsWith("periscope_"))addPeriscopeDownload(pageUrl,raw,text,discovered);for(const extracted of extractQuotedUrls(raw,pageUrl)){if(FILE_EXT.test(extracted)||DOC_URL_HINT.test(extracted))discovered.add(extracted);else if(DOC_TEXT_HINT.test(text)||oppSpecific)follow.add(extracted)}continue}
       const url=absolute(pageUrl,raw);if(!url)continue;if(FILE_EXT.test(url))discovered.add(url);else if(oppSpecific)follow.add(url);else if(DOC_URL_HINT.test(url)&&DOC_TEXT_HINT.test(text||url))follow.add(url);else if(DOC_TEXT_HINT.test(text))follow.add(url)
     }
   });
