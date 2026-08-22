@@ -1,9 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
+import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = requireInternalAuth(request);
+  if (auth) return auth;
+
   const sql = getSql();
   const rows = await sql`
     select state_code, count(*)::int as agencies
