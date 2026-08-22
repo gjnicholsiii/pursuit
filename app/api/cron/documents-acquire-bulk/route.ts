@@ -28,18 +28,21 @@ export async function GET(request: NextRequest) {
   if (request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const origin = workerOrigin(request);
-  // Three independent workers claim disjoint rows via FOR UPDATE SKIP LOCKED in
-  // /api/documents/acquire. This raises bulk throughput without increasing per-host
-  // concurrency inside an individual worker, preserving IonWave throttling and
-  // existing retry/backoff behavior.
-  const results = await Promise.all([
-    runAcquire(origin, secret, 1),
-    runAcquire(origin, secret, 2),
-    runAcquire(origin, secret, 3),
-  ]);
+  // The child acquisition route already uses bounded concurrency and SKIP LOCKED.
+  // Run bulk claims sequentially so the parent invocation never fans out multiple
+  // memory-heavy document buffers at once. Stop before the 300s ceiling; the next
+  // scheduled run resumes safely from the queue.
+  const results: Array<Awaited<ReturnType<typeof runAcquire>>> = [];
+  const startedAt = Date.now();
+  for (let worker = 1; worker <= 3; worker++) {
+    if (Date.now() - startedAt > 240_000) break;
+    const result = await runAcquire(origin, secret, worker);
+    results.push(result);
+    if (!result.ok) break;
+  }
 
   return NextResponse.json({
-    ok: results.every(result => result.ok),
+    ok: results.length > 0 && results.every(result => result.ok),
     workers: results.length,
     results,
   });
