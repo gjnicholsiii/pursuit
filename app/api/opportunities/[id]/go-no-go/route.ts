@@ -66,7 +66,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       await sql.query(
         `update document_jobs set state='pending', priority=1000, run_after=now(), leased_until=null, lease_owner=null,
          meta=coalesce(meta,'{}'::jsonb)||jsonb_build_object('reason','go_no_go','organizationId',$2,'opportunityId',$3), updated_at=now()
-         where document_id=$1 and stage='acquire' and state='deferred'`,
+         where document_id=$1 and stage='acquire' and state='skipped'`,
         [document.id, profile.organizationId, id],
       );
     } else if (!['complete','extracted','analyzed'].includes(document.extraction_status || '')) {
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       await sql.query(
         `update document_jobs set state='pending', priority=1000, run_after=now(), leased_until=null, lease_owner=null,
          meta=coalesce(meta,'{}'::jsonb)||jsonb_build_object('reason','go_no_go','organizationId',$2,'opportunityId',$3), updated_at=now()
-         where document_id=$1 and stage='extract' and state='deferred'`,
+         where document_id=$1 and stage='extract' and state='skipped'`,
         [document.id, profile.organizationId, id],
       );
     }
