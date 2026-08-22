@@ -165,10 +165,29 @@ export async function syncNcesDistrictState(stateCode: string) {
   };
 }
 
-export async function syncNcesDistrictBatch(states: string[]) {
-  const results: Awaited<ReturnType<typeof syncNcesDistrictState>>[] = [];
+export type NcesDistrictSyncResult = Awaited<ReturnType<typeof syncNcesDistrictState>> & { error?: string };
+
+export async function syncNcesDistrictBatch(states: string[]): Promise<NcesDistrictSyncResult[]> {
+  const results: NcesDistrictSyncResult[] = [];
   for (let i = 0; i < states.length; i += 3) {
-    results.push(...await Promise.all(states.slice(i, i + 3).map(syncNcesDistrictState)));
+    const batch = states.slice(i, i + 3);
+    const settled = await Promise.all(batch.map(async stateCode => {
+      try {
+        return await syncNcesDistrictState(stateCode);
+      } catch (error) {
+        return {
+          stateCode: stateCode.toUpperCase(),
+          ncesTotal: 0,
+          rowsParsed: 0,
+          pages: 0,
+          inserted: 0,
+          updated: 0,
+          existing: 0,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }));
+    results.push(...settled);
   }
   return results;
 }
