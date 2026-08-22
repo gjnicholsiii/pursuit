@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { getCurrentCustomerProfile } from "@/lib/customer-profile";
 
@@ -38,7 +38,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
        published_at desc nulls last,filename asc limit 8`, [id]
   ) as Array<{id:string;filename:string|null;document_type:string|null;fetched_at:string|null;extraction_status:string|null}>;
 
-  if (!documents.length) { target.searchParams.set("goNoGo", "package-not-found"); return NextResponse.redirect(target, 303); }
+  if (!documents.length) {
+    const secret=process.env.CRON_SECRET;
+    if(secret){
+      const origin=process.env.VERCEL_PROJECT_PRODUCTION_URL?`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`:request.nextUrl.origin;
+      const discovery=new URL('/api/documents/discover',origin);
+      discovery.searchParams.set('opportunityId',id);
+      discovery.searchParams.set('organizationId',profile.organizationId);
+      after(async()=>{try{await fetch(discovery,{cache:'no-store',headers:{authorization:`Bearer ${secret}`},signal:AbortSignal.timeout(240_000)})}catch{}});
+      target.searchParams.set("goNoGo", "discovering");
+    } else {
+      target.searchParams.set("goNoGo", "package-not-found");
+    }
+    return NextResponse.redirect(target, 303);
+  }
 
   for (const document of documents) {
     if (!document.fetched_at) {
