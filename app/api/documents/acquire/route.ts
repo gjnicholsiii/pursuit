@@ -7,8 +7,8 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const STANDARD_DOCUMENT_BYTES = 50 * 1024 * 1024;
-const MAX_DOCUMENT_BYTES = 96 * 1024 * 1024;
+const STANDARD_DOCUMENT_BYTES = 32 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = 48 * 1024 * 1024;
 
 type PendingDocumentRow = { job_id:string; id:string; opportunity_id:string; source_url:string; opportunity_source_url:string; filename:string; source_family:string; host_class:string; priority:number; last_error:string|null };
 function filenameFromDisposition(value:string|null){if(!value)return null;const utf8=value.match(/filename\*=UTF-8''([^;]+)/i);if(utf8?.[1]){try{return decodeURIComponent(utf8[1])}catch{return utf8[1]}}return value.match(/filename="?([^";]+)"?/i)?.[1]||null}
