@@ -50,7 +50,7 @@ export default async function RavenPage({ searchParams }: { searchParams?: Promi
         where.push(`a.state_code = $${values.length}`);
       }
       const clause = where.length ? `where ${where.join(" and ")}` : "";
-      const [result, countResult] = await Promise.all([
+      const [rawResult, rawCountResult] = await Promise.all([
         sql.query(`
           select
             a.id::text,
@@ -70,10 +70,11 @@ export default async function RavenPage({ searchParams }: { searchParams?: Promi
           group by a.id
           order by count(o.id) filter (where o.status='open' and (o.due_at is null or o.due_at >= now())) desc, a.canonical_name
           limit 100
-        `, values) as Promise<RavenAgencyRow[]>,
-        sql.query(`select count(*)::int as total, count(*) filter (where website is not null and website <> '')::int as with_website from agencies a ${clause}`, values) as Promise<CountRow[]>,
+        `, values),
+        sql.query(`select count(*)::int as total, count(*) filter (where website is not null and website <> '')::int as with_website from agencies a ${clause}`, values),
       ]);
-      rows = result;
+      rows = rawResult as unknown as RavenAgencyRow[];
+      const countResult = rawCountResult as unknown as CountRow[];
       counts = countResult[0] || counts;
     }
   } catch (error) {
