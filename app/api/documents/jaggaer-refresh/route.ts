@@ -14,6 +14,7 @@ type Row = {
   filename: string;
   base_url: string;
   adapter_key: string;
+  state: "pending" | "dead";
 };
 
 export async function GET(request: NextRequest) {
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
 
   const sql = getSql();
   const rows = await sql.query(
-    `select j.id::text as job_id,d.id::text as document_id,d.filename,s.base_url,s.adapter_key
+    `select j.id::text as job_id,d.id::text as document_id,d.filename,s.base_url,s.adapter_key,j.state
      from document_jobs j
      join opportunity_documents d on d.id=j.document_id
      join opportunities o on o.id=d.opportunity_id
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
        and coalesce(d.is_missing,false)=false
        and o.status='open'
        and (o.due_at is null or o.due_at>=now())
-     order by case when j.state='dead' then 0 else 1 end,j.updated_at asc
+     order by case when j.state='dead' then 0 else 1 end,j.run_after asc,j.updated_at asc
      limit 1200`,
   ) as Row[];
 
@@ -69,11 +70,20 @@ export async function GET(request: NextRequest) {
         `update opportunity_documents set source_url=$2,extraction_status='cataloged' where id=$1::uuid`,
         [row.document_id, freshUrl],
       );
-      await sql.query(
-        `update document_jobs set state='pending',attempts=0,run_after=now(),leased_until=null,lease_owner=null,last_error=null,updated_at=now()
-         where id=$1::bigint`,
-        [row.job_id],
-      );
+      if (row.state === "dead") {
+        await sql.query(
+          `update document_jobs set state='pending',attempts=0,run_after=now(),leased_until=null,lease_owner=null,last_error=null,updated_at=now()
+           where id=$1::bigint`,
+          [row.job_id],
+        );
+      } else {
+        // Refreshing a signed URL must not move an already-ready job to the back of
+        // the acquisition queue. Preserve run_after and attempts for pending work.
+        await sql.query(
+          `update document_jobs set last_error=null,updated_at=now() where id=$1::bigint`,
+          [row.job_id],
+        );
+      }
       refreshed++;
       sourceRefreshed++;
     }
