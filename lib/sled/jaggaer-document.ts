@@ -9,19 +9,20 @@ function normalize(value: string) {
   return value.replace(/\+/g, " ").replace(/[^a-zA-Z0-9._() -]+/g, "-").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function findSignedUrl(html: string, pageUrl: string, filename: string) {
+function signedUrlMap(html: string, pageUrl: string) {
   const $ = load(html);
-  const wanted = normalize(filename);
-  let found = "";
+  const result = new Map<string, string>();
   $('a[href*="solutions-selectsite-documents.s3.amazonaws.com"]').each((_, node) => {
-    if (found) return;
     const href = $(node).attr("href") || "";
-    const pathName = (() => { try { return decodeURIComponent(new URL(href, pageUrl).pathname.split("/").pop() || ""); } catch { return ""; } })();
-    if (normalize(pathName) === wanted || normalize($(node).text()) === wanted) {
-      try { found = new URL(href, pageUrl).toString(); } catch {}
-    }
+    try {
+      const url = new URL(href, pageUrl).toString();
+      const pathName = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+      if (pathName) result.set(normalize(pathName), url);
+      const label = normalize($(node).text());
+      if (label) result.set(label, url);
+    } catch {}
   });
-  return found;
+  return result;
 }
 
 function buildFullResultRequest(html: string, pageUrl: string) {
@@ -50,20 +51,25 @@ function buildFullResultRequest(html: string, pageUrl: string) {
   try { return { url: new URL(form.attr("action") || pageUrl, pageUrl).toString(), params }; } catch { return null; }
 }
 
-export async function refreshJaggaerEventDocument(sourceBaseUrl: string, filename: string, signal: AbortSignal, userAgent: string) {
-  if (!sourceBaseUrl) return null;
+export async function refreshJaggaerEventDocuments(sourceBaseUrl: string, filenames: string[], signal: AbortSignal, userAgent: string) {
+  const wanted = new Map(filenames.map(filename => [normalize(filename), filename]));
+  const found = new Map<string, string>();
+  if (!sourceBaseUrl || !wanted.size) return found;
+
   const initial = await fetch(sourceBaseUrl, {
     redirect: "follow",
     signal,
     cache: "no-store",
     headers: { accept: "text/html,application/xhtml+xml,*/*", "user-agent": userAgent },
   });
-  if (!initial.ok) return null;
+  if (!initial.ok) return found;
   const html = await initial.text();
-  let found = findSignedUrl(html, initial.url, filename);
-  if (found) return found;
+  const first = signedUrlMap(html, initial.url);
+  for (const [key, original] of wanted) if (first.has(key)) found.set(original, first.get(key) as string);
+  if (found.size === wanted.size) return found;
+
   const full = buildFullResultRequest(html, initial.url);
-  if (!full) return null;
+  if (!full) return found;
   const cookie = cookieHeader(initial.headers.get("set-cookie"));
   const expanded = await fetch(full.url, {
     method: "POST",
@@ -79,7 +85,12 @@ export async function refreshJaggaerEventDocument(sourceBaseUrl: string, filenam
     },
     body: full.params,
   });
-  if (!expanded.ok) return null;
-  found = findSignedUrl(await expanded.text(), expanded.url, filename);
-  return found || null;
+  if (!expanded.ok) return found;
+  const second = signedUrlMap(await expanded.text(), expanded.url);
+  for (const [key, original] of wanted) if (!found.has(original) && second.has(key)) found.set(original, second.get(key) as string);
+  return found;
+}
+
+export async function refreshJaggaerEventDocument(sourceBaseUrl: string, filename: string, signal: AbortSignal, userAgent: string) {
+  return (await refreshJaggaerEventDocuments(sourceBaseUrl, [filename], signal, userAgent)).get(filename) || null;
 }
