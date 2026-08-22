@@ -3,7 +3,12 @@ import { getSql } from "@/lib/db";
 import { getCurrentCustomerProfile } from "@/lib/customer-profile";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 300;
+
+function workerOrigin(request: NextRequest) {
+  const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  return productionHost ? `https://${productionHost}` : request.nextUrl.origin;
+}
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -25,6 +30,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     target.searchParams.set("goNoGo", "unavailable");
     return NextResponse.redirect(target, 303);
   }
+
+  await sql.query(
+    `update opportunity_documents
+     set extraction_status = 'cataloged'
+     where storage_key is null and coalesce(is_missing,false) = false and extraction_status = 'pending'`,
+  );
+  await sql.query(
+    `update document_jobs
+     set state='skipped', leased_until=null, lease_owner=null, updated_at=now()
+     where state='pending'
+       and stage in ('acquire','extract','analyze')
+       and coalesce(meta->>'reason','') <> 'go_no_go'`,
+  );
 
   await sql.query(
     `insert into opportunity_decisions (organization_id, opportunity_id, decision, reason, decided_by)
@@ -59,32 +77,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!document.fetched_at) {
       await sql.query(
         `insert into document_jobs (document_id, stage, host_class, priority, state, attempts, max_attempts, run_after, meta)
-         select $1,'acquire','ondemand',1000,'pending',0,5,now(),jsonb_build_object('reason','go_no_go','organizationId',$2,'opportunityId',$3)
-         where not exists (select 1 from document_jobs where document_id=$1 and stage='acquire' and state in ('pending','leased'))`,
-        [document.id, profile.organizationId, id],
-      );
-      await sql.query(
-        `update document_jobs set state='pending', priority=1000, run_after=now(), leased_until=null, lease_owner=null,
-         meta=coalesce(meta,'{}'::jsonb)||jsonb_build_object('reason','go_no_go','organizationId',$2,'opportunityId',$3), updated_at=now()
-         where document_id=$1 and stage='acquire' and state='skipped'`,
+         values ($1,'acquire','ondemand',0,'pending',0,5,now(),jsonb_build_object('reason','go_no_go','organizationId',$2,'opportunityId',$3))
+         on conflict(document_id,stage) do update set
+           state='pending', priority=0, run_after=now(), leased_until=null, lease_owner=null,
+           attempts=case when document_jobs.state='dead' then 0 else document_jobs.attempts end,
+           meta=coalesce(document_jobs.meta,'{}'::jsonb)||excluded.meta, updated_at=now()`,
         [document.id, profile.organizationId, id],
       );
     } else if (!['complete','extracted','analyzed'].includes(document.extraction_status || '')) {
       await sql.query(
         `insert into document_jobs (document_id, stage, host_class, priority, state, attempts, max_attempts, run_after, meta)
-         select $1,'extract','ondemand',1000,'pending',0,5,now(),jsonb_build_object('reason','go_no_go','organizationId',$2,'opportunityId',$3)
-         where not exists (select 1 from document_jobs where document_id=$1 and stage='extract' and state in ('pending','leased','done'))`,
-        [document.id, profile.organizationId, id],
-      );
-      await sql.query(
-        `update document_jobs set state='pending', priority=1000, run_after=now(), leased_until=null, lease_owner=null,
-         meta=coalesce(meta,'{}'::jsonb)||jsonb_build_object('reason','go_no_go','organizationId',$2,'opportunityId',$3), updated_at=now()
-         where document_id=$1 and stage='extract' and state='skipped'`,
+         values ($1,'extract','ondemand',0,'pending',0,5,now(),jsonb_build_object('reason','go_no_go','organizationId',$2,'opportunityId',$3))
+         on conflict(document_id,stage) do update set
+           state=case when document_jobs.state='done' then 'done' else 'pending' end,
+           priority=0, run_after=now(), leased_until=null, lease_owner=null,
+           meta=coalesce(document_jobs.meta,'{}'::jsonb)||excluded.meta, updated_at=now()`,
         [document.id, profile.organizationId, id],
       );
     }
   }
 
-  target.searchParams.set("goNoGo", "queued");
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    target.searchParams.set("goNoGo", "queued");
+    return NextResponse.redirect(target, 303);
+  }
+
+  try {
+    const response = await fetch(new URL("/api/documents/acquire", workerOrigin(request)), {
+      cache: "no-store",
+      headers: { authorization: `Bearer ${secret}` },
+      signal: AbortSignal.timeout(240_000),
+    });
+    target.searchParams.set("goNoGo", response.ok ? "processing" : "queued");
+  } catch {
+    target.searchParams.set("goNoGo", "queued");
+  }
+
   return NextResponse.redirect(target, 303);
 }
