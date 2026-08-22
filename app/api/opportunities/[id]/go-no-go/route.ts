@@ -42,7 +42,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const secret=process.env.CRON_SECRET;
     if(secret){
       const origin=process.env.VERCEL_PROJECT_PRODUCTION_URL?`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`:request.nextUrl.origin;
-      const discovery=new URL('/api/documents/discover',origin);
+      const path=source.adapter_key==='sam_gov'?'/api/documents/sam-discover':'/api/documents/discover';
+      const discovery=new URL(path,origin);
       discovery.searchParams.set('opportunityId',id);
       discovery.searchParams.set('organizationId',profile.organizationId);
       after(async()=>{try{await fetch(discovery,{cache:'no-store',headers:{authorization:`Bearer ${secret}`},signal:AbortSignal.timeout(240_000)})}catch{}});
