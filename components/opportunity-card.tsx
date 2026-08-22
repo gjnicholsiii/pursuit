@@ -29,14 +29,22 @@ export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
       </div>
       <div className="opp-insight">
         <span>{opportunity.matchScore != null ? "WHY THIS MATCHES YOU" : lowConfidence ? "WHY CONFIDENCE IS LOW" : "WHAT WE VERIFIED"}</span>
-        <p>{insight || "Source record verified; document intelligence is still processing."}</p>
+        <p>{insight || "Source record verified; document intelligence is available on demand."}</p>
         {opportunity.blocker && <small>{opportunity.blocker}</small>}
       </div>
       <div className="opp-score">
-        {opportunity.matchScore != null && <><span>Match</span><strong>{opportunity.matchScore}%</strong></>}
-        <span>Confidence</span>
-        <strong>{opportunity.confidence}%</strong>
-        <Link href={`/opportunities/${opportunity.id}`} aria-label="Open Five-Minute Brief"><ArrowUpRight size={18} /></Link>
+        {opportunity.matchScore != null && <><span>Relevance</span><strong>{opportunity.matchScore}%</strong></>}
+        {opportunity.matchScore != null ? (
+          <form action={`/api/opportunities/${opportunity.id}/go-no-go`} method="post">
+            <button className="go-no-go-button" type="submit">GO / NO-GO</button>
+          </form>
+        ) : (
+          <>
+            <span>Confidence</span>
+            <strong>{opportunity.confidence}%</strong>
+          </>
+        )}
+        <Link href={`/opportunities/${opportunity.id}`} aria-label="Open opportunity brief"><ArrowUpRight size={18} /></Link>
       </div>
     </article>
   );
