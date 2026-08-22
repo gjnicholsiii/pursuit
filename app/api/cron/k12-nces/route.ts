@@ -33,15 +33,18 @@ export async function GET(request: NextRequest) {
       },
       { ncesTotal: 0, rowsParsed: 0, inserted: 0, updated: 0, existing: 0 },
     );
+    const failures = results.filter(row => row.error);
 
     return NextResponse.json({
-      ok: true,
+      ok: failures.length === 0,
+      partial: failures.length > 0,
       shard,
       shardCount: SHARD_COUNT,
       states,
       totals,
+      failures,
       results,
-    });
+    }, { status: failures.length ? 207 : 200 });
   } catch (error) {
     return NextResponse.json(
       { ok: false, shard, states, error: error instanceof Error ? error.message : String(error) },
