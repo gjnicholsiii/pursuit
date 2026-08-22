@@ -95,9 +95,9 @@ export default async function Home() {
                   <p>Match tells you whether an opportunity fits your company. Confidence tells you how complete and reliable the information is. The Five-Minute Brief turns the solicitation package into the facts you need to decide what deserves your time.</p>
                 </div>
                 <div className="readiness-grid">
-                  <div className="readiness-item"><div><strong>92% MATCH</strong><small>Codes, capabilities, geography and target value align</small></div></div>
+                  <div className="readiness-item"><div><strong>MATCH SCORE</strong><small>Codes, capabilities, geography and target value are evaluated against your profile</small></div></div>
                   <div className="readiness-item"><div><strong>WHY IT MATCHES</strong><small>Exact reasons instead of a mystery recommendation</small></div></div>
-                  <div className="readiness-item"><div><strong>81% CONFIDENCE</strong><small>Separate measure of source and package completeness</small></div></div>
+                  <div className="readiness-item"><div><strong>CONFIDENCE SCORE</strong><small>Separate measure of source and package completeness</small></div></div>
                   <div className="readiness-item"><div><strong>FIVE-MINUTE BRIEF</strong><small>Requirements, deadlines, forms, set-asides and submission facts</small></div></div>
                   <div className="readiness-item"><div><strong>PACKAGE WATCH</strong><small>Changes, amendments and missing documents surfaced</small></div></div>
                   <div className="readiness-item"><div><strong>SOURCE EVIDENCE</strong><small>Original procurement evidence remains one click away</small></div></div>
