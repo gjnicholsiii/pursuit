@@ -26,7 +26,7 @@ function safePublicUrl(raw: string) {
   } catch { return null; }
 }
 
-function absoluteUrl(base: URL, href: string) {
+function absoluteSameHost(base: URL, href: string) {
   try {
     const u = new URL(href, base);
     return u.hostname === base.hostname && /^https?:$/.test(u.protocol) ? u.toString() : null;
@@ -57,24 +57,22 @@ function plausibleName(value: string) {
   if (s.length < 5 || s.length > 60) return null;
   const parts = s.split(" ").filter(Boolean);
   if (parts.length < 2 || parts.length > 5) return null;
-  if (parts.some(p => p.length === 1 && p !== "J")) return null;
   if (/director|superintendent|technology|security|facilities|board|department|school|district|office/i.test(s)) return null;
   return titleCaseName(s);
 }
 
 function extractCandidates(html: string, sourceUrl: string): Candidate[] {
-  const text = visibleText(html);
-  const lines = text.split("\n").map(x => x.trim()).filter(Boolean);
+  const lines = visibleText(html).split("\n").map(x => x.trim()).filter(Boolean);
   const candidates: Candidate[] = [];
-
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const rule = ROLE_RULES.find(r => r.terms.test(line));
     if (!rule) continue;
     const context = lines.slice(Math.max(0, i - 2), Math.min(lines.length, i + 4));
-    const title = line.length <= 120 ? line : context.find(x => x.length <= 120 && rule.terms.test(x)) || line.slice(0, 120);
-    const email = context.join(" ").match(EMAIL_RE)?.[0];
-    const phone = context.join(" ").match(PHONE_RE)?.[0];
+    const title = line.length <= 120 ? line : line.slice(0, 120);
+    const joined = context.join(" ");
+    const email = joined.match(EMAIL_RE)?.[0];
+    const phone = joined.match(PHONE_RE)?.[0];
     let name: string | null = null;
     for (const offset of [-1, 1, -2, 2]) {
       const candidateLine = lines[i + offset];
@@ -82,14 +80,10 @@ function extractCandidates(html: string, sourceUrl: string): Candidate[] {
       name = plausibleName(candidateLine.replace(EMAIL_RE, "").replace(PHONE_RE, ""));
       if (name) break;
     }
-    if (!name && email) {
-      const local = email.split("@")[0].replace(/[._-]+/g, " ");
-      name = plausibleName(local);
-    }
+    if (!name && email) name = plausibleName(email.split("@")[0].replace(/[._-]+/g, " "));
     if (!name) continue;
     candidates.push({ name, title, roleFamily: rule.family, email, phone, sourceUrl, confidence: email ? 88 : phone ? 82 : 72 });
   }
-
   const deduped = new Map<string, Candidate>();
   for (const c of candidates) {
     const key = `${c.name}|${c.title}`.toLowerCase();
@@ -107,9 +101,26 @@ async function fetchPage(url: string) {
     if (!res.ok) return null;
     const type = res.headers.get("content-type") || "";
     if (!type.includes("text/html")) return null;
-    return await res.text();
+    return { html: await res.text(), finalUrl: res.url || url };
   } catch { return null; }
   finally { clearTimeout(timer); }
+}
+
+function discoverOfficialSite(seed: URL, html: string) {
+  if (!seed.hostname.endsWith("nces.ed.gov")) return seed;
+  const re = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  const candidates: URL[] = [];
+  while ((match = re.exec(html))) {
+    const label = visibleText(match[2]).trim();
+    try {
+      const u = new URL(match[1], seed);
+      if (!/^https?:$/.test(u.protocol)) continue;
+      if (u.hostname.endsWith("ed.gov") || u.hostname.endsWith("usa.gov")) continue;
+      if (/web\s*site|website|district|school/i.test(label)) candidates.push(u);
+    } catch {}
+  }
+  return candidates[0] || seed;
 }
 
 function discoverLinks(base: URL, html: string) {
@@ -120,7 +131,7 @@ function discoverLinks(base: URL, html: string) {
     const label = visibleText(match[2]);
     const href = match[1];
     if (!LINK_TERMS.test(`${label} ${href}`)) continue;
-    const u = absoluteUrl(base, href);
+    const u = absoluteSameHost(base, href);
     if (u) links.push(u);
   }
   return [...new Set(links)].slice(0, 6);
@@ -128,8 +139,8 @@ function discoverLinks(base: URL, html: string) {
 
 async function enrichAgency(agency: Agency) {
   const sql = getSql();
-  const base = safePublicUrl(agency.website);
-  if (!base) return { agency: agency.canonical_name, ok: false, reason: "invalid website", pages: 0, people: 0 };
+  const seed = safePublicUrl(agency.website);
+  if (!seed) return { agency: agency.canonical_name, ok: false, reason: "invalid website", pages: 0, people: 0 };
 
   const runRows = await sql.query(`insert into raven_enrichment_runs (agency_id, status) values ($1, 'running') returning id::text`, [agency.id]);
   const runId = String(runRows[0]?.id || "");
@@ -138,23 +149,32 @@ async function enrichAgency(agency: Agency) {
   const errors: string[] = [];
 
   try {
-    const homepage = await fetchPage(base.toString());
-    if (!homepage) throw new Error("homepage unavailable");
+    const seedPage = await fetchPage(seed.toString());
+    if (!seedPage) throw new Error("seed page unavailable");
     pages++;
-    const urls = [base.toString(), ...discoverLinks(base, homepage)].slice(0, 5);
-    const allCandidates: Candidate[] = [];
-    allCandidates.push(...extractCandidates(homepage, base.toString()));
+    let base = discoverOfficialSite(seed, seedPage.html);
+    let homepage = seedPage.html;
 
-    for (const url of urls.slice(1)) {
-      const html = await fetchPage(url);
-      if (!html) { errors.push(url); continue; }
+    if (base.hostname !== seed.hostname) {
+      const officialPage = await fetchPage(base.toString());
+      if (!officialPage) throw new Error("official district site unavailable");
       pages++;
-      allCandidates.push(...extractCandidates(html, url));
+      base = safePublicUrl(officialPage.finalUrl) || base;
+      homepage = officialPage.html;
+      await sql.query(`update agencies set website=$2 where id=$1`, [agency.id, base.toString()]);
+    }
+
+    const urls = [base.toString(), ...discoverLinks(base, homepage)].slice(0, 5);
+    const allCandidates: Candidate[] = extractCandidates(homepage, base.toString());
+    for (const url of urls.slice(1)) {
+      const page = await fetchPage(url);
+      if (!page) { errors.push(url); continue; }
+      pages++;
+      allCandidates.push(...extractCandidates(page.html, page.finalUrl));
     }
 
     const unique = new Map<string, Candidate>();
     for (const c of allCandidates) unique.set(`${c.name}|${c.title}`.toLowerCase(), c);
-
     for (const c of [...unique.values()].slice(0, 20)) {
       await sql.query(`
         insert into raven_people (agency_id, full_name, title, role_family, email, phone, source_url, source_type, confidence, last_verified_at, updated_at)
@@ -170,8 +190,8 @@ async function enrichAgency(agency: Agency) {
       people++;
     }
 
-    await sql.query(`update raven_enrichment_runs set status='complete', pages_scanned=$2, people_found=$3, completed_at=now(), diagnostics=$4::jsonb where id=$1`, [runId, pages, people, JSON.stringify({ errors })]);
-    return { agency: agency.canonical_name, ok: true, pages, people };
+    await sql.query(`update raven_enrichment_runs set status='complete', pages_scanned=$2, people_found=$3, completed_at=now(), diagnostics=$4::jsonb where id=$1`, [runId, pages, people, JSON.stringify({ errors, officialWebsite: base.toString() })]);
+    return { agency: agency.canonical_name, ok: true, pages, people, website: base.toString() };
   } catch (error) {
     await sql.query(`update raven_enrichment_runs set status='failed', pages_scanned=$2, people_found=$3, completed_at=now(), diagnostics=$4::jsonb where id=$1`, [runId, pages, people, JSON.stringify({ error: error instanceof Error ? error.message : String(error), errors })]);
     return { agency: agency.canonical_name, ok: false, pages, people, reason: error instanceof Error ? error.message : String(error) };
