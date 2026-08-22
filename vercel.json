@@ -11,6 +11,7 @@
     { "path": "/api/cron/state-pages-secondary", "schedule": "45 */2 * * *" },
     { "path": "/api/cron/state-heavy", "schedule": "45 */4 * * *" },
     { "path": "/api/cron/k12-nces", "schedule": "25 * * * *" },
+    { "path": "/api/cron/raven-k12", "schedule": "10,25,40,55 * * * *" },
     { "path": "/api/documents/opengov-sync", "schedule": "2,17,32,47 * * * *" },
     { "path": "/api/documents/ionwave-sync", "schedule": "7 * * * *" },
     { "path": "/api/documents/discover", "schedule": "8,38 * * * *" },
