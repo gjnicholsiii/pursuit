@@ -6,6 +6,7 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const ANALYZER_VERSION=2;
 type Row = { job_id:string; id:string; opportunity_id:string; filename:string; text_storage_key:string };
 type Req = { category:string; text:string; line:number };
 
@@ -14,105 +15,83 @@ function skipRequirementMining(filename:string){
   const normalized=filename.toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
   return /(^| )(w 9|w9|form 1295|1295 form|certificate of interested parties)( |$)/.test(normalized);
 }
-
-function collectRequirements(lines:string[]):Req[] {
-  const out:Req[]=[]; const seen=new Set<string>();
-  lines.forEach((raw,i)=>{
-    const line=compact(raw);
-    if(line.length<25 || line.length>600) return;
-    if(!/\b(shall|must|required to|are required to|is required to)\b/i.test(line)) return;
-    if(/\b(if required|not required|not is required)\b/i.test(line)) return;
-    if(/\b(internal revenue service|taxpayer identification|social security number|tax return)\b/i.test(line)) return;
-    const key=line.toLowerCase(); if(seen.has(key)) return; seen.add(key);
-    let category="submission_requirement";
-    if(/bond|bonding/i.test(line)) category="bonding";
-    else if(/insurance|insured/i.test(line)) category="insurance";
-    else if(/certif|license|registration/i.test(line)) category="certification";
-    else if(/delivery|period of performance|completion date/i.test(line)) category="performance";
-    else if(/technical|specification|scope of work|statement of work/i.test(line)) category="technical";
-    else if(/price|pricing|cost/i.test(line)) category="pricing";
-    else if(/site visit|pre[- ]bid|preproposal|pre-proposal/i.test(line)) category="site_visit";
-    out.push({category,text:line,line:i+1});
+function segments(text:string){
+  const out:Array<{text:string;line:number}>=[];
+  text.split(/\r?\n/).forEach((page,pageIndex)=>{
+    const normalized=compact(page);
+    if(!normalized)return;
+    const parts=normalized.split(/(?<=[.;!?])\s+(?=(?:\(?\d+[.)]|[A-Z•]))|\s+(?=(?:SECTION|ARTICLE|PART)\s+\d+)/g);
+    let buffer="";
+    for(const part of parts){
+      const p=compact(part);if(!p)continue;
+      if((buffer+" "+p).trim().length<=520){buffer=(buffer+" "+p).trim();continue}
+      if(buffer.length>=20)out.push({text:buffer,line:pageIndex+1});
+      buffer=p;
+    }
+    if(buffer.length>=20)out.push({text:buffer,line:pageIndex+1});
   });
-  return out.slice(0,40);
+  return out;
+}
+function obligation(text:string){
+  return /\b(shall|must|required to|is required to|are required to)\b/i.test(text)
+    && !/\b(if required|when required by|not required|is not required|are not required)\b/i.test(text);
+}
+function classify(line:string){
+  if(/\b(bid bond|proposal bond|performance bond|payment bond|bonding capacity|surety)\b/i.test(line))return"bonding";
+  if(/\b(insurance|insured|certificate of insurance|general liability|workers.? compensation|automobile liability|umbrella)\b/i.test(line))return"insurance";
+  if(/\b(license[ds]?|licensure|certif(?:y|ied|ication)|registration|registered contractor|permit)\b/i.test(line))return"certification";
+  if(/\b(mandatory|required)\b.{0,80}\b(site visit|pre[- ]bid|preproposal|pre-proposal|conference|walkthrough)\b|\b(site visit|pre[- ]bid|preproposal|pre-proposal|conference|walkthrough)\b.{0,80}\b(mandatory|required)\b/i.test(line))return"site_visit";
+  if(/\b(submit|submission|proposal|bidder|offeror|bid form|signature|signed|upload|return with|due date|deadline|sealed bid|electronic bid)\b/i.test(line))return"submission_requirement";
+  if(/\b(price|pricing|cost proposal|fee schedule|unit price|bid price)\b/i.test(line))return"pricing";
+  if(/\b(years? of experience|past performance|references?|qualified personnel|key personnel|staffing|resume|project experience|similar projects?)\b/i.test(line))return"performance";
+  if(/\b(evaluation|evaluated|scoring|points|selection criteria)\b/i.test(line))return"evaluation";
+  if(/\b(specification|technical|system shall|equipment shall|contractor shall furnish|contractor shall provide|minimum requirement|manufacturer|model|compatib|interoperab)\b/i.test(line))return"technical";
+  return"other_requirement";
+}
+function collectRequirements(text:string):Req[] {
+  const out:Req[]=[];const seen=new Set<string>();
+  for(const segment of segments(text)){
+    const line=segment.text;
+    if(line.length<25||line.length>600||!obligation(line))continue;
+    if(/\b(internal revenue service|taxpayer identification|social security number|tax return)\b/i.test(line))continue;
+    if(/\b(this contract shall be|law shall|section shall|government shall|contracting officer shall|owner shall|agency shall|state shall)\b/i.test(line)&&!/\b(bidder|offeror|contractor|vendor|proposer|supplier)\b/i.test(line))continue;
+    const key=line.toLowerCase();if(seen.has(key))continue;seen.add(key);
+    out.push({category:classify(line),text:line,line:segment.line});
+    if(out.length>=60)break;
+  }
+  return out;
 }
 
-async function finishJob(jobId:string){
-  const sql=getSql();
-  await sql.query(`update document_jobs set state='done',leased_until=null,lease_owner=null,last_error=null,updated_at=now() where id=$1::bigint`,[jobId]);
-}
-
-async function retryJob(jobId:string,error:string){
-  const sql=getSql();
-  await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,attempts))),leased_until=null,lease_owner=null,last_error=$2,updated_at=now() where id=$1::bigint`,[jobId,error.slice(0,1000)]);
-}
+async function finishJob(jobId:string){await getSql().query(`update document_jobs set state='done',leased_until=null,lease_owner=null,last_error=null,updated_at=now() where id=$1::bigint`,[jobId]);}
+async function retryJob(jobId:string,error:string){await getSql().query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,attempts))),leased_until=null,lease_owner=null,last_error=$2,updated_at=now() where id=$1::bigint`,[jobId,error.slice(0,1000)]);}
 
 async function analyzeOne(document:Row){
   const sql=getSql();
   try{
     if(skipRequirementMining(document.filename)){
       await sql.query(`delete from requirements where document_id=$1::uuid and normalized_value->>'source'='document_text'`,[document.id]);
-      await sql.query(`update opportunity_documents set extraction_status='analyzed' where id=$1::uuid`,[document.id]);
-      await finishJob(document.job_id);
+      await sql.query(`update opportunity_documents set extraction_status='analyzed' where id=$1::uuid`,[document.id]);await finishJob(document.job_id);
       return {ok:true,documentId:document.id,filename:document.filename,requirementsFound:0,skippedBoilerplate:true};
     }
-    const blob=await get(document.text_storage_key,{access:"private"});
-    if(!blob || blob.statusCode!==200 || !blob.stream) throw new Error("extracted_text_unavailable");
-    const text=(await new Response(blob.stream).text()).replace(/\u0000/g,"");
-    const requirements=collectRequirements(text.split(/\r?\n/));
-
+    const blob=await get(document.text_storage_key,{access:"private"});if(!blob||blob.statusCode!==200||!blob.stream)throw new Error("extracted_text_unavailable");
+    const text=(await new Response(blob.stream).text()).replace(/\u0000/g,"");const requirements=collectRequirements(text);
+    await sql.query(`delete from requirements where document_id=$1::uuid and normalized_value->>'source'='document_text'`,[document.id]);
     if(requirements.length){
-      await sql.query(
-        `insert into requirements (opportunity_id,document_id,category,requirement_text,mandatory,evidence_locator,normalized_value,extraction_confidence)
-         select $1::uuid,$2::uuid,u.category,u.requirement_text,true,
-                jsonb_build_object('document_id',$2::text,'line',u.line),
-                jsonb_build_object('source','document_text'),0.98
-         from unnest($3::text[],$4::text[],$5::int[]) as u(category,requirement_text,line)
-         where not exists (select 1 from requirements x where x.document_id=$2::uuid and x.requirement_text=u.requirement_text)`,
-        [document.opportunity_id,document.id,requirements.map(r=>r.category),requirements.map(r=>r.text),requirements.map(r=>r.line)]
-      );
+      await sql.query(`insert into requirements(opportunity_id,document_id,category,requirement_text,mandatory,evidence_locator,normalized_value,extraction_confidence)
+        select $1::uuid,$2::uuid,u.category,u.requirement_text,true,jsonb_build_object('document_id',$2::text,'page',u.line),jsonb_build_object('source','document_text','analyzer_version',$6::int),0.96
+        from unnest($3::text[],$4::text[],$5::int[]) as u(category,requirement_text,line)`,[document.opportunity_id,document.id,requirements.map(r=>r.category),requirements.map(r=>r.text),requirements.map(r=>r.line),ANALYZER_VERSION]);
     }
-
-    await sql.query(`update opportunity_documents set extraction_status='analyzed' where id=$1::uuid`,[document.id]);
-    await finishJob(document.job_id);
+    await sql.query(`update opportunity_documents set extraction_status='analyzed' where id=$1::uuid`,[document.id]);await finishJob(document.job_id);
     return {ok:true,documentId:document.id,filename:document.filename,requirementsFound:requirements.length};
-  }catch(error){
-    const message=error instanceof Error?error.message:"evidence_analysis_failed";
-    await retryJob(document.job_id,message);
-    return {ok:false,documentId:document.id,reason:message};
-  }
+  }catch(error){const message=error instanceof Error?error.message:"evidence_analysis_failed";await retryJob(document.job_id,message);return{ok:false,documentId:document.id,reason:message}}
 }
 
 export async function GET(request:NextRequest){
-  const unauthorized=requireInternalAuth(request); if(unauthorized)return unauthorized;
-  const sql=getSql();
+  const unauthorized=requireInternalAuth(request);if(unauthorized)return unauthorized;const sql=getSql();
   await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,attempts))),leased_until=null,lease_owner=null,last_error=coalesce(last_error,'lease expired'),updated_at=now() where state='leased' and leased_until<now()`);
-
   const owner=`vercel-analyze-${crypto.randomUUID()}`;
-  const rows=await sql.query(
-    `with claim as (
-       select j.id from document_jobs j
-       join opportunity_documents d on d.id=j.document_id
-       join opportunities o on o.id=d.opportunity_id
-       where j.stage='analyze' and j.state='pending' and j.run_after<=now()
-         and d.extraction_status='text_extracted' and o.status='open'
-         and (o.due_at is null or o.due_at>=now())
-       order by j.priority,j.run_after,j.id
-       limit 24 for update skip locked
-     ), leased as (
-       update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now()
-       from claim where j.id=claim.id returning j.id as job_id,j.document_id
-     )
-     select leased.job_id::text,d.id,d.opportunity_id,d.filename,ef.normalized_value->>'text_storage_key' as text_storage_key
-     from leased join opportunity_documents d on d.id=leased.document_id
-     join extracted_facts ef on ef.document_id=d.id and ef.fact_type='document_text_extract'
-     where ef.normalized_value->>'text_storage_key' is not null`,[owner]
-  ) as Row[];
-
-  if(!rows.length) return NextResponse.json({ok:true,processed:0,message:"No analysis jobs are waiting"});
-  const results=[] as Array<Record<string,unknown>>;
-  const concurrency=6;
-  for(let i=0;i<rows.length;i+=concurrency) results.push(...await Promise.all(rows.slice(i,i+concurrency).map(analyzeOne)));
-  const analyzed=results.filter(result=>result.ok).length;
-  return NextResponse.json({ok:true,processed:results.length,analyzed,failed:results.length-analyzed,requirementsFound:results.reduce((sum,result)=>sum+Number(result.requirementsFound||0),0)});
+  const rows=await sql.query(`with claim as(select j.id from document_jobs j join opportunity_documents d on d.id=j.document_id join opportunities o on o.id=d.opportunity_id where j.stage='analyze' and j.state='pending' and j.run_after<=now() and d.extraction_status in('text_extracted','analyzed') and o.status='open' and (o.due_at is null or o.due_at>=now()) order by j.priority,j.run_after,j.id limit 24 for update skip locked),leased as(update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now() from claim where j.id=claim.id returning j.id job_id,j.document_id) select leased.job_id::text,d.id,d.opportunity_id,d.filename,ef.normalized_value->>'text_storage_key' text_storage_key from leased join opportunity_documents d on d.id=leased.document_id join extracted_facts ef on ef.document_id=d.id and ef.fact_type='document_text_extract' where ef.normalized_value->>'text_storage_key' is not null`,[owner]) as Row[];
+  if(!rows.length)return NextResponse.json({ok:true,processed:0,message:"No analysis jobs are waiting"});
+  const results=[] as Array<Record<string,unknown>>;const concurrency=6;for(let i=0;i<rows.length;i+=concurrency)results.push(...await Promise.all(rows.slice(i,i+concurrency).map(analyzeOne)));
+  const analyzed=results.filter(r=>r.ok).length;return NextResponse.json({ok:true,processed:results.length,analyzed,failed:results.length-analyzed,requirementsFound:results.reduce((sum,r)=>sum+Number(r.requirementsFound||0),0),analyzerVersion:ANALYZER_VERSION});
 }
