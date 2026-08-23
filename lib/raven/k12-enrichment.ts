@@ -4,17 +4,22 @@ type Agency = { id: string; canonical_name: string; website: string };
 type Candidate = { name: string; title: string; roleFamily: string; email?: string; phone?: string; sourceUrl: string; confidence: number };
 
 const ROLE_RULES: Array<{ family: string; terms: RegExp }> = [
-  { family: "Technology", terms: /\b(cio|cto|chief technology|chief information|director of technology|technology director|director of information technology|it director|information technology director)\b/i },
-  { family: "Security", terms: /\b(director of (?:safety|security)|safety director|security director|school safety|chief of security|public safety)\b/i },
-  { family: "Facilities", terms: /\b(facilities director|director of facilities|operations director|director of operations|chief operations officer|coo)\b/i },
+  { family: "Technology", terms: /\b(cio|cto|chief technology|chief information|director of technology|technology director|director of information technology|it director|information technology director|network director|director of infrastructure)\b/i },
+  { family: "Security", terms: /\b(director of (?:safety|security)|safety director|security director|school safety|chief of security|public safety|emergency management)\b/i },
+  { family: "Facilities", terms: /\b(facilities director|director of facilities|operations director|director of operations|chief operations officer|coo|maintenance director|director of maintenance)\b/i },
   { family: "Executive", terms: /\b(superintendent|deputy superintendent|assistant superintendent)\b/i },
-  { family: "Procurement", terms: /\b(procurement|purchasing|director of finance|chief financial officer|cfo)\b/i },
+  { family: "Procurement", terms: /\b(procurement|purchasing|director of finance|chief financial officer|cfo|business manager)\b/i },
   { family: "Board", terms: /\b(board president|board vice president|board member|school board)\b/i },
 ];
 
-const LINK_TERMS = /staff|directory|administration|leadership|technology|information.?technology|security|safety|facilities|operations|procurement|purchasing|board/i;
+const LINK_TERMS = /staff|directory|administration|leadership|technology|information.?technology|security|safety|facilities|operations|procurement|purchasing|board|departments|district office/i;
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig;
 const PHONE_RE = /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/;
+const COMMON_PATHS = [
+  "/staff", "/staff-directory", "/directory", "/administration", "/leadership", "/departments",
+  "/technology", "/departments/technology", "/information-technology", "/facilities", "/operations",
+  "/safety", "/security", "/school-safety", "/procurement", "/purchasing", "/board"
+];
 
 function safePublicUrl(raw: string) {
   try {
@@ -42,7 +47,7 @@ function visibleText(html: string) {
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<br\s*\/?\s*>/gi, "\n")
-    .replace(/<\/(p|div|li|tr|h[1-6]|section|article)>/gi, "\n")
+    .replace(/<\/(p|div|li|tr|h[1-6]|section|article|td)>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{2,}/g, "\n");
@@ -57,7 +62,7 @@ function plausibleName(value: string) {
   if (s.length < 5 || s.length > 60) return null;
   const parts = s.split(" ").filter(Boolean);
   if (parts.length < 2 || parts.length > 5) return null;
-  if (/director|superintendent|technology|security|facilities|board|department|school|district|office/i.test(s)) return null;
+  if (/director|superintendent|technology|security|facilities|board|department|school|district|office|contact|email|phone/i.test(s)) return null;
   return titleCaseName(s);
 }
 
@@ -68,13 +73,13 @@ function extractCandidates(html: string, sourceUrl: string): Candidate[] {
     const line = lines[i];
     const rule = ROLE_RULES.find(r => r.terms.test(line));
     if (!rule) continue;
-    const context = lines.slice(Math.max(0, i - 2), Math.min(lines.length, i + 4));
-    const title = line.length <= 120 ? line : line.slice(0, 120);
+    const context = lines.slice(Math.max(0, i - 3), Math.min(lines.length, i + 5));
+    const title = line.length <= 140 ? line : line.slice(0, 140);
     const joined = context.join(" ");
     const email = joined.match(EMAIL_RE)?.[0];
     const phone = joined.match(PHONE_RE)?.[0];
     let name: string | null = null;
-    for (const offset of [-1, 1, -2, 2]) {
+    for (const offset of [-1, 1, -2, 2, -3, 3]) {
       const candidateLine = lines[i + offset];
       if (!candidateLine) continue;
       name = plausibleName(candidateLine.replace(EMAIL_RE, "").replace(PHONE_RE, ""));
@@ -82,7 +87,7 @@ function extractCandidates(html: string, sourceUrl: string): Candidate[] {
     }
     if (!name && email) name = plausibleName(email.split("@")[0].replace(/[._-]+/g, " "));
     if (!name) continue;
-    candidates.push({ name, title, roleFamily: rule.family, email, phone, sourceUrl, confidence: email ? 88 : phone ? 82 : 72 });
+    candidates.push({ name, title, roleFamily: rule.family, email, phone, sourceUrl, confidence: email ? 90 : phone ? 84 : 74 });
   }
   const deduped = new Map<string, Candidate>();
   for (const c of candidates) {
@@ -90,20 +95,38 @@ function extractCandidates(html: string, sourceUrl: string): Candidate[] {
     const old = deduped.get(key);
     if (!old || c.confidence > old.confidence) deduped.set(key, c);
   }
-  return [...deduped.values()].slice(0, 20);
+  return [...deduped.values()].slice(0, 30);
 }
 
 async function fetchPage(url: string) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 9000);
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
-    const res = await fetch(url, { redirect: "follow", signal: controller.signal, headers: { "user-agent": "Pursuit-Raven/1.0 (+public-business-intelligence)" } });
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "user-agent": "Pursuit-Raven/1.1 (+public-business-intelligence)",
+        "accept": "text/html,application/xhtml+xml"
+      }
+    });
     if (!res.ok) return null;
     const type = res.headers.get("content-type") || "";
-    if (!type.includes("text/html")) return null;
+    if (!type.includes("text/html") && !type.includes("application/xhtml+xml")) return null;
     return { html: await res.text(), finalUrl: res.url || url };
   } catch { return null; }
   finally { clearTimeout(timer); }
+}
+
+function ncesSeedCandidates(seed: URL) {
+  if (!seed.hostname.endsWith("nces.ed.gov")) return [seed.toString()];
+  const id = seed.searchParams.get("ID2") || seed.searchParams.get("DistrictID");
+  if (!id) return [seed.toString()];
+  return [
+    `https://nces.ed.gov/ccd/districtsearch/district_detail.asp?ID2=${encodeURIComponent(id)}`,
+    `https://nces.ed.gov/ccd/districtsearch/district_detail.asp?DistrictID=${encodeURIComponent(id)}&ID2=${encodeURIComponent(id)}&Search=2`,
+    seed.toString()
+  ];
 }
 
 function discoverOfficialSite(seed: URL, html: string) {
@@ -116,8 +139,8 @@ function discoverOfficialSite(seed: URL, html: string) {
     try {
       const u = new URL(match[1], seed);
       if (!/^https?:$/.test(u.protocol)) continue;
-      if (u.hostname.endsWith("ed.gov") || u.hostname.endsWith("usa.gov")) continue;
-      if (/web\s*site|website|district|school/i.test(label)) candidates.push(u);
+      if (u.hostname.endsWith("nces.ed.gov") || u.hostname.endsWith("ed.gov") || u.hostname.endsWith("usa.gov")) continue;
+      if (/web\s*site|website|district|school|home/i.test(label)) candidates.push(u);
     } catch {}
   }
   return candidates[0] || seed;
@@ -134,7 +157,10 @@ function discoverLinks(base: URL, html: string) {
     const u = absoluteSameHost(base, href);
     if (u) links.push(u);
   }
-  return [...new Set(links)].slice(0, 6);
+  for (const path of COMMON_PATHS) {
+    try { links.push(new URL(path, base).toString()); } catch {}
+  }
+  return [...new Set(links)].filter(x => x !== base.toString()).slice(0, 14);
 }
 
 async function enrichAgency(agency: Agency) {
@@ -147,15 +173,25 @@ async function enrichAgency(agency: Agency) {
   let pages = 0;
   let people = 0;
   const errors: string[] = [];
+  const attemptedSeeds = ncesSeedCandidates(seed);
 
   try {
-    const seedPage = await fetchPage(seed.toString());
+    let seedPage: { html: string; finalUrl: string } | null = null;
+    let workingSeed = seed;
+    for (const candidate of attemptedSeeds) {
+      seedPage = await fetchPage(candidate);
+      if (seedPage) {
+        workingSeed = safePublicUrl(seedPage.finalUrl) || safePublicUrl(candidate) || seed;
+        break;
+      }
+    }
     if (!seedPage) throw new Error("seed page unavailable");
     pages++;
-    let base = discoverOfficialSite(seed, seedPage.html);
+
+    let base = discoverOfficialSite(workingSeed, seedPage.html);
     let homepage = seedPage.html;
 
-    if (base.hostname !== seed.hostname) {
+    if (base.hostname !== workingSeed.hostname) {
       const officialPage = await fetchPage(base.toString());
       if (!officialPage) throw new Error("official district site unavailable");
       pages++;
@@ -164,18 +200,19 @@ async function enrichAgency(agency: Agency) {
       await sql.query(`update agencies set website=$2 where id=$1`, [agency.id, base.toString()]);
     }
 
-    const urls = [base.toString(), ...discoverLinks(base, homepage)].slice(0, 5);
+    const urls = [base.toString(), ...discoverLinks(base, homepage)].slice(0, 15);
     const allCandidates: Candidate[] = extractCandidates(homepage, base.toString());
     for (const url of urls.slice(1)) {
       const page = await fetchPage(url);
       if (!page) { errors.push(url); continue; }
       pages++;
       allCandidates.push(...extractCandidates(page.html, page.finalUrl));
+      if (allCandidates.length >= 30) break;
     }
 
     const unique = new Map<string, Candidate>();
     for (const c of allCandidates) unique.set(`${c.name}|${c.title}`.toLowerCase(), c);
-    for (const c of [...unique.values()].slice(0, 20)) {
+    for (const c of [...unique.values()].slice(0, 30)) {
       await sql.query(`
         insert into raven_people (agency_id, full_name, title, role_family, email, phone, source_url, source_type, confidence, last_verified_at, updated_at)
         values ($1,$2,$3,$4,$5,$6,$7,'public_web',$8,now(),now())
@@ -190,10 +227,10 @@ async function enrichAgency(agency: Agency) {
       people++;
     }
 
-    await sql.query(`update raven_enrichment_runs set status='complete', pages_scanned=$2, people_found=$3, completed_at=now(), diagnostics=$4::jsonb where id=$1`, [runId, pages, people, JSON.stringify({ errors, officialWebsite: base.toString() })]);
+    await sql.query(`update raven_enrichment_runs set status='complete', pages_scanned=$2, people_found=$3, completed_at=now(), diagnostics=$4::jsonb where id=$1`, [runId, pages, people, JSON.stringify({ errors, attemptedSeeds, officialWebsite: base.toString() })]);
     return { agency: agency.canonical_name, ok: true, pages, people, website: base.toString() };
   } catch (error) {
-    await sql.query(`update raven_enrichment_runs set status='failed', pages_scanned=$2, people_found=$3, completed_at=now(), diagnostics=$4::jsonb where id=$1`, [runId, pages, people, JSON.stringify({ error: error instanceof Error ? error.message : String(error), errors })]);
+    await sql.query(`update raven_enrichment_runs set status='failed', pages_scanned=$2, people_found=$3, completed_at=now(), diagnostics=$4::jsonb where id=$1`, [runId, pages, people, JSON.stringify({ error: error instanceof Error ? error.message : String(error), errors, attemptedSeeds })]);
     return { agency: agency.canonical_name, ok: false, pages, people, reason: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -207,7 +244,16 @@ export async function enrichK12Batch(limit = 10) {
       and a.website is not null and a.website <> ''
       and not exists (
         select 1 from raven_enrichment_runs r
-        where r.agency_id=a.id and r.status='complete' and r.completed_at > now() - interval '30 days'
+        where r.agency_id=a.id
+          and r.status='complete'
+          and r.people_found > 0
+          and r.completed_at > now() - interval '30 days'
+      )
+      and not exists (
+        select 1 from raven_enrichment_runs r
+        where r.agency_id=a.id
+          and r.people_found = 0
+          and r.completed_at > now() - interval '6 hours'
       )
     order by coalesce((select max(r.completed_at) from raven_enrichment_runs r where r.agency_id=a.id), '1970-01-01'::timestamptz), a.canonical_name
     limit $1
