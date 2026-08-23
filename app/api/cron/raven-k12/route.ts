@@ -19,7 +19,8 @@ export async function GET(request: NextRequest) {
     const limit = Number(request.nextUrl.searchParams.get("limit") || 9);
     const identity = await resolveK12OfficialSites(60);
     const result = await enrichK12Batch(limit);
-    return NextResponse.json({ ok: true, identity, ...result });
+    const removed=await sql.query(`delete from raven_people where source_type='public_web' and full_name ~* '(quick links|in this section|testing|environmental|air quality|water.*testing|road$|street$|avenue$|boulevard$|highway$|^event details$|^scroll down$|^please register|^new student enrollment$|^view spending$|^committee members$|^term expires$|^current bids$|^watch the latest meeting$)' returning id`);
+    return NextResponse.json({ ok: true, identity, ...result, falsePeopleRemoved: removed.length });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
