@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const STANDARD_DOCUMENT_BYTES = 50 * 1024 * 1024;
-const EXTRACTION_BATCH_SIZE = 4;
+const EXTRACTION_BATCH_SIZE = 8;
 const MAX_EXTRACTED_CHARACTERS = 12_000_000;
 const EXTRACTION_BUDGET_MS = 240_000;
 
