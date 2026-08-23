@@ -64,7 +64,7 @@ function findOfficial(html:string,base:string):string|null{
   return candidates[0]?.url||null;
 }
 
-export async function resolveK12OfficialSites(limit=20){
+export async function resolveK12OfficialSites(limit=60){
   const sql=getSql();
   const rows=await sql.query(`
     select a.id::text,a.canonical_name,a.website
@@ -74,11 +74,11 @@ export async function resolveK12OfficialSites(limit=20){
       and exists(select 1 from opportunities o where o.agency_id=a.id and o.status='open' and (o.due_at is null or o.due_at>=now()))
     order by coalesce((select max(r.started_at) from raven_enrichment_runs r where r.agency_id=a.id),'1970-01-01'::timestamptz),a.canonical_name
     limit $1
-  `,[Math.max(1,Math.min(limit,40))]) as AgencyRow[];
+  `,[Math.max(1,Math.min(limit,60))]) as AgencyRow[];
   let resolved=0,failed=0;
   const results:Array<{agency:string;website?:string;ok:boolean}>=[];
-  for(let i=0;i<rows.length;i+=5){
-    const batch=rows.slice(i,i+5);
+  for(let i=0;i<rows.length;i+=8){
+    const batch=rows.slice(i,i+8);
     const settled=await Promise.all(batch.map(async row=>{
       const html=await fetchHtml(row.website);
       if(!html)return{agency:row.canonical_name,ok:false};
