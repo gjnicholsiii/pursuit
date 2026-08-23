@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const limit = Number(request.nextUrl.searchParams.get("limit") || 9);
-    const identity = await resolveK12OfficialSites(Math.max(limit * 2, 18));
+    const identity = await resolveK12OfficialSites(60);
     const result = await enrichK12Batch(limit);
     return NextResponse.json({ ok: true, identity, ...result });
   } catch (error) {
