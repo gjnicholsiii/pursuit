@@ -1,6 +1,6 @@
 import { get, put } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
-import { extractText, getDocumentProxy } from "unpdf";
+import { getDocumentProxy } from "unpdf";
 import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const STANDARD_DOCUMENT_BYTES = 50 * 1024 * 1024;
-const EXTRACTION_BATCH_SIZE = 8;
+const EXTRACTION_BATCH_SIZE = 1;
+const MAX_EXTRACTED_CHARACTERS = 12_000_000;
 
 interface FetchedDocumentRow {
   job_id: string;
@@ -31,15 +32,34 @@ async function retryJob(jobId:string,error:string){
   await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,attempts))),leased_until=null,lease_owner=null,last_error=$2,updated_at=now() where id=$1::bigint`,[jobId,error.slice(0,1000)]);
 }
 
+async function extractPdfPagewise(pdf:any) {
+  const pages:string[]=[];
+  let characters=0;
+  const totalPages=Number(pdf.numPages||0);
+  for(let pageNumber=1;pageNumber<=totalPages;pageNumber++){
+    const page=await pdf.getPage(pageNumber);
+    try{
+      const content=await page.getTextContent();
+      const text=(content.items||[]).map((item:any)=>typeof item?.str==="string"?item.str:"").filter(Boolean).join(" ");
+      if(text){pages.push(text);characters+=text.length+1;}
+      if(characters>=MAX_EXTRACTED_CHARACTERS)break;
+    } finally {
+      try{page.cleanup?.();}catch{}
+    }
+  }
+  return {text:pages.join("\n"),totalPages,characters,truncated:characters>=MAX_EXTRACTED_CHARACTERS};
+}
+
 async function extractOne(document: FetchedDocumentRow) {
   const sql = getSql();
+  let pdf:any=null;
   try {
     const blob = await get(document.storage_key, { access:"private" });
     if (!blob || blob.statusCode !== 200 || !blob.stream) throw new Error("stored_pdf_unavailable");
 
     const bytes = await new Response(blob.stream).arrayBuffer();
-    const pdf = await getDocumentProxy(new Uint8Array(bytes));
-    const extracted = await extractText(pdf, { mergePages:true });
+    pdf = await getDocumentProxy(new Uint8Array(bytes));
+    const extracted = await extractPdfPagewise(pdf);
     const text = extracted.text;
 
     if (!text.trim()) {
@@ -53,18 +73,21 @@ async function extractOne(document: FetchedDocumentRow) {
 
     await sql.query(
       `insert into extracted_facts (opportunity_id,document_id,fact_type,normalized_value,source_text,evidence_locator,extraction_confidence)
-       select $1::uuid,$2::uuid,'document_text_extract',jsonb_build_object('text_storage_key',$3::text,'page_count',$4::int,'character_count',$5::int),null,jsonb_build_object('document_id',$2::text),1.0
+       select $1::uuid,$2::uuid,'document_text_extract',jsonb_build_object('text_storage_key',$3::text,'page_count',$4::int,'character_count',$5::int,'truncated',$6::boolean),null,jsonb_build_object('document_id',$2::text),1.0
        where not exists (select 1 from extracted_facts where document_id=$2::uuid and fact_type='document_text_extract')`,
-      [document.opportunity_id,document.id,textBlob.pathname,extracted.totalPages,text.length]
+      [document.opportunity_id,document.id,textBlob.pathname,extracted.totalPages,text.length,extracted.truncated]
     );
     await sql.query(`update opportunity_documents set extraction_status='text_extracted' where id=$1::uuid`, [document.id]);
     await sql.query(`insert into document_jobs(document_id,stage,host_class,priority) values($1::uuid,'analyze',$2,$3) on conflict(document_id,stage) do update set priority=least(document_jobs.priority,excluded.priority),state=case when document_jobs.state in ('done','leased') then document_jobs.state else 'pending' end,updated_at=now()`,[document.id,document.host_class,Math.max(0,document.priority-10)]);
     await finishJob(document.job_id);
-    return { ok:true, documentId:document.id, pages:extracted.totalPages, characters:text.length };
+    return { ok:true, documentId:document.id, pages:extracted.totalPages, characters:text.length, truncated:extracted.truncated };
   } catch (error) {
     const message=error instanceof Error ? error.message : "text_extraction_failed";
     await retryJob(document.job_id,message);
     return { ok:false, documentId:document.id, reason:message };
+  } finally {
+    try{await pdf?.destroy?.();}catch{}
+    pdf=null;
   }
 }
 
@@ -86,12 +109,7 @@ export async function GET(request: NextRequest) {
 
   if (!rows.length) return NextResponse.json({ ok:true, processed:0, message:"No extraction jobs are waiting" });
   const results=[] as Array<Record<string,unknown>>;
-  // PDF parsing can expand a relatively small compressed file into a very large
-  // in-memory object graph. Process one document at a time so separate files never
-  // overlap their unpdf working sets inside one Vercel function instance.
-  for (const document of rows) {
-    results.push(await extractOne(document));
-  }
+  for (const document of rows) results.push(await extractOne(document));
   const extracted=results.filter(result=>result.ok).length;
   const oversized=rows.filter(row=>Number(row.bytes)>STANDARD_DOCUMENT_BYTES).length;
   return NextResponse.json({ ok:true, processed:results.length, extracted, failed:results.length-extracted, oversized });
