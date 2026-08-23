@@ -119,17 +119,23 @@ export async function syncNcesDistrictState(stateCode: string) {
     with input as (
       select * from jsonb_to_recordset($1::jsonb)
       as x(nces_id text, name text, city text, county text, source_url text)
-    ), unique_legacy as (
-      select i.*, a.id
+    ), matched as (
+      select i.*, a.id, a.website
       from input i
       join agencies a on a.state_code=$2 and a.agency_type='k12'
-        and lower(a.canonical_name)=lower(i.name) and a.website is null
+        and lower(a.canonical_name)=lower(i.name)
       where (select count(*) from agencies a2 where a2.state_code=$2 and a2.agency_type='k12' and lower(a2.canonical_name)=lower(i.name))=1
     )
     update agencies a
-    set website=u.source_url, city=coalesce(a.city,u.city), county=coalesce(a.county,u.county)
-    from unique_legacy u
-    where a.id=u.id
+    set website=case
+          when a.website is null or a.website='' then m.source_url
+          when a.website ~* '(ionwave|opengov|oregonbuys|bidnet|publicpurchase|bonfirehub|jaggaer|procurement|bidsync|periscope|scbo\\.sc\\.gov|app\\.az\\.gov|eva\\.virginia\\.gov|vendorregistry|planetbids)' then m.source_url
+          else a.website
+        end,
+        city=coalesce(a.city,m.city), county=coalesce(a.county,m.county)
+    from matched m
+    where a.id=m.id
+      and (a.website is null or a.website='' or a.website ~* '(ionwave|opengov|oregonbuys|bidnet|publicpurchase|bonfirehub|jaggaer|procurement|bidsync|periscope|scbo\\.sc\\.gov|app\\.az\\.gov|eva\\.virginia\\.gov|vendorregistry|planetbids)')
     returning a.id
   `, [payload, code]);
 
@@ -143,12 +149,9 @@ export async function syncNcesDistrictState(stateCode: string) {
     from input i
     where not exists (
       select 1 from agencies a
-      where a.state_code=$2 and a.agency_type='k12' and a.website like ('%' || i.nces_id || '%')
+      where a.state_code=$2 and a.agency_type='k12'
+        and (a.website like ('%' || i.nces_id || '%') or lower(a.canonical_name)=lower(i.name))
     )
-      and not exists (
-        select 1 from agencies a
-        where a.state_code=$2 and a.agency_type='k12' and lower(a.canonical_name)=lower(i.name) and a.website is null
-      )
     returning id
   `, [payload, code]);
 
