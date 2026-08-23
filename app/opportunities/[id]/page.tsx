@@ -17,11 +17,23 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
   if (!opportunity) notFound();
 
   const uncertainty = (opportunity.uncertainty || []).filter(item => !/package document|package review|solicitation package/i.test(item));
-  if (documents.identified === 0) uncertainty.push("No bid-package documents have been identified in the source record yet.");
-  else {
+  if (documents.identified === 0) {
+    if (documents.packageStatus === "access_required") uncertainty.push(documents.packageNote || "The source exposes this opportunity publicly but requires portal access for its package attachments.");
+    else if (documents.packageStatus === "scanned_no_public_attachment") uncertainty.push("Pursuit scanned the public source record and found no public attachment links. The package may be distributed outside the listing or require vendor access.");
+    else if (documents.packageStatus?.startsWith("source_http_") || documents.packageStatus === "source_unreachable") uncertainty.push("The procurement source could not be reached during the latest package scan. Pursuit will retry automatically.");
+    else uncertainty.push("Bid-package discovery is still pending for this source record.");
+  } else {
     if (documents.missing > 0) uncertainty.push(`${documents.missing} identified package document${documents.missing === 1 ? " is" : "s are"} currently unavailable from the source.`);
-    if (documents.identified > documents.fetched) uncertainty.push(`${documents.identified - documents.fetched} additional package document${documents.identified - documents.fetched === 1 ? " is" : "s are"} cataloged and will be retrieved only when requested.`);
+    if (documents.identified > documents.fetched) uncertainty.push(`${documents.identified - documents.fetched} additional package document${documents.identified - documents.fetched === 1 ? " is" : "s are"} cataloged and queued for retrieval.`);
   }
+
+  const emptyPackageMessage = documents.packageStatus === "access_required"
+    ? (documents.packageNote || "Package attachments require vendor portal access at the source.")
+    : documents.packageStatus === "scanned_no_public_attachment"
+      ? "The public source record was scanned and exposes no public package links."
+      : documents.packageStatus?.startsWith("source_http_") || documents.packageStatus === "source_unreachable"
+        ? "The latest package scan could not reach the source. Automatic retry is scheduled."
+        : "Package discovery is in progress for this opportunity.";
 
   return (
     <main className="shell">
@@ -96,8 +108,8 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
               <div><span>UNAVAILABLE</span><strong>{documents.missing}</strong></div>
             </div>
             {documents.documents.length > 0 ? <div className="package-list">{documents.documents.map(document => (
-              <a key={document.id} href={document.sourceUrl} target="_blank" rel="noreferrer"><FileCheck2 size={15} /><span>{document.filename}</span><small>{document.fetchedAt ? document.extractionStatus : "cataloged · retrieve on request"}</small><ArrowUpRight size={14} /></a>
-            ))}</div> : <p className="brief-explainer">No package links have been identified in the source record yet.</p>}
+              <a key={document.id} href={document.sourceUrl} target="_blank" rel="noreferrer"><FileCheck2 size={15} /><span>{document.filename}</span><small>{document.fetchedAt ? document.extractionStatus : "cataloged · queued for retrieval"}</small><ArrowUpRight size={14} /></a>
+            ))}</div> : <p className="brief-explainer">{emptyPackageMessage}</p>}
             {documents.identified > documents.fetched && <form action={`/api/opportunities/${id}/package`} method="post" className="profile-actions"><button className="secondary-button" type="submit">Get complete bid package</button></form>}
           </section>
 
