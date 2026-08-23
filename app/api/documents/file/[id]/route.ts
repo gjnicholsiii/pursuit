@@ -1,11 +1,15 @@
 import { get } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
+import { getCurrentCustomerProfile } from "@/lib/customer-profile";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  const profile = await getCurrentCustomerProfile();
+  if (!profile) return NextResponse.json({ error:"Unauthorized" }, { status:401 });
+
   const { id } = await params;
   const sql = getSql();
   const rows = await sql.query(
@@ -27,7 +31,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     headers: {
       "Content-Type": result.blob.contentType || "application/octet-stream",
       "Content-Disposition": `inline; filename="${filename}"`,
-      "Cache-Control": "private, max-age=300",
+      "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
     },
   });
