@@ -8,8 +8,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const STANDARD_DOCUMENT_BYTES = 50 * 1024 * 1024;
-const EXTRACTION_BATCH_SIZE = 1;
+const EXTRACTION_BATCH_SIZE = 4;
 const MAX_EXTRACTED_CHARACTERS = 12_000_000;
+const EXTRACTION_BUDGET_MS = 240_000;
 
 interface FetchedDocumentRow {
   job_id: string;
@@ -30,6 +31,11 @@ async function finishJob(jobId:string){
 async function retryJob(jobId:string,error:string){
   const sql=getSql();
   await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,attempts))),leased_until=null,lease_owner=null,last_error=$2,updated_at=now() where id=$1::bigint`,[jobId,error.slice(0,1000)]);
+}
+
+async function releaseJob(jobId:string){
+  const sql=getSql();
+  await sql.query(`update document_jobs set state='pending',leased_until=null,lease_owner=null,run_after=now(),updated_at=now() where id=$1::bigint and state='leased'`,[jobId]);
 }
 
 async function extractPdfPagewise(pdf:any) {
@@ -109,8 +115,15 @@ export async function GET(request: NextRequest) {
 
   if (!rows.length) return NextResponse.json({ ok:true, processed:0, message:"No extraction jobs are waiting" });
   const results=[] as Array<Record<string,unknown>>;
-  for (const document of rows) results.push(await extractOne(document));
+  const startedAt=Date.now();
+  let processedRows=0;
+  for (const document of rows) {
+    if (Date.now()-startedAt>=EXTRACTION_BUDGET_MS) break;
+    results.push(await extractOne(document));
+    processedRows++;
+  }
+  for (const document of rows.slice(processedRows)) await releaseJob(document.job_id);
   const extracted=results.filter(result=>result.ok).length;
-  const oversized=rows.filter(row=>Number(row.bytes)>STANDARD_DOCUMENT_BYTES).length;
-  return NextResponse.json({ ok:true, processed:results.length, extracted, failed:results.length-extracted, oversized });
+  const oversized=rows.slice(0,processedRows).filter(row=>Number(row.bytes)>STANDARD_DOCUMENT_BYTES).length;
+  return NextResponse.json({ ok:true, processed:results.length, extracted, failed:results.length-extracted, oversized, released:rows.length-processedRows });
 }
