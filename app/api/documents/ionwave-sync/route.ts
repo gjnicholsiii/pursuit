@@ -23,6 +23,32 @@ async function fetchWithThrottleRetry(url:string){
 export async function GET(request:NextRequest){
   const auth=requireInternalAuth(request); if(auth)return auth;
   const sql=getSql();
+
+  // Older generic HTML discovery interpreted ASP.NET postback control IDs such as
+  // ctl00$mainContent$rgBidAttachments... as relative URLs. They are UI control
+  // identifiers, not downloadable resources. Retire them here so the dedicated
+  // IonWave attachment parser remains the authoritative document path.
+  const retired=await sql.query(`
+    with artifacts as (
+      update opportunity_documents d
+      set is_missing=true, extraction_status='discovery_artifact'
+      from opportunities o, sources s
+      where d.opportunity_id=o.id
+        and o.source_id=s.id
+        and s.adapter_key='ionwave_k12'
+        and d.document_type='sled_resource'
+        and d.storage_key is null
+        and position('$' in d.source_url)>0
+      returning d.id
+    )
+    update document_jobs j
+    set state='skipped',leased_until=null,lease_owner=null,last_error=null,updated_at=now(),
+        meta=coalesce(j.meta,'{}'::jsonb)||jsonb_build_object('reason','ionwave_control_id_not_document')
+    from artifacts a
+    where j.document_id=a.id and j.stage='acquire' and j.state in ('pending','dead')
+    returning j.id
+  `) as Array<{id:number}>;
+
   const opps=await sql.query(`
     select o.id,o.external_id,o.source_url
     from opportunities o
@@ -106,5 +132,5 @@ export async function GET(request:NextRequest){
       await sleep(350);
     }catch(error){ results.push({externalId:opp.external_id,error:error instanceof Error?error.message:String(error),inserted:0}); await sleep(350); }
   }
-  return NextResponse.json({ok:true,opportunities:opps.length,insertedTotal,refreshedTotal,revivedTotal,results});
+  return NextResponse.json({ok:true,opportunities:opps.length,retiredControlArtifacts:retired.length,insertedTotal,refreshedTotal,revivedTotal,results});
 }
