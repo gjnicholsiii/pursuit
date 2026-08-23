@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import { getSql } from "@/lib/db";
 
 type AgencyRow={id:string;canonical_name:string;website:string};
+type RankedSite={url:string;score:number};
 
 function safePublicUrl(raw:string){
   try{
@@ -21,11 +22,12 @@ function externalFromNcesHref(href:string,base:string){
       const location=wrapped.searchParams.get('location');
       if(location){
         const decoded=decodeURIComponent(location).replace(/^\/+/,"");
-        return safePublicUrl(decoded);
+        const candidate=safePublicUrl(decoded);
+        return candidate?.toString()||null;
       }
     }
     const direct=safePublicUrl(wrapped.toString());
-    if(direct&&!direct.hostname.toLowerCase().endsWith('nces.ed.gov')&&!direct.hostname.toLowerCase().endsWith('ed.gov'))return direct;
+    if(direct&&!direct.hostname.toLowerCase().endsWith('nces.ed.gov')&&!direct.hostname.toLowerCase().endsWith('ed.gov'))return direct.toString();
   }catch{}
   return null;
 }
@@ -40,25 +42,26 @@ async function fetchHtml(url:string){
   }catch{return null;}finally{clearTimeout(timer);}
 }
 
-function findOfficial(html:string,base:string){
+function findOfficial(html:string,base:string):string|null{
   const $=cheerio.load(html);
-  let bestUrl:URL|null=null;
-  let bestScore=-1;
+  const candidates:RankedSite[]=[];
   $('a[href]').each((_,el)=>{
     const href=$(el).attr('href')||'';
     const label=$(el).text().replace(/\s+/g,' ').trim();
     const candidate=externalFromNcesHref(href,base);
     if(!candidate)return;
-    const host=candidate.hostname.toLowerCase();
+    let host='';
+    try{host=new URL(candidate).hostname.toLowerCase();}catch{return;}
     if(/facebook|twitter|instagram|youtube|linkedin/.test(host))return;
     let score=0;
     if(/website|web site/i.test(label))score+=30;
     if(/k12|schools?|district|isd|usd|csd/i.test(`${label} ${host}`))score+=20;
     if(/\.k12\.[a-z]{2}\.us$/.test(host))score+=20;
     if(/\.org$|\.net$|\.us$/.test(host))score+=3;
-    if(score>bestScore){bestScore=score;bestUrl=candidate;}
+    candidates.push({url:candidate,score});
   });
-  return bestUrl;
+  candidates.sort((a,b)=>b.score-a.score);
+  return candidates[0]?.url||null;
 }
 
 export async function resolveK12OfficialSites(limit=20){
@@ -81,8 +84,8 @@ export async function resolveK12OfficialSites(limit=20){
       if(!html)return{agency:row.canonical_name,ok:false};
       const official=findOfficial(html,row.website);
       if(!official)return{agency:row.canonical_name,ok:false};
-      await sql.query(`update agencies set website=$2 where id=$1`,[row.id,official.toString()]);
-      return{agency:row.canonical_name,website:official.toString(),ok:true};
+      await sql.query(`update agencies set website=$2 where id=$1`,[row.id,official]);
+      return{agency:row.canonical_name,website:official,ok:true};
     }));
     for(const result of settled){results.push(result);if(result.ok)resolved++;else failed++;}
   }
