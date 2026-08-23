@@ -11,7 +11,6 @@
     { "path": "/api/cron/state-pages-secondary", "schedule": "45 */2 * * *" },
     { "path": "/api/cron/state-heavy", "schedule": "45 */4 * * *" },
     { "path": "/api/cron/k12-nces", "schedule": "10,25,40,55 * * * *" },
-    { "path": "/api/cron/raven-k12", "schedule": "* * * * *" },
     { "path": "/api/cron/raven-higher-ed", "schedule": "15 8 * * *" },
     { "path": "/api/cron/raven-procurement-contacts", "schedule": "40 * * * *" },
     { "path": "/api/cron/document-link-recovery", "schedule": "*/5 * * * *" },
