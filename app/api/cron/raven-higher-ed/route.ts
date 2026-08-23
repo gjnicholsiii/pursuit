@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   if (auth) return auth;
 
   try {
-    const result = await importHigherEdUniverse(2);
+    const result = await importHigherEdUniverse(10);
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
