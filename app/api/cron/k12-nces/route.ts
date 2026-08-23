@@ -7,9 +7,10 @@ export const maxDuration = 300;
 
 const ALL_STATES = Object.keys(STATE_FIPS).sort();
 const SHARD_COUNT = 5;
+const SLOT_MS = 15 * 60 * 1000;
 
-function shardForHour(date: Date) {
-  return date.getUTCHours() % SHARD_COUNT;
+function shardForSlot(date: Date) {
+  return Math.floor(date.getTime() / SLOT_MS) % SHARD_COUNT;
 }
 
 export async function GET(request: NextRequest) {
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
   if (auth) return auth;
 
   const now = new Date();
-  const shard = shardForHour(now);
+  const shard = shardForSlot(now);
   const states = ALL_STATES.filter((_, index) => index % SHARD_COUNT === shard);
 
   try {
