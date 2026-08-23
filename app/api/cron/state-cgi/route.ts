@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   if (request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   try {
     const results = await syncCgiAdvantageFullSweeps();
-    const failures = results.filter(result => !result.ok && result.stateCode !== "ME");
+    const failures = results.filter(result => (result.stateCode !== "ME") && (!result.ok || result.rowsFound === 0));
     if (failures.length) console.warn("SLED_CGI_PARTIAL", JSON.stringify(failures));
     return NextResponse.json({ ok: failures.length === 0, results, failures }, { status: failures.length ? 207 : 200 });
   } catch (error) {
