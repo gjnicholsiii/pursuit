@@ -4,7 +4,7 @@ import { getCurrentCustomerProfile } from "@/lib/customer-profile";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
-const REQUIRED_ANALYZER_VERSION=3;
+const REQUIRED_ANALYZER_VERSION=4;
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
