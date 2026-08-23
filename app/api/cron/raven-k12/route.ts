@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enrichK12Batch } from "@/lib/raven/k12-enrichment";
+import { resolveK12OfficialSites } from "@/lib/raven/k12-official-site";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -10,9 +11,10 @@ export async function GET(request: NextRequest) {
   if (auth) return auth;
 
   try {
-    const limit = Number(request.nextUrl.searchParams.get("limit") || 10);
+    const limit = Number(request.nextUrl.searchParams.get("limit") || 9);
+    const identity = await resolveK12OfficialSites(Math.max(limit * 2, 18));
     const result = await enrichK12Batch(limit);
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, identity, ...result });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
