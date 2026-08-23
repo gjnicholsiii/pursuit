@@ -7,6 +7,18 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 function clean(value:string){ return value.replace(/\s+/g," ").trim(); }
+function sleep(ms:number){ return new Promise(resolve=>setTimeout(resolve,ms)); }
+
+async function fetchWithThrottleRetry(url:string){
+  const headers={'user-agent':'Pursuit/1.0 procurement document indexer',accept:'text/html,application/xhtml+xml,*/*'};
+  let response=await fetch(url,{redirect:'follow',cache:'no-store',headers});
+  if(response.status!==429)return response;
+  const retryAfter=Number(response.headers.get('retry-after')||0);
+  const waitMs=Math.min(8000,Math.max(1500,Number.isFinite(retryAfter)&&retryAfter>0?retryAfter*1000:2500));
+  await sleep(waitMs);
+  response=await fetch(url,{redirect:'follow',cache:'no-store',headers});
+  return response;
+}
 
 export async function GET(request:NextRequest){
   const auth=requireInternalAuth(request); if(auth)return auth;
@@ -34,8 +46,8 @@ export async function GET(request:NextRequest){
   let revivedTotal=0;
   for(const opp of opps){
     try{
-      const response=await fetch(opp.source_url,{redirect:'follow',cache:'no-store',headers:{'user-agent':'Pursuit/1.0 procurement document indexer',accept:'text/html,application/xhtml+xml,*/*'}});
-      if(!response.ok){ results.push({externalId:opp.external_id,status:response.status,inserted:0}); continue; }
+      const response=await fetchWithThrottleRetry(opp.source_url);
+      if(!response.ok){ results.push({externalId:opp.external_id,status:response.status,inserted:0}); await sleep(350); continue; }
       const html=await response.text(); const $=cheerio.load(html);
       let inserted=0; let refreshed=0; let revived=0; let publicCount=0; let restrictedCount=0;
       const rows=$("#ctl00_mainContent_rgBidAttachments_ctl00 tr.rgRow, #ctl00_mainContent_rgBidAttachments_ctl00 tr.rgAltRow").toArray();
@@ -64,12 +76,14 @@ export async function GET(request:NextRequest){
         `,[opp.id,filename]) as Array<{id:string;source_url:string;storage_key:string|null}>;
 
         if(existing[0]){
-          if(!existing[0].storage_key && existing[0].source_url!==url){
-            await sql.query(`update opportunity_documents set source_url=$2::text, extraction_status='pending' where id=$1::uuid`,[existing[0].id,url]);
-            refreshed++;
+          if(!existing[0].storage_key){
+            if(existing[0].source_url!==url){
+              await sql.query(`update opportunity_documents set source_url=$2::text, extraction_status='pending' where id=$1::uuid`,[existing[0].id,url]);
+              refreshed++;
+            }
             const revivedJobs=await sql.query(`
-              update document_jobs set state='pending',attempts=0,run_after=now(),leased_until=null,lease_owner=null,last_error=null,updated_at=now()
-              where document_id=$1::uuid and stage='acquire' and state in ('failed','dead')
+              update document_jobs set state='pending',attempts=0,run_after=now()+interval '5 minutes',leased_until=null,lease_owner=null,last_error=null,updated_at=now()
+              where document_id=$1::uuid and stage='acquire' and state in ('failed','dead') and last_error in ('http_429','http_404')
               returning id
             `,[existing[0].id]) as Array<{id:number}>;
             revived+=revivedJobs.length;
@@ -89,7 +103,8 @@ export async function GET(request:NextRequest){
       refreshedTotal+=refreshed;
       revivedTotal+=revived;
       results.push({externalId:opp.external_id,status:response.status,publicCount,restrictedCount,inserted,refreshed,revived});
-    }catch(error){ results.push({externalId:opp.external_id,error:error instanceof Error?error.message:String(error),inserted:0}); }
+      await sleep(350);
+    }catch(error){ results.push({externalId:opp.external_id,error:error instanceof Error?error.message:String(error),inserted:0}); await sleep(350); }
   }
   return NextResponse.json({ok:true,opportunities:opps.length,insertedTotal,refreshedTotal,revivedTotal,results});
 }
