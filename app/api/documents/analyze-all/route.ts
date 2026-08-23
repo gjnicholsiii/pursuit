@@ -9,7 +9,7 @@ export const maxDuration = 60;
 type Row = { job_id:string; id:string; opportunity_id:string; filename:string; text_storage_key:string };
 type Req = { category:string; text:string; line:number };
 
-function compact(v:string){ return v.replace(/\s+/g," ").trim(); }
+function compact(v:string){ return v.replace(/\u0000/g,"").replace(/\s+/g," ").trim(); }
 function skipRequirementMining(filename:string){
   const normalized=filename.toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
   return /(^| )(w 9|w9|form 1295|1295 form|certificate of interested parties)( |$)/.test(normalized);
@@ -39,7 +39,7 @@ function collectRequirements(lines:string[]):Req[] {
 
 async function finishJob(jobId:string){
   const sql=getSql();
-  await sql.query(`update document_jobs set state='done',leased_until=null,lease_owner=null,updated_at=now() where id=$1::bigint`,[jobId]);
+  await sql.query(`update document_jobs set state='done',leased_until=null,lease_owner=null,last_error=null,updated_at=now() where id=$1::bigint`,[jobId]);
 }
 
 async function retryJob(jobId:string,error:string){
@@ -58,7 +58,7 @@ async function analyzeOne(document:Row){
     }
     const blob=await get(document.text_storage_key,{access:"private"});
     if(!blob || blob.statusCode!==200 || !blob.stream) throw new Error("extracted_text_unavailable");
-    const text=await new Response(blob.stream).text();
+    const text=(await new Response(blob.stream).text()).replace(/\u0000/g,"");
     const requirements=collectRequirements(text.split(/\r?\n/));
 
     if(requirements.length){
