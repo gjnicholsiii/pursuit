@@ -42,7 +42,8 @@ async function fetchHtml(url:string){
 
 function findOfficial(html:string,base:string){
   const $=cheerio.load(html);
-  let best:{url:URL;score:number}|null=null;
+  let bestUrl:URL|null=null;
+  let bestScore=-1;
   $('a[href]').each((_,el)=>{
     const href=$(el).attr('href')||'';
     const label=$(el).text().replace(/\s+/g,' ').trim();
@@ -55,9 +56,9 @@ function findOfficial(html:string,base:string){
     if(/k12|schools?|district|isd|usd|csd/i.test(`${label} ${host}`))score+=20;
     if(/\.k12\.[a-z]{2}\.us$/.test(host))score+=20;
     if(/\.org$|\.net$|\.us$/.test(host))score+=3;
-    if(!best||score>best.score)best={url:candidate,score};
+    if(score>bestScore){bestScore=score;bestUrl=candidate;}
   });
-  return best?.url||null;
+  return bestUrl;
 }
 
 export async function resolveK12OfficialSites(limit=20){
