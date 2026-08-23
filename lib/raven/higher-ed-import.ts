@@ -77,7 +77,7 @@ async function ensureSource() {
   const sql = getSql();
   const existing = await sql.query(`select id::text from sources where adapter_key=$1 limit 1`,[ADAPTER_KEY]) as Array<{id:string}>;
   if (existing[0]?.id) return existing[0].id;
-  const inserted = await sql.query(`insert into sources(source_family,source_name,base_url,jurisdiction,source_type,adapter_key,active,health_score,last_success_at) values('reference',$1,$2,'United States','federal_reference',$3,true,1,now()) returning id::text`,[SOURCE_NAME,BASE,ADAPTER_KEY]) as Array<{id:string}>;
+  const inserted = await sql.query(`insert into sources(source_family,source_name,base_url,jurisdiction,source_type,adapter_key,active,health_score,last_success_at) values('reference',$1,$2,'United States','api',$3,true,100,now()) returning id::text`,[SOURCE_NAME,BASE,ADAPTER_KEY]) as Array<{id:string}>;
   return inserted[0].id;
 }
 
@@ -96,7 +96,7 @@ async function checkpoint(sourceId:string) {
 async function persistBatch(records: HigherEdRecord[]) {
   if (!records.length) return { inserted:0, updated:0 };
   const sql = getSql();
-  const payload = JSON.stringify(records);
+  const payload = JSON.stringify(records.map(r=>({name:r.name,state:r.state,city:r.city,website:r.website,unit_id:r.unitId})));
   const result = await sql.query(`
     with incoming as (
       select distinct on (lower(name), state)
@@ -157,12 +157,12 @@ export async function importHigherEdUniverse(maxPages = 8): Promise<ImportResult
       if(!next) break;
     }
     const complete=!url;
-    await sql.query(`update sources set last_success_at=now(),last_error=null,health_score=1 where id=$1::uuid`,[sourceId]);
+    await sql.query(`update sources set last_success_at=now(),last_error=null,health_score=100 where id=$1::uuid`,[sourceId]);
     if(complete) await sql.query(`update source_runs set status='success',completed_at=now(),diagnostics=coalesce(diagnostics,'{}'::jsonb)||jsonb_build_object('complete',true,'nextUrl',null) where id=$1::uuid`,[cp.runId]);
     return {fetched,accepted,inserted,updated,skipped,pages,totalReported,complete,resumed:cp.resumed};
   } catch(error){
     const message=error instanceof Error?error.message:String(error);
-    await sql.query(`update sources set last_failure_at=now(),last_error=$2,health_score=greatest(0,coalesce(health_score,1)-0.1) where id=$1::uuid`,[sourceId,message]);
+    await sql.query(`update sources set last_failure_at=now(),last_error=$2,health_score=greatest(0,coalesce(health_score,100)-10) where id=$1::uuid`,[sourceId,message]);
     await sql.query(`update source_runs set error_count=coalesce(error_count,0)+1,diagnostics=coalesce(diagnostics,'{}'::jsonb)||jsonb_build_object('lastError',$2::text,'lastErrorAt',now()) where id=$1::uuid`,[cp.runId,message]);
     throw error;
   }
