@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { getSql } from "@/lib/db";
+import { decodeCustomerSession, encodeCustomerSession } from "@/lib/customer-session";
 import type { Opportunity } from "@/lib/types";
 
 const PROFILE_COOKIE = "pursuit_org_id";
@@ -71,7 +72,7 @@ function decodeProfile(row: ProfileRow): CustomerProfile {
 
 export async function getCurrentCustomerProfile(): Promise<CustomerProfile | null> {
   const cookieStore = await cookies();
-  const organizationId = cookieStore.get(PROFILE_COOKIE)?.value;
+  const organizationId = decodeCustomerSession(cookieStore.get(PROFILE_COOKIE)?.value);
   if (!organizationId) return null;
 
   const sql = getSql();
@@ -110,8 +111,8 @@ export async function saveCustomerProfile(input: {
 }) {
   const sql = getSql();
   const cookieStore = await cookies();
-  const currentId = cookieStore.get(PROFILE_COOKIE)?.value;
-  let organizationId = currentId;
+  const currentId = decodeCustomerSession(cookieStore.get(PROFILE_COOKIE)?.value);
+  let organizationId = currentId || undefined;
 
   if (organizationId) {
     const existing = await sql.query(`select id from organizations where id = $1 limit 1`, [organizationId]) as Array<{ id: string }>;
@@ -121,7 +122,7 @@ export async function saveCustomerProfile(input: {
   if (!organizationId) {
     const created = await sql.query(`insert into organizations (name) values ($1) returning id`, [input.organizationName]) as Array<{ id: string }>;
     organizationId = created[0].id;
-    cookieStore.set(PROFILE_COOKIE, organizationId, {
+    cookieStore.set(PROFILE_COOKIE, encodeCustomerSession(organizationId), {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
