@@ -5,6 +5,9 @@ export interface OpportunityDocumentSummary {
   fetched: number;
   analyzed: number;
   missing: number;
+  packageStatus: string | null;
+  packageNote: string | null;
+  packageCheckedAt: string | null;
   documents: Array<{
     id: string;
     filename: string;
@@ -46,35 +49,53 @@ type RequirementRow = {
   storage_key: string | null;
 };
 
+type PackageRow = {
+  package_status: string | null;
+  package_note: string | null;
+  package_checked_at: string | null;
+};
+
 export async function getOpportunityDocumentSummary(opportunityId: string): Promise<OpportunityDocumentSummary> {
   const sql = getSql();
 
-  const rawRows = await sql.query(
-    `select id, filename, source_url, storage_key, extraction_status, fetched_at, is_missing
-     from opportunity_documents
-     where opportunity_id=$1
-     order by fetched_at desc nulls last, filename asc`,
-    [opportunityId],
-  );
-
-  const rawRequirementRows = await sql.query(
-    `select r.id, r.category, r.requirement_text, r.extraction_confidence, r.evidence_locator,
-            d.id as document_id, d.filename, d.source_url, d.storage_key
-     from requirements r
-     join opportunity_documents d on d.id=r.document_id
-     where r.opportunity_id=$1 and r.mandatory=true
-     order by r.created_at asc, r.id asc`,
-    [opportunityId],
-  );
+  const [rawRows, rawRequirementRows, packageRows] = await Promise.all([
+    sql.query(
+      `select id, filename, source_url, storage_key, extraction_status, fetched_at, is_missing
+       from opportunity_documents
+       where opportunity_id=$1
+       order by fetched_at desc nulls last, filename asc`,
+      [opportunityId],
+    ),
+    sql.query(
+      `select r.id, r.category, r.requirement_text, r.extraction_confidence, r.evidence_locator,
+              d.id as document_id, d.filename, d.source_url, d.storage_key
+       from requirements r
+       join opportunity_documents d on d.id=r.document_id
+       where r.opportunity_id=$1 and r.mandatory=true
+       order by r.created_at asc, r.id asc`,
+      [opportunityId],
+    ),
+    sql.query(
+      `select raw_payload->>'pursuitPackageStatus' as package_status,
+              raw_payload->>'pursuitPackageNote' as package_note,
+              raw_payload->>'pursuitPackageCheckedAt' as package_checked_at
+       from opportunities where id=$1 limit 1`,
+      [opportunityId],
+    ),
+  ]);
 
   const rows = rawRows as unknown as DocumentRow[];
   const requirementRows = rawRequirementRows as unknown as RequirementRow[];
+  const packageRow = (packageRows as unknown as PackageRow[])[0];
 
   return {
     identified: rows.length,
     fetched: rows.filter(row => Boolean(row.fetched_at)).length,
     analyzed: rows.filter(row => ["complete", "extracted", "analyzed"].includes(row.extraction_status)).length,
     missing: rows.filter(row => row.is_missing).length,
+    packageStatus: packageRow?.package_status || null,
+    packageNote: packageRow?.package_note || null,
+    packageCheckedAt: packageRow?.package_checked_at || null,
     documents: rows.slice(0, 50).map(row => ({
       id: row.id,
       filename: row.filename,
