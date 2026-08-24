@@ -15,14 +15,14 @@ function filename(url:string){try{const u=new URL(url);const explicit=u.searchPa
 
 export async function GET(request:NextRequest){
  const secret=process.env.CRON_SECRET;if(!secret)return NextResponse.json({ok:false,error:'CRON_SECRET is not configured'},{status:503});if(request.headers.get('authorization')!==`Bearer ${secret}`)return NextResponse.json({ok:false,error:'Unauthorized'},{status:401});
- const apiKey=process.env.SAM_GOV_API_KEY;if(!apiKey)return NextResponse.json({ok:false,error:'SAM_GOV_API_KEY is not configured'},{status:503});
+ const apiKey=process.env.SAM_GOV_API_KEY;if(!apiKey)return NextResponse.json({ok:false,error:'SAM_GOV_API_KEY is not configured'},{status:503});const apiKeyValue:string=apiKey;
  const started=Date.now();const deadline=started+RUN_BUDGET_MS;const sql=getSql();
  const rows=await sql.query(`select o.id::text,o.external_id,o.issue_date::text,o.raw_payload->>'postedDate' posted_date,o.title from opportunities o join sources s on s.id=o.source_id where s.adapter_key='sam_gov' and o.status='open' and (o.due_at is null or o.due_at>=now()) and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false) order by case when (o.title||' '||coalesce(o.description,''))~*'(access control|video surveillance|security system|security camera|cctv|fire alarm|nurse call|low voltage|structured cabling|intrusion|audiovisual|av systems)' then 0 else 1 end,coalesce((o.raw_payload->>'pursuitSamPackageCheckedAt')::timestamptz,'epoch'::timestamptz),o.due_at asc nulls last limit ${BATCH_SIZE}`) as Row[];
  let inserted=0,foundOpps=0,failed=0,checked=0,rateLimited=false;
  async function processRow(row:Row){
   if(rateLimited||Date.now()>=deadline)return;
   const posted=new Date(row.posted_date||row.issue_date||Date.now());const from=new Date(posted);from.setUTCDate(from.getUTCDate()-3);const to=new Date(posted);to.setUTCDate(to.getUTCDate()+3);
-  const url=new URL('https://api.sam.gov/opportunities/v2/search');url.searchParams.set('api_key',apiKey);url.searchParams.set('noticeid',row.external_id);url.searchParams.set('limit','10');url.searchParams.set('offset','0');url.searchParams.set('postedFrom',apiDate(from.toISOString())!);url.searchParams.set('postedTo',apiDate(to.toISOString())!);
+  const url=new URL('https://api.sam.gov/opportunities/v2/search');url.searchParams.set('api_key',apiKeyValue);url.searchParams.set('noticeid',row.external_id);url.searchParams.set('limit','10');url.searchParams.set('offset','0');url.searchParams.set('postedFrom',apiDate(from.toISOString())!);url.searchParams.set('postedTo',apiDate(to.toISOString())!);
   let status='scanned_no_public_attachment';
   try{
    const response=await fetch(url,{cache:'no-store',headers:{accept:'application/json'},signal:AbortSignal.timeout(20000)});
