@@ -18,7 +18,8 @@ function absolute(base:string,value:string){try{const u=new URL(value,base);retu
 function sameResource(a:string,b:string){try{const x=new URL(a),y=new URL(b);return x.origin===y.origin&&x.pathname.replace(/\/$/,"")===y.pathname.replace(/\/$/,"")&&x.search===y.search}catch{return a===b}}
 function isStrongDocumentUrl(url:string){return FILE_RE.test(url)||STRONG_DOWNLOAD_RE.test(url)}
 function add(found:Map<string,Found>,base:string,raw:string,label?:string){
-  const url=absolute(base,raw.replace(/&amp;/g,"&"));if(!url)return;
+  const cleaned=raw.replace(/&amp;/g,"&").replace(/\\u0026/g,"&").trim();
+  const url=absolute(base,cleaned);if(!url)return;
   if(REJECT_RE.test(url)||sameResource(base,url)||!isStrongDocumentUrl(url))return;
   let filename=label||"";
   try{const u=new URL(url);filename=filename||u.searchParams.get("filename")||u.searchParams.get("fileName")||u.searchParams.get("attachment_name")||decodeURIComponent(u.pathname.split("/").filter(Boolean).pop()||"")}catch{}
@@ -26,7 +27,7 @@ function add(found:Map<string,Found>,base:string,raw:string,label?:string){
   found.set(url,{url,filename:safeName(filename||"package-document")});
 }
 function walkJson(value:unknown,base:string,found:Map<string,Found>,label=""){
-  if(typeof value==="string"){if(/^https?:\/\//i.test(value)||/^\//.test(value))add(found,base,value,label);return}
+  if(typeof value==="string"){if(/^https?:\/\//i.test(value)||/^\//.test(value)||STRONG_DOWNLOAD_RE.test(value))add(found,base,value,label);return}
   if(Array.isArray(value)){for(const item of value)walkJson(item,base,found,label);return}
   if(!value||typeof value!=="object")return;
   for(const [key,item] of Object.entries(value as Record<string,unknown>))walkJson(item,base,found,key)
@@ -34,9 +35,11 @@ function walkJson(value:unknown,base:string,found:Map<string,Found>,label=""){
 function extractText(body:string,base:string,found:Map<string,Found>){
   try{walkJson(JSON.parse(body),base,found)}catch{}
   const $=cheerio.load(body);
-  $("a[href],iframe[src],[data-url],[data-href]").each((_,node)=>{const el=$(node);const raw=el.attr("href")||el.attr("src")||el.attr("data-url")||el.attr("data-href")||"";add(found,base,raw,el.text().replace(/\s+/g," ").trim())});
+  $("a[href],iframe[src],[data-url],[data-href],form[action]").each((_,node)=>{const el=$(node);const raw=el.attr("href")||el.attr("src")||el.attr("data-url")||el.attr("data-href")||el.attr("action")||"";add(found,base,raw,el.text().replace(/\s+/g," ").trim())});
+  $("[onclick],[onmousedown],[onchange]").each((_,node)=>{const el=$(node);const script=[el.attr("onclick"),el.attr("onmousedown"),el.attr("onchange")].filter(Boolean).join(" ");for(const match of script.matchAll(/(?:https?:\/\/[^"'<>\s\\]+|(?:\.\.\/|\.\/|\/)?(?:[^"'<>\s]+\/)?download\.jsp\?[^"'<>\s)]+|(?:\.\.\/|\.\/|\/)?[^"'<>\s]*attachment[_-]?id=[^"'<>\s)]+)/gi))add(found,base,match[0],el.text().replace(/\s+/g," ").trim())});
   for(const match of body.matchAll(/https?:\/\/[^"'<>\s\\]+/g))add(found,base,match[0]);
-  for(const match of body.matchAll(/["'](\/[^"']{2,600}(?:download\.jsp|attachment[_-]?id=|downloadFile|\/attachments?\/|\/documents?\/|\/files?\/)[^"']*)["']/gi))add(found,base,match[1]);
+  for(const match of body.matchAll(/["']((?:\.\.\/|\.\/|\/)?[^"']{0,600}(?:download\.jsp|attachment[_-]?id=|downloadFile(?:Nbr)?=)[^"']*)["']/gi))add(found,base,match[1]);
+  for(const match of body.matchAll(/["'](\/[^"']{2,600}(?:\/attachments?\/|\/documents?\/|\/files?\/)[^"']*)["']/gi))add(found,base,match[1]);
 }
 async function fetchBody(url:string,options:RequestInit={}){try{const response=await fetch(url,{...options,cache:"no-store",redirect:"follow",signal:AbortSignal.timeout(10000),headers:{"user-agent":UA,accept:"application/json,text/html,application/xhtml+xml,*/*",...(options.headers||{})}});const body=await response.text();return{status:response.status,url:response.url||url,body,contentType:response.headers.get("content-type")||""}}catch{return{status:0,url,body:"",contentType:""}}}
 async function persist(row:Row,found:Map<string,Found>,reference:string){const sql=getSql();let inserted=0;for(const item of [...found.values()].slice(0,60)){const result=await sql.query(`insert into opportunity_documents(opportunity_id,document_type,filename,source_url,referenced_by,extraction_status) select $1::uuid,'sled_resource',$2,$3,$4,'cataloged' where not exists(select 1 from opportunity_documents where opportunity_id=$1::uuid and source_url=$3) returning id`,[row.id,item.filename,item.url,reference]) as Array<{id:string}>;inserted+=result.length}return inserted}
@@ -72,7 +75,7 @@ async function recoverHtmlSource(row:Row){
 export async function GET(request:NextRequest){
   const secret=process.env.CRON_SECRET;if(!secret)return NextResponse.json({ok:false,error:"CRON_SECRET is not configured"},{status:503});if(request.headers.get("authorization")!==`Bearer ${secret}`)return NextResponse.json({ok:false,error:"Unauthorized"},{status:401});
   const sql=getSql();
-  const rows=await sql.query(`with candidates as(select o.id::text,o.external_id,o.source_url,s.adapter_key,o.raw_payload,row_number() over(partition by s.adapter_key order by case when (o.title||' '||coalesce(o.description,''))~*'(access control|video surveillance|security system|security camera|cctv|fire alarm|nurse call|low voltage|structured cabling|intrusion|audiovisual|av systems)' then 0 else 1 end,coalesce((o.raw_payload->>'pursuitPackageCheckedAt')::timestamptz,'epoch'::timestamptz),o.due_at asc nulls last) rn from opportunities o join sources s on s.id=o.source_id where o.status='open' and (o.due_at is null or o.due_at>=now()) and s.adapter_key in('mfmp_vip_fl','peoplesoft_ca','peoplesoft_mn','peoplesoft_ks','cgi_advantage_mi','cgi_advantage_wv','cgi_advantage_ky','cgi_advantage_co','cgi_advantage_legacy_me','eva_vbo_va','hands_hi','south_carolina_scbo_sc','delaware_open_bids_de','esm_posting_board_sd','ivalua_app_az','powerpages_nc') and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false)) select id,external_id,source_url,adapter_key,raw_payload from candidates where rn<=8 order by adapter_key,rn`) as Row[];
+  const rows=await sql.query(`with candidates as(select o.id::text,o.external_id,o.source_url,s.adapter_key,o.raw_payload,row_number() over(partition by s.adapter_key order by case when (o.title||' '||coalesce(o.description,''))~*'(access control|video surveillance|security system|security camera|cctv|fire alarm|nurse call|low voltage|structured cabling|intrusion|audiovisual|av systems)' then 0 else 1 end,coalesce((o.raw_payload->>'pursuitPackageCheckedAt')::timestamptz,'epoch'::timestamptz),o.due_at asc nulls last) rn from opportunities o join sources s on s.id=o.source_id where o.status='open' and (o.due_at is null or o.due_at>=now()) and s.adapter_key in('mfmp_vip_fl','peoplesoft_ca','peoplesoft_mn','peoplesoft_ks','cgi_advantage_mi','cgi_advantage_wv','cgi_advantage_ky','cgi_advantage_co','cgi_advantage_legacy_me','eva_vbo_va','hands_hi','south_carolina_scbo_sc','delaware_open_bids_de','esm_posting_board_sd','ivalua_app_az','powerpages_nc') and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false)) select id,external_id,source_url,adapter_key,raw_payload from candidates where rn<=12 order by adapter_key,rn`) as Row[];
   const results=[] as Array<Record<string,unknown>>;
   const concurrency=8;
   for(let i=0;i<rows.length;i+=concurrency){results.push(...await Promise.all(rows.slice(i,i+concurrency).map(async row=>row.adapter_key==='mfmp_vip_fl'?{adapter:row.adapter_key,id:row.id,...await recoverFlorida(row)}:{adapter:row.adapter_key,id:row.id,...await recoverHtmlSource(row)})))}
