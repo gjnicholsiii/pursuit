@@ -1,9 +1,11 @@
 import * as cheerio from "cheerio";
+import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
 import { discoverIonWavePortal, IONWAVE_SOURCE, type IonWavePortal } from "@/lib/sled/ionwave";
 import { persistSledOpportunities } from "@/lib/sled/persistence";
+import type { SledOpportunityRecord, SledSourceConfig } from "@/lib/sled/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -25,6 +27,16 @@ type PortalHit = {
 
 const PLATFORM_RE = /(ionwave\.net|procurement\.opengov\.com|opengov\.com|bonfirehub\.com|bidnetdirect\.com|publicpurchase\.com|vendorregistry\.com|planetbids\.com|jaggaer\.com|bidsync\.com|periscopeholdings\.com)/i;
 const INTERNAL_PROCUREMENT_RE = /procurement|purchasing|bids?|rfps?|solicitations?|vendors?|business[- ]services/i;
+const BID_LINK_RE = /\b(rfp|rfq|ifb|itb|bid|bids|solicitation|invitation to bid|request for proposal|request for quote|request for qualification|competitive sealed proposal|csp)\b/i;
+const GENERIC_LINK_RE = /^(bids?|rfps?|rfqs?|solicitations?|procurement|purchasing|vendors?|current bids?|open bids?|bid opportunities|doing business)$/i;
+
+const DIRECT_K12_SOURCE: SledSourceConfig = {
+  adapterKey: "k12_direct_web",
+  sourceName: "K-12 District Procurement Websites",
+  baseUrl: "https://nces.ed.gov",
+  jurisdiction: "United States",
+  sourceType: "district_web",
+};
 
 function safeUrl(raw: string, base?: string) {
   try {
@@ -62,12 +74,66 @@ async function fetchHtml(url: string) {
   }
 }
 
-function extractPortalHits(html: string, pageUrl: string, agency: Agency) {
+function parseDueAt(text: string) {
+  const match = text.match(/(?:due|deadline|closes?|closing|responses? due|proposals? due)\s*[:\-]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-](?:\d{2}|\d{4}))(?:\s+(\d{1,2}:\d{2}\s*(?:am|pm)?))?/i);
+  if (!match) return null;
+  const parsed = new Date(`${match[1]} ${match[2] || "23:59"}`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function directRecord(agency: Agency, title: string, sourceUrl: string, context: string): SledOpportunityRecord | null {
+  const cleanTitle = title.replace(/\s+/g, " ").trim().replace(/^[-–—:|\s]+|[-–—:|\s]+$/g, "");
+  if (cleanTitle.length < 8 || cleanTitle.length > 220 || GENERIC_LINK_RE.test(cleanTitle)) return null;
+  if (!BID_LINK_RE.test(`${cleanTitle} ${sourceUrl}`)) return null;
+  const stateCode = agency.state_code?.trim() || null;
+  if (!stateCode) return null;
+  const externalId = createHash("sha256").update(`${agency.id}|${sourceUrl}|${cleanTitle}`).digest("hex").slice(0, 32);
+  const upper = cleanTitle.toUpperCase();
+  const solicitationType = /\bRFP\b/.test(upper) ? "RFP" : /\bRFQ\b/.test(upper) ? "RFQ" : /\b(?:IFB|ITB)\b/.test(upper) ? "IFB" : /\bCSP\b/.test(upper) ? "CSP" : /\bBID\b/.test(upper) ? "Bid" : null;
+  return {
+    externalId,
+    agency: {
+      key: agency.id,
+      name: agency.canonical_name,
+      agencyType: "k12",
+      jurisdictionLevel: "local",
+      stateCode,
+      city: agency.city,
+      county: agency.county,
+      website: agency.website,
+    },
+    title: cleanTitle,
+    description: context.slice(0, 1500) || null,
+    solicitationType,
+    procurementMechanism: "district solicitation",
+    status: "open",
+    issueDate: null,
+    dueAt: parseDueAt(context),
+    prebidAt: null,
+    estimatedValue: null,
+    stateCode,
+    city: agency.city,
+    naicsCodes: [],
+    setAside: null,
+    sourceUrl,
+    rawPayload: {
+      discoveryMode: "direct-district-web",
+      agencyId: agency.id,
+      agencyWebsite: agency.website,
+      title: cleanTitle,
+      sourceUrl,
+      context: context.slice(0, 2000),
+    },
+  };
+}
+
+function extractPage(html: string, pageUrl: string, agency: Agency) {
   const $ = cheerio.load(html);
   const hits: PortalHit[] = [];
   const internal: string[] = [];
+  const direct: SledOpportunityRecord[] = [];
   const base = safeUrl(pageUrl);
-  if (!base) return { hits, internal };
+  if (!base) return { hits, internal, direct };
 
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href") || "";
@@ -89,42 +155,60 @@ function extractPortalHits(html: string, pageUrl: string, agency: Agency) {
       hits.push({ agency, platform, url: u.toString() });
       return;
     }
+
     if (u.hostname === base.hostname && INTERNAL_PROCUREMENT_RE.test(haystack)) {
       u.hash = "";
       internal.push(u.toString());
+    }
+
+    const context = $(el).closest("tr,li,article,section,div,p").first().text().replace(/\s+/g, " ").trim();
+    const likelyDocument = /\.(pdf|docx?|xlsx?)($|\?)/i.test(u.pathname + u.search);
+    const likelyOpportunityLink = BID_LINK_RE.test(`${label} ${u.pathname}`) && (likelyDocument || label.length >= 8);
+    if (likelyOpportunityLink) {
+      const record = directRecord(agency, label || u.pathname.split("/").pop() || "", u.toString(), context || label);
+      if (record) direct.push(record);
     }
   });
 
   return {
     hits,
-    internal: [...new Set(internal)].slice(0, 2),
+    internal: [...new Set(internal)].slice(0, 4),
+    direct: [...new Map(direct.map(r => [r.externalId, r])).values()],
   };
 }
 
 async function scanAgency(agency: Agency) {
   const seed = safeUrl(agency.website);
-  if (!seed) return { agency, pages: 0, hits: [] as PortalHit[] };
+  if (!seed) return { agency, pages: 0, hits: [] as PortalHit[], direct: [] as SledOpportunityRecord[] };
   const first = await fetchHtml(seed.toString());
-  if (!first) return { agency, pages: 0, hits: [] as PortalHit[] };
+  if (!first) return { agency, pages: 0, hits: [] as PortalHit[], direct: [] as SledOpportunityRecord[] };
 
   let pages = 1;
-  const firstResult = extractPortalHits(first.html, first.finalUrl, agency);
+  const firstResult = extractPage(first.html, first.finalUrl, agency);
   const hits = [...firstResult.hits];
+  const direct = [...firstResult.direct];
 
   for (const url of firstResult.internal) {
     const page = await fetchHtml(url);
     if (!page) continue;
     pages++;
-    hits.push(...extractPortalHits(page.html, page.finalUrl, agency).hits);
+    const result = extractPage(page.html, page.finalUrl, agency);
+    hits.push(...result.hits);
+    direct.push(...result.direct);
   }
 
-  const unique = new Map<string, PortalHit>();
+  const uniqueHits = new Map<string, PortalHit>();
   for (const hit of hits) {
     const u = safeUrl(hit.url);
     if (!u) continue;
-    unique.set(`${hit.platform}|${u.hostname}`, hit);
+    uniqueHits.set(`${hit.platform}|${u.hostname}`, hit);
   }
-  return { agency, pages, hits: [...unique.values()] };
+  return {
+    agency,
+    pages,
+    hits: [...uniqueHits.values()],
+    direct: [...new Map(direct.map(r => [r.externalId, r])).values()],
+  };
 }
 
 function ionWavePortalFromHit(hit: PortalHit): IonWavePortal | null {
@@ -145,7 +229,7 @@ export async function GET(request: NextRequest) {
   if (auth) return auth;
 
   const sql = getSql();
-  const shardCount = 200;
+  const shardCount = 120;
   const shard = Math.floor(Date.now() / 60000) % shardCount;
   const rows = await sql.query(
     `select id::text, canonical_name, state_code::text, city, county, website
@@ -158,11 +242,22 @@ export async function GET(request: NextRequest) {
   ) as Agency[];
 
   const scanned: Awaited<ReturnType<typeof scanAgency>>[] = [];
-  for (let i = 0; i < rows.length; i += 12) {
-    scanned.push(...await Promise.all(rows.slice(i, i + 12).map(scanAgency)));
+  for (let i = 0; i < rows.length; i += 16) {
+    scanned.push(...await Promise.all(rows.slice(i, i + 16).map(scanAgency)));
   }
 
   const hits = scanned.flatMap(r => r.hits);
+  const directRecords = [...new Map(scanned.flatMap(r => r.direct).map(r => [r.externalId, r])).values()];
+  let directStored = 0;
+  if (directRecords.length) {
+    const persisted = await persistSledOpportunities(DIRECT_K12_SOURCE, directRecords, {
+      mode: "k12-direct-web",
+      recordChanges: false,
+      closeMissing: false,
+    });
+    directStored = persisted.stored;
+  }
+
   const ionwave = [...new Map(
     hits.filter(h => h.platform === "ionwave")
       .map(ionWavePortalFromHit)
@@ -204,6 +299,8 @@ export async function GET(request: NextRequest) {
     shardCount,
     districtsScanned: rows.length,
     pagesScanned: scanned.reduce((sum, r) => sum + r.pages, 0),
+    directDiscovered: directRecords.length,
+    directStored,
     portalHits: hits.length,
     platformCounts: Object.fromEntries(platformCounts),
     ionwavePortals: ionwave.length,
