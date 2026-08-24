@@ -10,7 +10,9 @@ type SamResponse = { totalRecords?: number; opportunitiesData?: SamRecord[] };
 const SECURITY_RE = /(access control|video surveillance|security system|security camera|cctv|fire alarm|nurse call|low voltage|structured cabling|intrusion|audiovisual|av systems)/i;
 const RUN_BUDGET_MS = 240_000;
 const PAGE_SIZE = 1000;
-const MAX_PAGES = 4;
+// Preserve headroom under SAM.gov's lowest published personal-key daily allowance.
+// The scheduled job now runs once per day, so these calls are spent on distinct posted dates.
+const MAX_API_CALLS = 6;
 
 function apiDate(value: string) {
   const d = new Date(value);
@@ -41,55 +43,67 @@ export async function GET(request: NextRequest) {
   const sql = getSql();
 
   const anchorRows = await sql.query(`
-    select o.issue_date::text as issue_date
+    select o.issue_date::text as issue_date,
+           min(coalesce(
+             (o.raw_payload->>'pursuitSamPackageCheckedAt')::timestamptz,
+             (o.raw_payload->>'pursuitSamPackagePartialAt')::timestamptz,
+             'epoch'::timestamptz
+           )) as last_scan,
+           min(case when (o.title||' '||coalesce(o.description,''))~*'(access control|video surveillance|security system|security camera|cctv|fire alarm|nurse call|low voltage|structured cabling|intrusion|audiovisual|av systems)' then 0 else 1 end) as priority
     from opportunities o
     join sources s on s.id=o.source_id
     where s.adapter_key='sam_gov'
       and o.status='open'
       and (o.due_at is null or o.due_at>=now())
       and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false)
-    order by
-      case when (o.title||' '||coalesce(o.description,''))~*'(access control|video surveillance|security system|security camera|cctv|fire alarm|nurse call|low voltage|structured cabling|intrusion|audiovisual|av systems)' then 0 else 1 end,
-      coalesce((o.raw_payload->>'pursuitSamPackageCheckedAt')::timestamptz,'epoch'::timestamptz),
-      o.issue_date desc
-    limit 1
-  `) as Array<{ issue_date: string }>;
+    group by o.issue_date
+    order by priority, last_scan, o.issue_date desc
+    limit $1
+  `, [MAX_API_CALLS]) as Array<{ issue_date: string }>;
 
-  const anchor = anchorRows[0]?.issue_date;
-  if (!anchor) return NextResponse.json({ ok: true, checked: 0, selected: 0, foundOpps: 0, inserted: 0, pages: 0, message: "No SAM package candidates" });
+  if (!anchorRows.length) return NextResponse.json({ ok: true, apiCalls: 0, selectedDates: 0, foundOpps: 0, inserted: 0, message: "No SAM package candidates" });
 
-  const rows = await sql.query(`
-    select o.id::text,o.external_id,o.issue_date::text,o.title
-    from opportunities o
-    join sources s on s.id=o.source_id
-    where s.adapter_key='sam_gov'
-      and o.status='open'
-      and (o.due_at is null or o.due_at>=now())
-      and o.issue_date=$1::date
-      and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false)
-    order by case when (o.title||' '||coalesce(o.description,''))~*'(access control|video surveillance|security system|security camera|cctv|fire alarm|nurse call|low voltage|structured cabling|intrusion|audiovisual|av systems)' then 0 else 1 end,
-             o.due_at asc nulls last
-  `, [anchor]) as Row[];
-
-  const byNotice = new Map(rows.map(row => [row.external_id, row]));
-  const found = new Set<string>();
   let inserted = 0;
   let foundOpps = 0;
-  let pages = 0;
+  let apiCalls = 0;
   let failed = 0;
   let rateLimited = false;
-  let completeDay = false;
-  let totalRecords = 0;
+  let completeDates = 0;
+  let partialDates = 0;
+  let selected = 0;
+  const processedDates: string[] = [];
 
-  for (let offset = 0; pages < MAX_PAGES && Date.now() < deadline; offset += PAGE_SIZE) {
+  for (const anchorRow of anchorRows) {
+    if (Date.now() >= deadline || apiCalls >= MAX_API_CALLS || rateLimited) break;
+    const anchor = anchorRow.issue_date;
+    const rows = await sql.query(`
+      select o.id::text,o.external_id,o.issue_date::text,o.title
+      from opportunities o
+      join sources s on s.id=o.source_id
+      where s.adapter_key='sam_gov'
+        and o.status='open'
+        and (o.due_at is null or o.due_at>=now())
+        and o.issue_date=$1::date
+        and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false)
+      order by case when (o.title||' '||coalesce(o.description,''))~*'(access control|video surveillance|security system|security camera|cctv|fire alarm|nurse call|low voltage|structured cabling|intrusion|audiovisual|av systems)' then 0 else 1 end,
+               o.due_at asc nulls last
+    `, [anchor]) as Row[];
+    if (!rows.length) continue;
+    selected += rows.length;
+
+    const byNotice = new Map(rows.map(row => [row.external_id, row]));
+    const found = new Set<string>();
     const url = new URL("https://api.sam.gov/opportunities/v2/search");
     url.searchParams.set("api_key", apiKey);
     url.searchParams.set("limit", String(PAGE_SIZE));
-    url.searchParams.set("offset", String(offset));
+    url.searchParams.set("offset", "0");
     url.searchParams.set("postedFrom", apiDate(anchor));
     url.searchParams.set("postedTo", apiDate(anchor));
 
+    let completeDay = false;
+    let totalRecords = 0;
     try {
+      apiCalls++;
       const response = await fetch(url, { cache: "no-store", headers: { accept: "application/json" }, signal: AbortSignal.timeout(30000) });
       if (response.status === 429) {
         rateLimited = true;
@@ -97,13 +111,13 @@ export async function GET(request: NextRequest) {
       }
       if (!response.ok) {
         failed++;
-        break;
+        continue;
       }
 
       const body = await response.json() as SamResponse;
       const records = body.opportunitiesData || [];
       totalRecords = Number(body.totalRecords || records.length);
-      pages++;
+      completeDay = records.length >= totalRecords || records.length < PAGE_SIZE;
 
       for (const record of records) {
         const noticeId = record.noticeId;
@@ -124,33 +138,39 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      if (offset + records.length >= totalRecords || records.length < PAGE_SIZE) {
-        completeDay = true;
-        break;
+      for (const row of rows) {
+        const hasDocs = found.has(row.external_id)
+          ? (await sql.query(`select exists(select 1 from opportunity_documents where opportunity_id=$1::uuid and coalesce(is_missing,false)=false) as has_docs`, [row.id]) as Array<{ has_docs: boolean }>)[0]?.has_docs
+          : false;
+        if (hasDocs) {
+          await sql.query(`
+            update opportunities set raw_payload=coalesce(raw_payload,'{}'::jsonb)||jsonb_build_object(
+              'pursuitSamPackageCheckedAt',now(),'pursuitPackageCheckedAt',now(),
+              'pursuitPackageStatus','public_attachments_found',
+              'pursuitPackageNote',$2::text
+            ) where id=$1::uuid
+          `, [row.id, SECURITY_RE.test(row.title) ? "Prioritized security/low-voltage SAM posted-date package scan" : "SAM posted-date package scan"]);
+        } else if (completeDay) {
+          await sql.query(`
+            update opportunities set raw_payload=coalesce(raw_payload,'{}'::jsonb)||jsonb_build_object(
+              'pursuitSamPackageCheckedAt',now(),'pursuitPackageCheckedAt',now(),
+              'pursuitPackageStatus','scanned_no_public_attachment',
+              'pursuitPackageNote',$2::text
+            ) where id=$1::uuid
+          `, [row.id, SECURITY_RE.test(row.title) ? "Prioritized security/low-voltage SAM posted-date package scan" : "SAM posted-date package scan"]);
+        } else {
+          await sql.query(`
+            update opportunities set raw_payload=coalesce(raw_payload,'{}'::jsonb)||jsonb_build_object('pursuitSamPackagePartialAt',now())
+            where id=$1::uuid
+          `, [row.id]);
+        }
       }
+
+      if (completeDay) completeDates++;
+      else partialDates++;
+      processedDates.push(anchor.slice(0, 10));
     } catch {
       failed++;
-      break;
-    }
-  }
-
-  if (completeDay) {
-    for (const row of rows) {
-      const status = found.has(row.external_id)
-        ? (await sql.query(`select exists(select 1 from opportunity_documents where opportunity_id=$1::uuid and coalesce(is_missing,false)=false) as has_docs`, [row.id]) as Array<{ has_docs: boolean }>)[0]?.has_docs
-          ? "public_attachments_found"
-          : "scanned_no_public_attachment"
-        : "scanned_no_public_attachment";
-      await sql.query(`
-        update opportunities
-        set raw_payload=coalesce(raw_payload,'{}'::jsonb)||jsonb_build_object(
-          'pursuitSamPackageCheckedAt',now(),
-          'pursuitPackageCheckedAt',now(),
-          'pursuitPackageStatus',$2::text,
-          'pursuitPackageNote',$3::text
-        )
-        where id=$1::uuid
-      `, [row.id, status, SECURITY_RE.test(row.title) ? "Prioritized security/low-voltage SAM posted-date package scan" : "SAM posted-date package scan"]);
     }
   }
 
@@ -173,16 +193,17 @@ export async function GET(request: NextRequest) {
       updated_at=now()
   `);
 
+  console.log("sam-document-recovery", { apiCalls, selectedDates: processedDates.length, completeDates, partialDates, selected, foundOpps, inserted, failed, rateLimited, elapsedMs: Date.now() - started });
   return NextResponse.json({
     ok: !rateLimited && failed === 0,
-    issueDate: anchor.slice(0, 10),
-    selected: rows.length,
-    matchedInApi: found.size,
+    apiCalls,
+    selectedDates: processedDates.length,
+    dates: processedDates,
+    completeDates,
+    partialDates,
+    selected,
     foundOpps,
     inserted,
-    pages,
-    totalRecords,
-    completeDay,
     failed,
     rateLimited,
     elapsedMs: Date.now() - started,
