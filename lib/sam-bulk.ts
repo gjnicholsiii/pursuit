@@ -92,7 +92,7 @@ function mapBulkRow(row: SamBulkRow): SamOpportunityRaw | null {
       zip,
     } : undefined,
     description: clean(row.Description),
-    uiLink: clean(row.Link),
+    uiLink: noticeId ? `https://sam.gov/opp/${noticeId}/view` : clean(row.Link),
   };
 }
 
