@@ -12,6 +12,7 @@
     { "path": "/api/cron/state-heavy", "schedule": "45 */4 * * *" },
     { "path": "/api/cron/k12-nces", "schedule": "10,25,40,55 * * * *" },
     { "path": "/api/ingest/ionwave", "schedule": "6,21,36,51 * * * *" },
+    { "path": "/api/cron/k12-portal-discovery", "schedule": "* * * * *" },
     { "path": "/api/cron/raven-higher-ed", "schedule": "15 8 * * *" },
     { "path": "/api/cron/raven-procurement-contacts", "schedule": "40 * * * *" },
     { "path": "/api/cron/document-link-recovery", "schedule": "*/5 * * * *" },
