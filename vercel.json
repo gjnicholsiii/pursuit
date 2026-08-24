@@ -9,7 +9,7 @@
     { "path": "/api/cron/state-jaggaer", "schedule": "35 */2 * * *" },
     { "path": "/api/cron/state-cgi", "schedule": "50 */2 * * *" },
     { "path": "/api/cron/state-pages-secondary", "schedule": "45 */2 * * *" },
-    { "path": "/api/cron/state-heavy", "schedule": "45 */4 * * *" },
+    { "path": "/api/cron/state-heavy", "schedule": "15,45 * * * *" },
     { "path": "/api/cron/k12-nces", "schedule": "10,25,40,55 * * * *" },
     { "path": "/api/ingest/ionwave", "schedule": "6,21,36,51 * * * *" },
     { "path": "/api/cron/k12-portal-discovery", "schedule": "* * * * *" },
