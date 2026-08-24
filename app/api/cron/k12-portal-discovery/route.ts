@@ -35,7 +35,7 @@ const DIRECT_K12_SOURCE: SledSourceConfig = {
   sourceName: "K-12 District Procurement Websites",
   baseUrl: "https://nces.ed.gov",
   jurisdiction: "United States",
-  sourceType: "district_web",
+  sourceType: "website",
 };
 
 function safeUrl(raw: string, base?: string) {
