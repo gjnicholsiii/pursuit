@@ -76,31 +76,10 @@ export async function getOpportunityDocumentSummary(opportunityId: string): Prom
       [opportunityId],
     ),
     sql.query(
-      `select
-         coalesce(
-           o.raw_payload->>'pursuitPackageStatus',
-           case
-             when s.adapter_key='sam_gov'
-              and o.last_seen_at >= now() - interval '36 hours'
-              and not (coalesce(o.raw_payload,'{}'::jsonb) ? 'resourceLinks')
-             then 'scanned_no_public_attachment'
-             else null
-           end
-         ) as package_status,
-         coalesce(
-           o.raw_payload->>'pursuitPackageNote',
-           case
-             when s.adapter_key='sam_gov'
-              and o.last_seen_at >= now() - interval '36 hours'
-              and not (coalesce(o.raw_payload,'{}'::jsonb) ? 'resourceLinks')
-             then 'The current SAM.gov opportunity record exposes no public resource links. Pursuit will pick up attachments automatically if SAM publishes them in a later refresh.'
-             else null
-           end
-         ) as package_note,
-         coalesce(o.raw_payload->>'pursuitPackageCheckedAt', o.last_seen_at::text) as package_checked_at
-       from opportunities o
-       join sources s on s.id=o.source_id
-       where o.id=$1 limit 1`,
+      `select raw_payload->>'pursuitPackageStatus' as package_status,
+              raw_payload->>'pursuitPackageNote' as package_note,
+              raw_payload->>'pursuitPackageCheckedAt' as package_checked_at
+       from opportunities where id=$1 limit 1`,
       [opportunityId],
     ),
   ]);
