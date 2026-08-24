@@ -12,11 +12,13 @@ const REJECT_RE = /\.(?:js|css)(?:$|[?#])|\/signin(?:[/?]|$)|\/login(?:[/?]|$)|G
 
 type Row = { id:string; external_id:string|null; source_url:string; adapter_key:string; raw_payload:Record<string,unknown>|null };
 type Found = { url:string; filename:string };
+type FetchHeaders = Record<string,string>;
 
 function safeName(value:string){return value.replace(/[^a-zA-Z0-9._() -]+/g,"-").replace(/\s+/g," ").trim().slice(0,500)||"package-document"}
 function absolute(base:string,value:string){try{const u=new URL(value,base);return /^https?:$/.test(u.protocol)?u.toString():null}catch{return null}}
 function sameResource(a:string,b:string){try{const x=new URL(a),y=new URL(b);return x.origin===y.origin&&x.pathname.replace(/\/$/,"")===y.pathname.replace(/\/$/,"")&&x.search===y.search}catch{return a===b}}
 function isStrongDocumentUrl(url:string){return FILE_RE.test(url)||STRONG_DOWNLOAD_RE.test(url)}
+function cookieHeader(response:Response){const values=typeof response.headers.getSetCookie==="function"?response.headers.getSetCookie():[];const fallback=response.headers.get("set-cookie");return (values.length?values:fallback?[fallback]:[]).map(v=>v.split(";",1)[0]).filter(Boolean).join("; ")}
 function add(found:Map<string,Found>,base:string,raw:string,label?:string){
   const cleaned=raw.replace(/&amp;/g,"&").replace(/\\u0026/g,"&").trim();
   const url=absolute(base,cleaned);if(!url)return;
@@ -41,7 +43,8 @@ function extractText(body:string,base:string,found:Map<string,Found>){
   for(const match of body.matchAll(/["']((?:\.\.\/|\.\/|\/)?[^"']{0,600}(?:download\.jsp|attachment[_-]?id=|downloadFile(?:Nbr)?=)[^"']*)["']/gi))add(found,base,match[1]);
   for(const match of body.matchAll(/["'](\/[^"']{2,600}(?:\/attachments?\/|\/documents?\/|\/files?\/)[^"']*)["']/gi))add(found,base,match[1]);
 }
-async function fetchBody(url:string,options:RequestInit={}){try{const response=await fetch(url,{...options,cache:"no-store",redirect:"follow",signal:AbortSignal.timeout(10000),headers:{"user-agent":UA,accept:"application/json,text/html,application/xhtml+xml,*/*",...(options.headers||{})}});const body=await response.text();return{status:response.status,url:response.url||url,body,contentType:response.headers.get("content-type")||""}}catch{return{status:0,url,body:"",contentType:""}}}
+async function fetchBody(url:string,options:RequestInit={}){try{const response=await fetch(url,{...options,cache:"no-store",redirect:"follow",signal:AbortSignal.timeout(10000),headers:{"user-agent":UA,accept:"application/json,text/html,application/xhtml+xml,*/*",...(options.headers||{})}});const body=await response.text();return{status:response.status,url:response.url||url,body,contentType:response.headers.get("content-type")||"",cookie:cookieHeader(response)}}catch{return{status:0,url,body:"",contentType:"",cookie:""}}}
+async function evaSession():Promise<FetchHeaders>{const landing=await fetchBody("https://mvendor.cgieva.com/Vendor/public/AllOpportunities.jsp");if(landing.status!==200)return{};return{referer:landing.url,...(landing.cookie?{cookie:landing.cookie}:{})}}
 async function persist(row:Row,found:Map<string,Found>,reference:string){const sql=getSql();let inserted=0;for(const item of [...found.values()].slice(0,60)){const result=await sql.query(`insert into opportunity_documents(opportunity_id,document_type,filename,source_url,referenced_by,extraction_status) select $1::uuid,'sled_resource',$2,$3,$4,'cataloged' where not exists(select 1 from opportunity_documents where opportunity_id=$1::uuid and source_url=$3) returning id`,[row.id,item.filename,item.url,reference]) as Array<{id:string}>;inserted+=result.length}return inserted}
 async function mark(row:Row,status:string,note?:string){await getSql().query(`update opportunities set raw_payload=coalesce(raw_payload,'{}'::jsonb)||jsonb_build_object('pursuitPackageCheckedAt',now(),'pursuitPackageStatus',$2::text,'pursuitPackageNote',$3::text) where id=$1::uuid`,[row.id,status,note||""])}
 
@@ -64,12 +67,14 @@ async function recoverFlorida(row:Row){
 
 async function recoverHtmlSource(row:Row){
   if(row.adapter_key==='powerpages_nc'){await mark(row,"access_required","NC eVP attachment records require vendor portal permission");return{inserted:0,status:"access_required",found:0,http:200}}
-  const res=await fetchBody(row.source_url);const found=new Map<string,Found>();if(res.status===200)extractText(res.body,res.url,found);
+  const headers=row.adapter_key==='eva_vbo_va'?await evaSession():{};
+  const res=await fetchBody(row.source_url,{headers});const found=new Map<string,Found>();if(res.status===200)extractText(res.body,res.url,found);
   const inserted=await persist(row,found,`${row.adapter_key} public package recovery`);
   const denied=res.status===401||res.status===403||/you don.?t have permissions|sign in to view|log in to view|authentication required/i.test(res.body);
   const status=found.size?"public_attachments_found":denied?"access_required":res.status===200?"scanned_no_public_attachment":res.status?`source_http_${res.status}`:"source_unreachable";
-  await mark(row,status,found.size?`${found.size} verified file/download links discovered`:denied?"Source requires vendor authentication for package access":"Public detail record scanned; no verified attachment URL exposed");
-  return{inserted,status,found:found.size,http:res.status};
+  const sessionNote=row.adapter_key==='eva_vbo_va'?(headers.cookie?"eVA guest session established; ":"eVA guest session unavailable; "):"";
+  await mark(row,status,found.size?`${found.size} verified file/download links discovered`:`${sessionNote}${denied?"Source requires vendor authentication for package access":"Public detail record scanned; no verified attachment URL exposed"}`);
+  return{inserted,status,found:found.size,http:res.status,session:Boolean(headers.cookie)};
 }
 
 export async function GET(request:NextRequest){
