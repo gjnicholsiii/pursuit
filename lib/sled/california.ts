@@ -32,6 +32,11 @@ function text(value: unknown) {
   return String(value ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function absolute(base: string, href?: string) {
+  if (!href || href.startsWith("javascript:")) return null;
+  try { return new URL(href, base).toString(); } catch { return null; }
+}
+
 function collectCookies(response: Response) {
   const values = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
   const fallback = response.headers.get("set-cookie");
@@ -106,6 +111,7 @@ function parseCalifornia(html: string) {
     departmentCode: string;
     agencyName: string;
     eventId: string;
+    detailUrl: string | null;
     title: string;
     format: string;
     type: string;
@@ -122,6 +128,8 @@ function parseCalifornia(html: string) {
     const departmentCode = cell(0);
     const agencyName = cell(1);
     const eventId = cell(2);
+    const eventAnchor = $(cells[2]).find("a[href]").first();
+    const detailUrl = absolute(CA_PSP, eventAnchor.attr("href"));
     const title = cell(3);
     const format = cell(4);
     const type = cell(5);
@@ -132,7 +140,7 @@ function parseCalifornia(html: string) {
     if (!departmentCode || !agencyName || !eventId || !title) return;
     if (!/^[A-Z0-9-]+$/i.test(eventId.replace(/\s+/g, ""))) return;
     if (!/posted/i.test(status)) return;
-    parsedRows.push({ departmentCode, agencyName, eventId, title, format, type, endText, status, buyerName, buyerEmail });
+    parsedRows.push({ departmentCode, agencyName, eventId, detailUrl, title, format, type, endText, status, buyerName, buyerEmail });
   });
 
   const records: SledOpportunityRecord[] = parsedRows.flatMap(row => {
@@ -162,13 +170,14 @@ function parseCalifornia(html: string) {
       status: "open",
       dueAt,
       stateCode: "CA",
-      sourceUrl: CA_PSP,
+      sourceUrl: row.detailUrl || CA_PSP,
       rawPayload: {
         platform: "Cal eProcure / PeopleSoft Supplier Portal",
         departmentCode: row.departmentCode,
         departmentName: row.agencyName,
         eventId: row.eventId,
         eventName: row.title,
+        detailUrl: row.detailUrl,
         format: row.format || null,
         eventType: row.type || null,
         endDate: row.endText,
