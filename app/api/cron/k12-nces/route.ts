@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncNcesDistrictBatch, STATE_FIPS } from "@/lib/k12/nces-districts";
+import { repairNcesIdsFromDistrictUrls } from "@/lib/k12/repair-nces";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
   const states = ALL_STATES.filter((_, index) => index % SHARD_COUNT === shard);
 
   try {
+    const repair = await repairNcesIdsFromDistrictUrls();
     const results = await syncNcesDistrictBatch(states);
     const totals = results.reduce(
       (acc, row) => {
@@ -50,6 +52,7 @@ export async function GET(request: NextRequest) {
       shard,
       shardCount: SHARD_COUNT,
       states,
+      repair,
       totals,
       failures,
       results,
