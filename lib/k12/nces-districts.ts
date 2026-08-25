@@ -31,7 +31,7 @@ function extractCsvFromZip(buffer:Buffer){
     if(buffer.readUInt32LE(offset)!==0x02014b50)throw new Error("NCES directory ZIP central directory is invalid");
     const method=buffer.readUInt16LE(offset+10);
     const compressedSize=buffer.readUInt32LE(offset+20);
-    const fileNameLength=buffer.readUInt32LE(offset+28);
+    const fileNameLength=buffer.readUInt16LE(offset+28);
     const extraLength=buffer.readUInt16LE(offset+30);
     const commentLength=buffer.readUInt16LE(offset+32);
     const localOffset=buffer.readUInt32LE(offset+42);
