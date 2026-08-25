@@ -42,16 +42,24 @@ export async function GET(request: NextRequest) {
   ]);
   results.push(...extracts);
 
-  // Analysis runs only after extraction workers return and while enough parent budget remains.
-  // The next minute's cron resumes automatically if heavy PDFs consume the parent budget.
+  // Analysis is also claim-safe: /api/documents/analyze-all leases jobs with
+  // FOR UPDATE SKIP LOCKED. Four parallel analyzers eliminate the final analysis
+  // tail without risking duplicate work. Idle workers return immediately.
   if (extracts.every(result => result.ok) && Date.now() - startedAt < 240_000) {
-    results.push(await capture(origin, "/api/documents/analyze-all", secret));
+    const analyses = await Promise.all([
+      capture(origin, "/api/documents/analyze-all", secret),
+      capture(origin, "/api/documents/analyze-all", secret),
+      capture(origin, "/api/documents/analyze-all", secret),
+      capture(origin, "/api/documents/analyze-all", secret),
+    ]);
+    results.push(...analyses);
   }
 
   return NextResponse.json({
     ok: results.length > 0 && results.every(result => result.ok),
     steps: results.length,
     extractionWorkers: extracts.length,
+    analysisWorkers: results.filter(result => result.path === "/api/documents/analyze-all").length,
     results,
   });
 }
