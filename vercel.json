@@ -1,6 +1,16 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": { "deploymentEnabled": true },
+  "functions": {
+    "app/api/cron/documents-acquire-large/route.ts": { "memory": 3009, "maxDuration": 300 },
+    "app/api/cron/state-heavy/route.ts": { "memory": 3009, "maxDuration": 300 },
+    "app/api/cron/document-platform-recovery/route.ts": { "memory": 3009, "maxDuration": 300 },
+    "app/api/documents/discover/route.ts": { "memory": 3009, "maxDuration": 300 },
+    "app/api/cron/k12-nces/route.ts": { "memory": 3009, "maxDuration": 300 },
+    "app/api/documents/acquire/route.ts": { "memory": 3009, "maxDuration": 300 },
+    "app/api/cron/documents-drain/route.ts": { "memory": 3009, "maxDuration": 300 },
+    "app/api/cron/k12-portal-discovery/route.ts": { "memory": 3009, "maxDuration": 300 }
+  },
   "crons": [
     { "path": "/api/cron/sam-bulk", "schedule": "0 7 * * *" },
     { "path": "/api/cron/opengov", "schedule": "30 */4 * * *" },
