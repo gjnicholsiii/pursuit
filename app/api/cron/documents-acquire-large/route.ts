@@ -7,7 +7,10 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const MAX_STREAM_BYTES = 1024 * 1024 * 1024;
+// Keep the serverless recovery path bounded. Larger public files remain linked to
+// their authoritative source and are classified for external/offline processing
+// rather than repeatedly exhausting a production function.
+const MAX_STREAM_BYTES = 256 * 1024 * 1024;
 const LARGE_LEASE_MINUTES = 6;
 
 type LargeDocumentRow = {
@@ -112,7 +115,18 @@ async function fetchDocument(row: LargeDocumentRow, signal: AbortSignal) {
   return fetch(row.source_url, { redirect: "follow", signal, cache: "no-store", headers: { ...baseHeaders, Referer: row.opportunity_source_url } });
 }
 
+function declaredContentLength(response: Response) {
+  const raw = response.headers.get("content-length");
+  if (!raw) return 0;
+  const bytes = Number(raw);
+  return Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+}
+
 async function streamForBlob(response: Response, filename: string) {
+  const declaredBytes = declaredContentLength(response);
+  if (declaredBytes > MAX_STREAM_BYTES) {
+    throw new Error(`external_processing_required:content_length_${declaredBytes}`);
+  }
   if (!response.body) throw new Error("empty_body");
   const reader = response.body.getReader();
   const first = await reader.read();
@@ -147,7 +161,7 @@ async function streamForBlob(response: Response, filename: string) {
         if (total > MAX_STREAM_BYTES) {
           closed = true;
           await reader.cancel();
-          controller.error(new Error("too_large_1gb"));
+          controller.error(new Error("external_processing_required:stream_exceeded_256mb"));
           return;
         }
         controller.enqueue(next.value);
