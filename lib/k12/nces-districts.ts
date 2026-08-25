@@ -31,7 +31,7 @@ function extractCsvFromZip(buffer:Buffer){
     if(buffer.readUInt32LE(offset)!==0x02014b50)throw new Error("NCES directory ZIP central directory is invalid");
     const method=buffer.readUInt16LE(offset+10);
     const compressedSize=buffer.readUInt32LE(offset+20);
-    const fileNameLength=buffer.readUInt16LE(offset+28);
+    const fileNameLength=buffer.readUInt32LE(offset+28);
     const extraLength=buffer.readUInt16LE(offset+30);
     const commentLength=buffer.readUInt16LE(offset+32);
     const localOffset=buffer.readUInt32LE(offset+42);
@@ -51,13 +51,28 @@ function extractCsvFromZip(buffer:Buffer){
   throw new Error("NCES directory ZIP contains no CSV file");
 }
 
+async function fetchDirectoryZipWithRetry(attempts=4){
+  let lastError:unknown=null;
+  for(let attempt=1;attempt<=attempts;attempt++){
+    try{
+      const response=await fetch(NCES_DIRECTORY_ZIP,{cache:"no-store",headers:{"user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0",accept:"application/zip,application/octet-stream,*/*"}});
+      if(!response.ok)throw new Error(`NCES directory file returned ${response.status}`);
+      const buffer=Buffer.from(await response.arrayBuffer());
+      if(buffer.length<1024)throw new Error(`NCES directory file was unexpectedly small (${buffer.length} bytes)`);
+      return buffer;
+    }catch(error){
+      lastError=error;
+      if(attempt<attempts)await sleep(750*attempt);
+    }
+  }
+  throw new Error(`NCES directory fetch failed after ${attempts} attempts: ${lastError instanceof Error?lastError.message:String(lastError)}`);
+}
+
 let directoryPromise:Promise<Map<string,DistrictRow[]>>|null=null;
 async function fetchNationalDirectory(){
   if(directoryPromise)return directoryPromise;
   directoryPromise=(async()=>{
-    const response=await fetch(NCES_DIRECTORY_ZIP,{cache:"no-store",headers:{"user-agent":"Mozilla/5.0 PursuitGovernmentRevenue/1.0",accept:"application/zip,application/octet-stream,*/*"}});
-    if(!response.ok)throw new Error(`NCES directory file returned ${response.status}`);
-    const csv=extractCsvFromZip(Buffer.from(await response.arrayBuffer()));
+    const csv=extractCsvFromZip(await fetchDirectoryZipWithRetry());
     const records=parse(csv,{columns:true,skip_empty_lines:true,bom:true,relax_column_count:true,trim:true}) as CsvRecord[];
     const byState=new Map<string,DistrictRow[]>();
     for(const record of records){
