@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const MAX_STREAM_BYTES = 1024 * 1024 * 1024;
+const LARGE_LEASE_MINUTES = 6;
 
 type LargeDocumentRow = {
   job_id: string;
@@ -183,13 +184,71 @@ async function acquireLarge(row: LargeDocumentRow) {
   }
 }
 
+async function claimLargeDocument() {
+  const sql = getSql();
+  const rows = await sql.query(`
+    with candidate as (
+      select j.id
+      from document_jobs j
+      join opportunity_documents d on d.id=j.document_id
+      join opportunities o on o.id=d.opportunity_id
+      where j.stage='acquire'
+        and (
+          j.state in ('dead','skipped')
+          or (j.state='leased' and j.lease_owner='large-stream' and j.leased_until < now())
+        )
+        and (
+          j.last_error in (
+            'too_large_runtime_cap',
+            'oversize_deferred_external_processing',
+            'deferred_external_size_limit',
+            'external_processing_required:too_large_runtime_cap',
+            'too_large_200mb'
+          )
+          or d.extraction_status='fetch_too_large'
+        )
+        and d.storage_key is null
+        and coalesce(d.is_missing,false)=false
+        and o.status='open'
+        and (o.due_at is null or o.due_at>=now())
+      order by j.priority,o.due_at asc nulls last,j.id
+      for update skip locked
+      limit 1
+    ), claimed as (
+      update document_jobs j
+      set state='leased',
+          leased_until=now() + ($1::int * interval '1 minute'),
+          lease_owner='large-stream',
+          updated_at=now()
+      from candidate c
+      where j.id=c.id
+      returning j.id,j.document_id,j.host_class,j.priority,j.meta
+    )
+    select
+      c.id::text job_id,
+      d.id::text,
+      d.opportunity_id::text,
+      d.source_url,
+      o.source_url opportunity_source_url,
+      d.filename,
+      s.source_family,
+      c.host_class,
+      c.priority,
+      c.meta
+    from claimed c
+    join opportunity_documents d on d.id=c.document_id
+    join opportunities o on o.id=d.opportunity_id
+    join sources s on s.id=o.source_id
+  `, [LARGE_LEASE_MINUTES]) as LargeDocumentRow[];
+  return rows[0] || null;
+}
+
 export async function GET(request: NextRequest) {
   const unauthorized = requireInternalAuth(request);
   if (unauthorized) return unauthorized;
   if (!process.env.BLOB_STORE_ID) return NextResponse.json({ ok: false, error: "BLOB_STORE_ID unavailable" }, { status: 503 });
-  const sql = getSql();
-  const rows = await sql.query(`select j.id::text job_id,d.id::text,d.opportunity_id::text,d.source_url,o.source_url opportunity_source_url,d.filename,s.source_family,j.host_class,j.priority,j.meta from document_jobs j join opportunity_documents d on d.id=j.document_id join opportunities o on o.id=d.opportunity_id join sources s on s.id=o.source_id where j.stage='acquire' and j.state in ('dead','skipped') and (j.last_error in ('too_large_runtime_cap','oversize_deferred_external_processing','deferred_external_size_limit','external_processing_required:too_large_runtime_cap','too_large_200mb') or d.extraction_status='fetch_too_large') and d.storage_key is null and coalesce(d.is_missing,false)=false and o.status='open' and (o.due_at is null or o.due_at>=now()) order by j.priority,o.due_at asc nulls last,j.id limit 1`) as LargeDocumentRow[];
-  if (!rows.length) return NextResponse.json({ ok: true, processed: 0, message: "No oversized public acquisition jobs remain" });
-  const result = await acquireLarge(rows[0]);
+  const row = await claimLargeDocument();
+  if (!row) return NextResponse.json({ ok: true, processed: 0, message: "No oversized public acquisition jobs remain" });
+  const result = await acquireLarge(row);
   return NextResponse.json({ ok: result.ok, processed: 1, result }, { status: result.ok ? 200 : 207 });
 }
