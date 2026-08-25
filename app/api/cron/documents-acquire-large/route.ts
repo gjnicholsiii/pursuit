@@ -122,29 +122,44 @@ async function streamForBlob(response: Response, filename: string) {
   if (contentType.includes("text/html") || /^\s*</.test(head)) throw new Error("invalid_payload");
   if ((filename.toLowerCase().endsWith(".pdf") || contentType.includes("application/pdf")) && !head.startsWith("%PDF")) throw new Error("invalid_payload");
   if (/\.(docx|xlsx|pptx|zip)$/i.test(filename) && !head.startsWith("PK")) throw new Error("invalid_payload");
+
   let total = first.value.byteLength;
+  let firstPending: Uint8Array | null = first.value;
+  let closed = false;
+
   const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      controller.enqueue(first.value!);
+    async pull(controller) {
+      if (closed) return;
       try {
-        while (true) {
-          const next = await reader.read();
-          if (next.done) break;
-          if (!next.value) continue;
-          total += next.value.byteLength;
-          if (total > MAX_STREAM_BYTES) {
-            await reader.cancel();
-            controller.error(new Error("too_large_1gb"));
-            return;
-          }
-          controller.enqueue(next.value);
+        if (firstPending) {
+          controller.enqueue(firstPending);
+          firstPending = null;
+          return;
         }
-        controller.close();
+        const next = await reader.read();
+        if (next.done) {
+          closed = true;
+          controller.close();
+          return;
+        }
+        if (!next.value) return;
+        total += next.value.byteLength;
+        if (total > MAX_STREAM_BYTES) {
+          closed = true;
+          await reader.cancel();
+          controller.error(new Error("too_large_1gb"));
+          return;
+        }
+        controller.enqueue(next.value);
       } catch (error) {
+        closed = true;
         controller.error(error);
       }
     },
-    cancel() { void reader.cancel(); },
+    async cancel() {
+      closed = true;
+      await reader.cancel();
+    },
   });
   return { stream, contentType, getBytes: () => total };
 }
