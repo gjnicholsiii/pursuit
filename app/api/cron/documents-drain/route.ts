@@ -27,25 +27,28 @@ export async function GET(request: NextRequest) {
   if (!secret) return NextResponse.json({ ok: false, error: "CRON_SECRET is not configured" }, { status: 503 });
   if (request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
-  // Keep extraction and analysis in separate serverless invocations. Importing and
-  // executing both workers inside this parent retained their PDF/text working sets in
-  // one process and caused avoidable OOM kills during heavy document drains.
+  // Heavy extraction stays in separate serverless invocations. Two workers can drain
+  // safely in parallel because /api/documents/extract claims jobs with FOR UPDATE SKIP LOCKED.
   const origin = workerOrigin(request);
   const results: Array<{ path: string; status: number; ok: boolean; body: unknown }> = [];
   const startedAt = Date.now();
 
-  const extract = await capture(origin, "/api/documents/extract", secret);
-  results.push(extract);
+  const extracts = await Promise.all([
+    capture(origin, "/api/documents/extract", secret),
+    capture(origin, "/api/documents/extract", secret),
+  ]);
+  results.push(...extracts);
 
-  // Do not start another heavy worker if extraction failed or consumed almost all of
-  // the parent budget. The next minute's cron resumes safely from the queue.
-  if (extract.ok && Date.now() - startedAt < 240_000) {
+  // Analysis runs only after both extraction workers return and while enough parent
+  // budget remains. The next minute's cron resumes automatically if a heavy PDF used it.
+  if (extracts.every(result => result.ok) && Date.now() - startedAt < 240_000) {
     results.push(await capture(origin, "/api/documents/analyze-all", secret));
   }
 
   return NextResponse.json({
     ok: results.length > 0 && results.every(result => result.ok),
     steps: results.length,
+    extractionWorkers: extracts.length,
     results,
   });
 }
