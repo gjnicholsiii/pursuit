@@ -64,7 +64,6 @@ create table agencies (
   created_at timestamptz not null default now()
 );
 create index agencies_name_idx on agencies using gin (to_tsvector('english', canonical_name));
--- Stable NCES IDs let the national K-12 reconciliation update districts without name-only duplication.
 create unique index agencies_nces_id_uidx on agencies(nces_id) where nces_id is not null;
 create index agencies_k12_state_name_idx on agencies(state_code, lower(canonical_name)) where agency_type='k12';
 
