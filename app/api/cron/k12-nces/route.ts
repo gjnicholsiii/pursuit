@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const ALL_STATES = Object.keys(STATE_FIPS).sort();
-const SHARD_COUNT = 5;
-const SLOT_MS = 15 * 60 * 1000;
+const SHARD_COUNT = 10;
+const SLOT_MS = 5 * 60 * 1000;
 
 function shardForSlot(date: Date) {
   return Math.floor(date.getTime() / SLOT_MS) % SHARD_COUNT;
@@ -36,6 +36,14 @@ export async function GET(request: NextRequest) {
     );
     const failures = results.filter(row => row.error);
 
+    if (failures.length) {
+      console.warn("NCES shard partial failure", {
+        shard,
+        states,
+        failures: failures.map(row => ({ stateCode: row.stateCode, error: row.error })),
+      });
+    }
+
     return NextResponse.json({
       ok: failures.length === 0,
       partial: failures.length > 0,
@@ -47,6 +55,11 @@ export async function GET(request: NextRequest) {
       results,
     }, { status: failures.length ? 207 : 200 });
   } catch (error) {
+    console.error("NCES shard failed", {
+      shard,
+      states,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       { ok: false, shard, states, error: error instanceof Error ? error.message : String(error) },
       { status: 500 },
