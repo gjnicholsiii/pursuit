@@ -60,9 +60,12 @@ create table agencies (
   city text,
   county text,
   website text,
+  nces_id text,
   created_at timestamptz not null default now()
 );
 create index agencies_name_idx on agencies using gin (to_tsvector('english', canonical_name));
+create unique index agencies_nces_id_uidx on agencies(nces_id) where nces_id is not null;
+create index agencies_k12_state_name_idx on agencies(state_code, lower(canonical_name)) where agency_type='k12';
 
 create table opportunities (
   id uuid primary key default gen_random_uuid(),
