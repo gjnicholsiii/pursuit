@@ -27,8 +27,9 @@ export async function GET(request: NextRequest) {
   if (!secret) return NextResponse.json({ ok: false, error: "CRON_SECRET is not configured" }, { status: 503 });
   if (request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
-  // Heavy extraction stays in separate serverless invocations. Two workers can drain
+  // Heavy extraction stays in separate serverless invocations. Four workers drain
   // safely in parallel because /api/documents/extract claims jobs with FOR UPDATE SKIP LOCKED.
+  // This is launch-drain capacity; idle workers return immediately once the queue is empty.
   const origin = workerOrigin(request);
   const results: Array<{ path: string; status: number; ok: boolean; body: unknown }> = [];
   const startedAt = Date.now();
@@ -36,11 +37,13 @@ export async function GET(request: NextRequest) {
   const extracts = await Promise.all([
     capture(origin, "/api/documents/extract", secret),
     capture(origin, "/api/documents/extract", secret),
+    capture(origin, "/api/documents/extract", secret),
+    capture(origin, "/api/documents/extract", secret),
   ]);
   results.push(...extracts);
 
-  // Analysis runs only after both extraction workers return and while enough parent
-  // budget remains. The next minute's cron resumes automatically if a heavy PDF used it.
+  // Analysis runs only after extraction workers return and while enough parent budget remains.
+  // The next minute's cron resumes automatically if heavy PDFs consume the parent budget.
   if (extracts.every(result => result.ok) && Date.now() - startedAt < 240_000) {
     results.push(await capture(origin, "/api/documents/analyze-all", secret));
   }
