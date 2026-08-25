@@ -3,12 +3,16 @@ import { ArrowUpRight, Clock3, DollarSign, MapPin } from "lucide-react";
 import type { Opportunity } from "@/lib/types";
 
 const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+const STALE_PACKAGE_MESSAGE = "No bid-package documents have been identified in Pursuit yet.";
 
 export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
   const lowConfidence = opportunity.confidence < 75;
-  const insight = opportunity.matchScore != null
+  const rawInsight = opportunity.matchScore != null
     ? opportunity.matchReasons?.slice(0, 3).join(" · ") || "Profile criteria matched this opportunity."
     : lowConfidence ? opportunity.uncertainty?.[0] : opportunity.verified[0];
+  const insight = rawInsight === STALE_PACKAGE_MESSAGE
+    ? "Bid-package intelligence is resolved when you run GO / NO-GO; if the portal blocks automated retrieval, Pursuit sends you directly to the authoritative bid source."
+    : rawInsight;
 
   return (
     <article className="opportunity-card">
