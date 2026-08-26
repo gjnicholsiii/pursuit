@@ -30,6 +30,7 @@ export const VERIFIED_BONFIRE_PORTALS: BonfirePortalConfig[] = [
   { slug: "bcsdk12", agencyName: "Bibb County School District", agencyType: "k12", jurisdictionLevel: "education", stateCode: "GA", city: "Macon" },
   { slug: "gss", agencyName: "Delaware Government Support Services", agencyType: "state_agency", jurisdictionLevel: "state", stateCode: "DE", city: "Dover" },
   { slug: "dallascityhall", agencyName: "City of Dallas", agencyType: "municipal", jurisdictionLevel: "local", stateCode: "TX", city: "Dallas" },
+  { slug: "mtc", agencyName: "Metropolitan Transportation Commission", agencyType: "transportation_authority", jurisdictionLevel: "regional", stateCode: "CA", city: "San Francisco" },
 ];
 
 interface BonfireRawRecord extends Record<string, unknown> {}
@@ -175,6 +176,10 @@ export async function syncBonfirePublic() {
     } catch (error) {
       failures.push({ slug: portal.slug, error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  if (failures.length) {
+    console.warn("Bonfire family refresh partial failure", { failures });
   }
 
   if (!failures.length) await closeMissingBonfireRecords(startedAt);
