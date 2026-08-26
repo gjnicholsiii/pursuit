@@ -28,6 +28,27 @@ export async function GET(request:NextRequest){
     returning j.id
   `) as Array<{id:number}>;
 
+  const redundant=await sql.query(`
+    update document_jobs j
+    set state='skipped',
+        updated_at=now(),
+        meta=coalesce(j.meta,'{}'::jsonb)||jsonb_build_object('terminalClassification','redundant_document_link')
+    from opportunity_documents d
+    where j.document_id=d.id
+      and j.stage='acquire'
+      and j.state='dead'
+      and exists(
+        select 1
+        from opportunity_documents d2
+        join document_jobs j2 on j2.document_id=d2.id
+        where d2.opportunity_id=d.opportunity_id
+          and d2.id<>d.id
+          and j2.stage='acquire'
+          and j2.state='done'
+      )
+    returning j.id
+  `) as Array<{id:number}>;
+
   const retired=await sql.query(`
     with doomed as (
       select d.id,d.opportunity_id
@@ -59,5 +80,5 @@ export async function GET(request:NextRequest){
       and exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and d.is_missing=true)
       and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false)
   `);
-  return NextResponse.json({ok:true,terminalSkipped:terminal.length,...(retired[0]||{retired:0,opportunities:0})});
+  return NextResponse.json({ok:true,terminalSkipped:terminal.length,redundantSkipped:redundant.length,...(retired[0]||{retired:0,opportunities:0})});
 }
