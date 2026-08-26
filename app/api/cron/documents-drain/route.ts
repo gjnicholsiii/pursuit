@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSql } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -26,6 +27,32 @@ export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return NextResponse.json({ ok: false, error: "CRON_SECRET is not configured" }, { status: 503 });
   if (request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+
+  // Jobs for opportunities that have already closed can never satisfy the worker
+  // claim predicates. Classify them explicitly instead of leaving a permanent
+  // pending tail that makes launch health look stalled forever.
+  const sql = getSql();
+  const stale = await sql.query(`
+    with stale_jobs as (
+      select j.id
+      from document_jobs j
+      join opportunity_documents d on d.id=j.document_id
+      join opportunities o on o.id=d.opportunity_id
+      where j.state='pending'
+        and j.stage in ('extract','analyze')
+        and not (o.status='open' and (o.due_at is null or o.due_at>=now()))
+      for update skip locked
+    )
+    update document_jobs j
+       set state='skipped',
+           leased_until=null,
+           lease_owner=null,
+           last_error='opportunity_closed_before_document_processing',
+           updated_at=now()
+      from stale_jobs s
+     where j.id=s.id
+     returning j.id
+  `);
 
   // Heavy extraction stays in separate serverless invocations. Four workers drain
   // safely in parallel because /api/documents/extract claims jobs with FOR UPDATE SKIP LOCKED.
@@ -57,6 +84,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     ok: results.length > 0 && results.every(result => result.ok),
+    staleJobsSkipped: stale.length,
     steps: results.length,
     extractionWorkers: extracts.length,
     extractionFailures: extracts.filter(result => !result.ok).length,
