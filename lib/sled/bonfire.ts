@@ -19,9 +19,6 @@ export interface BonfirePortalConfig {
   city?: string | null;
 }
 
-// Only portals already verified from authoritative buyer publications or the live
-// Pursuit platform registry belong here. The connector is family-level: adding a
-// portal is configuration, not a new scraper.
 export const VERIFIED_BONFIRE_PORTALS: BonfirePortalConfig[] = [
   { slug: "env-nm", agencyName: "New Mexico Environment Department", agencyType: "state_agency", jurisdictionLevel: "state", stateCode: "NM", city: "Santa Fe" },
   { slug: "nmdfa", agencyName: "New Mexico Department of Finance and Administration", agencyType: "state_agency", jurisdictionLevel: "state", stateCode: "NM", city: "Santa Fe" },
@@ -67,10 +64,19 @@ function normalizeDate(raw: string | null) { if (!raw) return null; const date =
 function mapRecord(portal: BonfirePortalConfig, raw: BonfireRawRecord): SledOpportunityRecord | null { const projectId = text(raw, "ProjectID", "ProjectId", "projectId", "Id", "ID", "id"); const title = text(raw, "ProjectName", "projectName", "Title", "title", "Name", "name"); if (!projectId || !title) return null; const referenceId = text(raw, "ReferenceID", "ReferenceId", "referenceId", "ReferenceNumber", "referenceNumber", "RefNumber", "refNumber"); const dueAt = normalizeDate(text(raw, "DateClose", "dateClose", "CloseDate", "closeDate", "ClosingDate", "closingDate")); const issueDate = normalizeDate(text(raw, "DateOpen", "dateOpen", "OpenDate", "openDate", "DateCreated", "dateCreated", "CreatedDate", "createdDate")); const statusText = (text(raw, "Status", "status", "ProjectStatus", "projectStatus") || "").toLowerCase(); const deadlineClosed = dueAt ? new Date(dueAt).getTime() < Date.now() : false; const status: "open" | "closed" = deadlineClosed || /closed|awarded|cancelled|canceled|complete/.test(statusText) ? "closed" : "open"; return { externalId: `${portal.slug}:${referenceId || projectId}`, agency: { key: `bonfire:${portal.slug}`, name: portal.agencyName, agencyType: portal.agencyType, jurisdictionLevel: portal.jurisdictionLevel, stateCode: portal.stateCode, city: portal.city || null, website: `https://${portal.slug}.bonfirehub.com` }, title, description: text(raw, "Description", "description", "ProjectDescription", "projectDescription"), solicitationType: text(raw, "OpportunityType", "opportunityType", "ProjectType", "projectType", "SolicitationType", "solicitationType"), procurementMechanism: "Euna Bonfire", status, issueDate, dueAt, estimatedValue: numberValue(raw, "EstimatedBudget", "estimatedBudget", "Budget", "budget", "EstimatedValue", "estimatedValue"), stateCode: portal.stateCode, city: portal.city || null, sourceUrl: `https://${portal.slug}.bonfirehub.com/opportunities/${projectId}`, rawPayload: { platform: "Euna Bonfire", portal: portal.slug, record: raw } }; }
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 async function fetchPortal(portal: BonfirePortalConfig) {
-  const endpoint = `https://${portal.slug}.bonfirehub.com/PublicPortal/getOpenPublicOpportunitiesSectionData`;
+  const endpoint = `https://${portal.slug}.bonfirehub.com/PublicPortal/getOpenPublicOpportunitiesSectionData?_=${Date.now()}`;
   let response: Response | null = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    response = await fetch(endpoint, { headers: { accept: "application/json, text/plain, */*", "user-agent": "Pursuit procurement indexer/1.0" }, cache: "no-store" });
+    response = await fetch(endpoint, {
+      headers: {
+        accept: "application/json, text/javascript, */*; q=0.01",
+        "accept-language": "en-US,en;q=0.9",
+        referer: `https://${portal.slug}.bonfirehub.com/portal/`,
+        "user-agent": "Mozilla/5.0 (compatible; PursuitProcurementIndexer/1.0; +https://pursuit.vercel.app)",
+        "x-requested-with": "XMLHttpRequest",
+      },
+      cache: "no-store",
+    });
     if (response.status !== 429) break;
     const retryAfter = Number(response.headers.get("retry-after"));
     const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 10000) : 1500 * (attempt + 1);
@@ -79,7 +85,10 @@ async function fetchPortal(portal: BonfirePortalConfig) {
   if (!response || !response.ok) throw new Error(`Bonfire ${portal.slug} returned ${response?.status ?? "no response"}`);
   const payload = await response.json() as unknown;
   const rawRecords = recordsFromPayload(payload);
-  if (!rawRecords.length) { const serialized = JSON.stringify(payload); if (serialized.length > 10 && !/\[\s*\]/.test(serialized)) throw new Error(`Bonfire ${portal.slug} returned an unrecognized public payload shape`); }
+  if (!rawRecords.length) {
+    const serialized = JSON.stringify(payload);
+    if (serialized.length > 10 && !/\[\s*\]/.test(serialized)) throw new Error(`Bonfire ${portal.slug} returned an unrecognized public payload shape`);
+  }
   return rawRecords.map(raw => mapRecord(portal, raw)).filter((item): item is SledOpportunityRecord => Boolean(item));
 }
 async function closeMissingBonfireRecords(syncStartedAt: string) { const sql = getSql(); await sql.query(`update opportunities o set status='closed' from sources s where o.source_id=s.id and s.adapter_key='bonfire_public' and o.status='open' and o.last_seen_at < $1::timestamptz`, [syncStartedAt]); }
@@ -98,6 +107,9 @@ export async function syncBonfirePublic() {
     } catch (error) { failures.push({ slug: portal.slug, error: error instanceof Error ? error.message : String(error) }); }
   }
   if (failures.length) console.warn("Bonfire family refresh partial failure", { failures });
-  if (!failures.length) await closeMissingBonfireRecords(startedAt);
+  if (!failures.length && opportunitiesSeen > 0) await closeMissingBonfireRecords(startedAt);
+  if (portalsSucceeded === VERIFIED_BONFIRE_PORTALS.length && opportunitiesSeen === 0) {
+    console.warn("Bonfire family refresh returned zero opportunities across every configured portal", { portalsConfigured: VERIFIED_BONFIRE_PORTALS.length });
+  }
   return { portalsConfigured: VERIFIED_BONFIRE_PORTALS.length, portalsSucceeded, portalsFailed: failures.length, opportunitiesSeen, stored, newRecords, changedRecords, failures, startedAt, completedAt: new Date().toISOString() };
 }
