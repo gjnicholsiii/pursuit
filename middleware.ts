@@ -17,7 +17,10 @@ export const config = {
     "/api/documents/discover",
     "/api/documents/extract",
     "/api/documents/ionwave-sync",
+    "/api/documents/jaggaer-refresh",
     "/api/documents/opengov-sync",
-    "/api/internal/k12-nces-sync",
+    "/api/documents/sam-discover",
+    "/api/ingest/:path*",
+    "/api/internal/:path*",
   ],
 };
