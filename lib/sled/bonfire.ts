@@ -43,18 +43,30 @@ function looksLikeOpportunity(record: BonfireRawRecord) { return Boolean(text(re
 function recordsFromPayload(payload: unknown): BonfireRawRecord[] {
   const seen = new Set<unknown>();
   const walk = (node: unknown, depth: number): BonfireRawRecord[] => {
-    if (depth > 5 || node === null || node === undefined || seen.has(node)) return [];
+    if (depth > 6 || node === null || node === undefined || seen.has(node)) return [];
     if (typeof node === "object") seen.add(node);
     if (Array.isArray(node)) {
       const objects = node.filter((item): item is BonfireRawRecord => Boolean(item) && typeof item === "object" && !Array.isArray(item));
-      if (objects.some(looksLikeOpportunity)) return objects;
+      const opportunities = objects.filter(looksLikeOpportunity);
+      if (opportunities.length) return opportunities;
       for (const item of node) { const nested = walk(item, depth + 1); if (nested.length) return nested; }
       return [];
     }
     if (typeof node !== "object") return [];
     const record = node as Record<string, unknown>;
-    const preferred = ["data", "Data", "projects", "Projects", "opportunities", "Opportunities", "result", "Result", "rows", "Rows", "items", "Items"];
-    for (const key of preferred) { if (key in record) { const nested = walk(record[key], depth + 1); if (nested.length) return nested; } }
+    if (looksLikeOpportunity(record as BonfireRawRecord)) return [record as BonfireRawRecord];
+    const preferred = ["data", "Data", "payload", "Payload", "projects", "Projects", "opportunities", "Opportunities", "result", "Result", "rows", "Rows", "items", "Items"];
+    for (const key of preferred) {
+      if (!(key in record)) continue;
+      const candidate = record[key];
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        const keyedObjects = Object.values(candidate as Record<string, unknown>).filter((item): item is BonfireRawRecord => Boolean(item) && typeof item === "object" && !Array.isArray(item));
+        const keyedOpportunities = keyedObjects.filter(looksLikeOpportunity);
+        if (keyedOpportunities.length) return keyedOpportunities;
+      }
+      const nested = walk(candidate, depth + 1);
+      if (nested.length) return nested;
+    }
     for (const nestedValue of Object.values(record)) { const nested = walk(nestedValue, depth + 1); if (nested.length) return nested; }
     return [];
   };
