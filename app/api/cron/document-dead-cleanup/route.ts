@@ -9,6 +9,25 @@ export async function GET(request:NextRequest){
   if(!secret)return NextResponse.json({ok:false,error:"CRON_SECRET is not configured"},{status:503});
   if(request.headers.get("authorization")!==`Bearer ${secret}`)return NextResponse.json({ok:false,error:"Unauthorized"},{status:401});
   const sql=getSql();
+
+  const terminal=await sql.query(`
+    update document_jobs j
+    set state='skipped',
+        updated_at=now(),
+        meta=coalesce(j.meta,'{}'::jsonb)||jsonb_build_object('terminalClassification','opportunity_closed_or_expired')
+    from opportunity_documents d, opportunities o
+    where j.document_id=d.id
+      and d.opportunity_id=o.id
+      and j.stage='acquire'
+      and j.state='dead'
+      and (
+        j.last_error='opportunity_closed_or_expired'
+        or o.status<>'open'
+        or (o.due_at is not null and o.due_at<now())
+      )
+    returning j.id
+  `) as Array<{id:number}>;
+
   const retired=await sql.query(`
     with doomed as (
       select d.id,d.opportunity_id
@@ -40,5 +59,5 @@ export async function GET(request:NextRequest){
       and exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and d.is_missing=true)
       and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false)
   `);
-  return NextResponse.json({ok:true,...(retired[0]||{retired:0,opportunities:0})});
+  return NextResponse.json({ok:true,terminalSkipped:terminal.length,...(retired[0]||{retired:0,opportunities:0})});
 }
