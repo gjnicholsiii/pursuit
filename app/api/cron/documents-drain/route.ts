@@ -42,10 +42,10 @@ export async function GET(request: NextRequest) {
   ]);
   results.push(...extracts);
 
-  // Analysis is also claim-safe: /api/documents/analyze-all leases jobs with
-  // FOR UPDATE SKIP LOCKED. Four parallel analyzers eliminate the final analysis
-  // tail without risking duplicate work. Idle workers return immediately.
-  if (extracts.every(result => result.ok) && Date.now() - startedAt < 240_000) {
+  // Analysis is independently claim-safe. Do not let one extraction worker failure
+  // strand already-extracted documents in the analysis queue. Run analyzers whenever
+  // there is enough function budget left, then report partial worker failure normally.
+  if (Date.now() - startedAt < 240_000) {
     const analyses = await Promise.all([
       capture(origin, "/api/documents/analyze-all", secret),
       capture(origin, "/api/documents/analyze-all", secret),
@@ -59,6 +59,7 @@ export async function GET(request: NextRequest) {
     ok: results.length > 0 && results.every(result => result.ok),
     steps: results.length,
     extractionWorkers: extracts.length,
+    extractionFailures: extracts.filter(result => !result.ok).length,
     analysisWorkers: results.filter(result => result.path === "/api/documents/analyze-all").length,
     results,
   });
