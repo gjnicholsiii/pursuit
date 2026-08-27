@@ -16,6 +16,22 @@ function shardForSlot(date: Date) {
   return Math.floor(date.getTime() / SLOT_MS) % SHARD_COUNT;
 }
 
+type CleanupStep = {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+};
+
+async function runCleanupStep(name: string, fn: () => Promise<unknown>): Promise<CleanupStep> {
+  try {
+    return { ok: true, result: await fn() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("NCES reconciliation cleanup failed", { step: name, error: message });
+    return { ok: false, error: message };
+  }
+}
+
 export async function GET(request: NextRequest) {
   const auth = requireInternalAuth(request);
   if (auth) return auth;
@@ -25,11 +41,16 @@ export async function GET(request: NextRequest) {
   const states = ALL_STATES.filter((_, index) => index % SHARD_COUNT === shard);
 
   try {
-    const nonLea = await reclassifyClearlyNonLeas();
-    const repair = await repairNcesIdsFromDistrictUrls();
-    const dedupe = await consolidateExactK12Duplicates();
-    const websiteHostAliases = await reconcileNcesAliasesByWebsiteHost();
-    const extendedAliases = await reconcileExtendedNcesAliases();
+    // Cleanup/reconciliation is valuable, but it must never prevent the
+    // authoritative NCES shard itself from syncing. Each statement is atomic,
+    // so a failed cleanup can be reported and retried on the next cycle while
+    // fresh national coverage continues to ingest.
+    const nonLea = await runCleanupStep("reclassify-non-lea", reclassifyClearlyNonLeas);
+    const repair = await runCleanupStep("repair-nces-ids", repairNcesIdsFromDistrictUrls);
+    const dedupe = await runCleanupStep("consolidate-duplicates", consolidateExactK12Duplicates);
+    const websiteHostAliases = await runCleanupStep("website-host-aliases", reconcileNcesAliasesByWebsiteHost);
+    const extendedAliases = await runCleanupStep("extended-aliases", reconcileExtendedNcesAliases);
+
     const results = await syncNcesDistrictBatch(states);
     const totals = results.reduce(
       (acc, row) => {
@@ -43,6 +64,10 @@ export async function GET(request: NextRequest) {
       { ncesTotal: 0, rowsParsed: 0, inserted: 0, updated: 0, existing: 0 },
     );
     const failures = results.filter(row => row.error);
+    const cleanup = { nonLea, repair, dedupe, websiteHostAliases, extendedAliases };
+    const cleanupFailures = Object.entries(cleanup)
+      .filter(([, value]) => !value.ok)
+      .map(([step, value]) => ({ step, error: value.error }));
 
     if (failures.length) {
       console.warn("NCES shard partial failure", {
@@ -54,15 +79,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: failures.length === 0,
-      partial: failures.length > 0,
+      partial: failures.length > 0 || cleanupFailures.length > 0,
       shard,
       shardCount: SHARD_COUNT,
       states,
-      nonLea,
-      repair,
-      dedupe,
-      websiteHostAliases,
-      extendedAliases,
+      cleanup,
+      cleanupFailures,
       totals,
       failures,
       results,
