@@ -38,14 +38,16 @@ export async function repairNcesIdsFromDistrictUrls() {
 }
 
 /**
- * Consolidate only the safest exact duplicate tail created by overlapping bulk
- * procurement feeds. A loser must have no Raven-side records; its opportunities
- * are moved to the better-populated survivor before the duplicate is deleted.
- * This deliberately avoids fuzzy matching and never invents an NCES identity.
+ * Consolidate only high-confidence K-12 duplicates created by overlapping bulk
+ * procurement feeds. The first pass removes literal duplicate unresolved rows.
+ * The second pass folds punctuation/case-only variants into an already NCES-
+ * identified agency in the same state. Losers with Raven-side records are never
+ * touched, fuzzy matching is deliberately excluded, and NCES IDs are never
+ * invented.
  */
 export async function consolidateExactK12Duplicates() {
   const sql = getSql();
-  const rows = await sql.query(`
+  const exactRows = await sql.query(`
     with ranked as (
       select
         a.id,
@@ -88,5 +90,59 @@ export async function consolidateExactK12Duplicates() {
     select id from deleted
   `);
 
-  return { consolidated: rows.length };
+  const normalizedRows = await sql.query(`
+    with unresolved as (
+      select
+        a.id,
+        a.state_code,
+        regexp_replace(lower(a.canonical_name), '[^a-z0-9]+', '', 'g') as normalized_name
+      from agencies a
+      where a.agency_type='k12'
+        and a.nces_id is null
+        and not exists(select 1 from raven_people p where p.agency_id=a.id)
+        and not exists(select 1 from raven_relationships x where x.agency_id=a.id)
+        and not exists(select 1 from raven_enrichment_runs e where e.agency_id=a.id)
+    ),
+    authoritative as (
+      select
+        a.id,
+        a.state_code,
+        regexp_replace(lower(a.canonical_name), '[^a-z0-9]+', '', 'g') as normalized_name,
+        count(*) over (
+          partition by a.state_code,
+          regexp_replace(lower(a.canonical_name), '[^a-z0-9]+', '', 'g')
+        ) as authoritative_count
+      from agencies a
+      where a.agency_type='k12' and a.nces_id is not null
+    ),
+    safe_losers as (
+      select u.id, a.id as survivor_id
+      from unresolved u
+      join authoritative a
+        on a.state_code=u.state_code
+       and a.normalized_name=u.normalized_name
+       and a.authoritative_count=1
+      where length(u.normalized_name) >= 8
+    ),
+    moved as (
+      update opportunities o
+      set agency_id=l.survivor_id
+      from safe_losers l
+      where o.agency_id=l.id
+      returning l.id
+    ),
+    deleted as (
+      delete from agencies a
+      using safe_losers l
+      where a.id=l.id
+      returning a.id
+    )
+    select id from deleted
+  `);
+
+  return {
+    consolidated: exactRows.length + normalizedRows.length,
+    exact: exactRows.length,
+    normalizedToAuthoritative: normalizedRows.length,
+  };
 }
