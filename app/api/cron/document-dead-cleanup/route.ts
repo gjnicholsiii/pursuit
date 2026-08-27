@@ -77,7 +77,7 @@ export async function GET(request:NextRequest){
       join opportunities o on o.id=d.opportunity_id
       where j.stage='acquire' and j.state='dead'
         and j.last_error in ('http_400','http_401','http_403','http_404','http_410','invalid_payload')
-        and d.storage_key is null and coalesce(d.is_missing,false)=false
+        and d.storage_key is null
         and o.status='open' and (o.due_at is null or o.due_at>=now())
       limit 500
     ), updated as (
