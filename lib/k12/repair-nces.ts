@@ -57,8 +57,8 @@ export async function reclassifyClearlyNonLeas() {
       and (
         canonical_name ~* '(^|[^a-z])(state )?(department of (elementary and secondary )?education|state board of education)([^a-z]|$)'
         or canonical_name ~* '(^|[^a-z])justice academy([^a-z]|$)'
-        or canonical_name ~* '^state\s*-\s*education$'
-        or canonical_name ~* '^sbe\s*-\s*state board of education$'
+        or canonical_name ~* '^state\\s*-\\s*education$'
+        or canonical_name ~* '^sbe\\s*-\\s*state board of education$'
       )
     returning id
   `);
@@ -67,11 +67,11 @@ export async function reclassifyClearlyNonLeas() {
 
 /**
  * Consolidate only high-confidence K-12 duplicates created by overlapping bulk
- * procurement feeds. The first pass removes literal duplicate unresolved rows.
- * The second pass folds punctuation/case-only variants into an already NCES-
- * identified agency in the same state. Losers with Raven-side records are never
- * touched, fuzzy matching is deliberately excluded, and NCES IDs are never
- * invented.
+ * procurement feeds. Literal and punctuation/case-only duplicates remain
+ * conservative. A final exact-identity pass can preserve Raven people and run
+ * history while folding an unresolved row into an authoritative NCES agency
+ * when state, canonical name and website host all agree. Fuzzy matching is
+ * deliberately excluded and NCES IDs are never invented.
  */
 export async function consolidateExactK12Duplicates() {
   const sql = getSql();
@@ -168,9 +168,98 @@ export async function consolidateExactK12Duplicates() {
     select id from deleted
   `);
 
+  const ravenPreservingRows = await sql.query(`
+    with unresolved as (
+      select
+        a.id,
+        a.state_code,
+        lower(a.canonical_name) as exact_name,
+        lower(regexp_replace(regexp_replace(coalesce(a.website,''), '^https?://(www\\.)?', '', 'i'), '/.*$', '', '')) as host
+      from agencies a
+      where a.agency_type='k12'
+        and a.nces_id is null
+        and coalesce(a.website,'') <> ''
+        and not exists(select 1 from raven_relationships x where x.agency_id=a.id)
+    ),
+    authoritative as (
+      select
+        a.id,
+        a.state_code,
+        lower(a.canonical_name) as exact_name,
+        lower(regexp_replace(regexp_replace(coalesce(a.website,''), '^https?://(www\\.)?', '', 'i'), '/.*$', '', '')) as host,
+        count(*) over (
+          partition by a.state_code,
+          lower(a.canonical_name),
+          lower(regexp_replace(regexp_replace(coalesce(a.website,''), '^https?://(www\\.)?', '', 'i'), '/.*$', '', ''))
+        ) as authoritative_count
+      from agencies a
+      where a.agency_type='k12'
+        and a.nces_id is not null
+        and coalesce(a.website,'') <> ''
+    ),
+    safe_losers as (
+      select u.id, a.id as survivor_id
+      from unresolved u
+      join authoritative a
+        on a.state_code=u.state_code
+       and a.exact_name=u.exact_name
+       and a.host=u.host
+       and a.authoritative_count=1
+      where length(u.host) > 5
+    ),
+    copied_people as (
+      insert into raven_people (
+        agency_id, full_name, title, role_family, email, phone, source_url,
+        source_type, confidence, last_verified_at, created_at, updated_at
+      )
+      select
+        l.survivor_id, p.full_name, p.title, p.role_family, p.email, p.phone,
+        p.source_url, p.source_type, p.confidence, p.last_verified_at,
+        p.created_at, p.updated_at
+      from raven_people p
+      join safe_losers l on l.id=p.agency_id
+      on conflict (agency_id, full_name, title) do update set
+        email=coalesce(excluded.email, raven_people.email),
+        phone=coalesce(excluded.phone, raven_people.phone),
+        source_url=coalesce(excluded.source_url, raven_people.source_url),
+        confidence=greatest(excluded.confidence, raven_people.confidence),
+        last_verified_at=greatest(excluded.last_verified_at, raven_people.last_verified_at),
+        updated_at=greatest(excluded.updated_at, raven_people.updated_at)
+      returning agency_id
+    ),
+    removed_people as (
+      delete from raven_people p
+      using safe_losers l
+      where p.agency_id=l.id
+      returning p.id
+    ),
+    moved_runs as (
+      update raven_enrichment_runs r
+      set agency_id=l.survivor_id
+      from safe_losers l
+      where r.agency_id=l.id
+      returning r.id
+    ),
+    moved_opportunities as (
+      update opportunities o
+      set agency_id=l.survivor_id
+      from safe_losers l
+      where o.agency_id=l.id
+      returning o.id
+    ),
+    deleted as (
+      delete from agencies a
+      using safe_losers l
+      where a.id=l.id
+      returning a.id
+    )
+    select id from deleted
+  `);
+
   return {
-    consolidated: exactRows.length + normalizedRows.length,
+    consolidated: exactRows.length + normalizedRows.length + ravenPreservingRows.length,
     exact: exactRows.length,
     normalizedToAuthoritative: normalizedRows.length,
+    ravenPreservingExactIdentity: ravenPreservingRows.length,
   };
 }
