@@ -40,10 +40,30 @@ export async function GET(request:NextRequest){
       and exists(
         select 1
         from opportunity_documents d2
+        where d2.opportunity_id=d.opportunity_id
+          and d2.id<>d.id
+          and d2.storage_key is not null
+      )
+    returning j.id
+  `) as Array<{id:number}>;
+
+  const redundantExtract=await sql.query(`
+    update document_jobs j
+    set state='skipped',
+        updated_at=now(),
+        meta=coalesce(j.meta,'{}'::jsonb)||jsonb_build_object('terminalClassification','redundant_unreadable_document')
+    from opportunity_documents d
+    where j.document_id=d.id
+      and j.stage='extract'
+      and j.state='dead'
+      and exists(
+        select 1
+        from opportunity_documents d2
         join document_jobs j2 on j2.document_id=d2.id
         where d2.opportunity_id=d.opportunity_id
           and d2.id<>d.id
-          and j2.stage='acquire'
+          and d2.storage_key is not null
+          and j2.stage='extract'
           and j2.state='done'
       )
     returning j.id
@@ -51,7 +71,7 @@ export async function GET(request:NextRequest){
 
   const retired=await sql.query(`
     with doomed as (
-      select d.id,d.opportunity_id
+      select d.id,d.opportunity_id,j.id as job_id
       from document_jobs j
       join opportunity_documents d on d.id=j.document_id
       join opportunities o on o.id=d.opportunity_id
@@ -67,9 +87,18 @@ export async function GET(request:NextRequest){
       from doomed x
       where d.id=x.id
       returning d.id,d.opportunity_id
+    ), classified as (
+      update document_jobs j
+      set state='skipped',
+          updated_at=now(),
+          meta=coalesce(j.meta,'{}'::jsonb)||jsonb_build_object('terminalClassification','source_link_unavailable')
+      from doomed x
+      where j.id=x.job_id
+      returning j.id
     )
     select count(*)::int retired,count(distinct opportunity_id)::int opportunities from updated
   `) as Array<{retired:number;opportunities:number}>;
+
   await sql.query(`
     update opportunities o set raw_payload=coalesce(o.raw_payload,'{}'::jsonb)||jsonb_build_object(
       'pursuitPackageCheckedAt',now(),
@@ -80,5 +109,12 @@ export async function GET(request:NextRequest){
       and exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and d.is_missing=true)
       and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false)
   `);
-  return NextResponse.json({ok:true,terminalSkipped:terminal.length,redundantSkipped:redundant.length,...(retired[0]||{retired:0,opportunities:0})});
+
+  return NextResponse.json({
+    ok:true,
+    terminalSkipped:terminal.length,
+    redundantSkipped:redundant.length,
+    redundantExtractSkipped:redundantExtract.length,
+    ...(retired[0]||{retired:0,opportunities:0})
+  });
 }
