@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncNcesDistrictBatch, STATE_FIPS } from "@/lib/k12/nces-districts";
-import { consolidateExactK12Duplicates, repairNcesIdsFromDistrictUrls } from "@/lib/k12/repair-nces";
+import { consolidateExactK12Duplicates, reclassifyClearlyNonLeas, repairNcesIdsFromDistrictUrls } from "@/lib/k12/repair-nces";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
   const states = ALL_STATES.filter((_, index) => index % SHARD_COUNT === shard);
 
   try {
+    const nonLea = await reclassifyClearlyNonLeas();
     const repair = await repairNcesIdsFromDistrictUrls();
     const dedupe = await consolidateExactK12Duplicates();
     const results = await syncNcesDistrictBatch(states);
@@ -53,6 +54,7 @@ export async function GET(request: NextRequest) {
       shard,
       shardCount: SHARD_COUNT,
       states,
+      nonLea,
       repair,
       dedupe,
       totals,
