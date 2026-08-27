@@ -38,6 +38,34 @@ export async function repairNcesIdsFromDistrictUrls() {
 }
 
 /**
+ * Some statewide procurement feeds use education-related department names that
+ * look K-12-ish to a generic classifier even though they are not local education
+ * agencies and therefore should never be forced into an NCES district match.
+ * Keep this intentionally narrow and semantic: only obvious state oversight or
+ * criminal-justice training entities are removed from the LEA reconciliation
+ * denominator. School systems, special schools, academies and ambiguous boards
+ * remain untouched for authoritative reconciliation.
+ */
+export async function reclassifyClearlyNonLeas() {
+  const sql = getSql();
+  const rows = await sql.query(`
+    update agencies
+    set agency_type='state_agency', jurisdiction_level='state'
+    where agency_type='k12'
+      and nces_id is null
+      and jurisdiction_level in ('state','local')
+      and (
+        canonical_name ~* '(^|[^a-z])(state )?(department of (elementary and secondary )?education|state board of education)([^a-z]|$)'
+        or canonical_name ~* '(^|[^a-z])justice academy([^a-z]|$)'
+        or canonical_name ~* '^state\s*-\s*education$'
+        or canonical_name ~* '^sbe\s*-\s*state board of education$'
+      )
+    returning id
+  `);
+  return { reclassified: rows.length };
+}
+
+/**
  * Consolidate only high-confidence K-12 duplicates created by overlapping bulk
  * procurement feeds. The first pass removes literal duplicate unresolved rows.
  * The second pass folds punctuation/case-only variants into an already NCES-
