@@ -29,12 +29,12 @@ export async function GET(request: NextRequest) {
 
   const origin = workerOrigin(request);
   // The child acquisition route already uses bounded concurrency and SKIP LOCKED.
-  // Run bulk claims sequentially so the parent invocation never fans out multiple
-  // memory-heavy document buffers at once. Allow up to six claims per minute while
-  // retaining the 240s execution budget; slow runs stop early and resume next minute.
+  // Keep claims sequential so the parent never fans out memory-heavy document buffers.
+  // Allow up to ten claims per minute during bulk SAM waves; the time guard still stops
+  // slow runs before the 300-second function ceiling and resumes them next minute.
   const results: Array<Awaited<ReturnType<typeof runAcquire>>> = [];
   const startedAt = Date.now();
-  for (let worker = 1; worker <= 6; worker++) {
+  for (let worker = 1; worker <= 10; worker++) {
     if (Date.now() - startedAt > 240_000) break;
     const result = await runAcquire(origin, secret, worker);
     results.push(result);
