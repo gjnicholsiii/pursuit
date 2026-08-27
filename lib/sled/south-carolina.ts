@@ -103,9 +103,7 @@ function parseCategoryLinks(html: string) {
 }
 
 function parseScboCategory(html: string, pageUrl: string, category: string): SledOpportunityRecord[] {
-  const $ = load(html);
-  const body = $("body").text().replace(/\r/g, "");
-  const chunks = body.split(/Ad Title:\s*/i).slice(1);
+  const rawChunks = html.split(/Ad Title:\s*/i).slice(1);
   const records: SledOpportunityRecord[] = [];
 
   const labels = [
@@ -123,7 +121,9 @@ function parseScboCategory(html: string, pageUrl: string, category: string): Sle
     "Ad Title:",
   ];
 
-  for (const chunk of chunks) {
+  for (const rawChunk of rawChunks) {
+    const fragment = load(rawChunk);
+    const chunk = fragment.root().text().replace(/\r/g, "");
     const title = text(chunk.split(/Purchasing Agent\/Entity:/i)[0]);
     const agencyName = findField(chunk, "Purchasing Agent/Entity:", labels.slice(1));
     const publishText = findField(chunk, "Ad Publish Date:", labels.slice(2));
@@ -134,6 +134,10 @@ function parseScboCategory(html: string, pageUrl: string, category: string): Sle
     const email = findField(chunk, "Buyer Email:", labels.slice(7));
     const description = findField(chunk, "Description:", labels.slice(8));
     const preBid = findField(chunk, "Pre-Bid Information:", labels.slice(9));
+    const detailMarkup = rawChunk.split(/Full Details\s*\/\s*Download:/i)[1]?.split(/Print Ad/i)[0] || "";
+    const detail$ = load(detailMarkup);
+    const detailHref = detail$('a[href]').first().attr("href");
+    const fullDetailsUrl = detailHref && !detailHref.startsWith("javascript:") ? absolute(pageUrl, detailHref) : null;
 
     if (!title || !agencyName || !dueText) continue;
     const dueAt = parseEastern(dueText);
@@ -167,7 +171,7 @@ function parseScboCategory(html: string, pageUrl: string, category: string): Sle
       issueDate: parseDateOnly(publishText),
       dueAt,
       stateCode: "SC",
-      sourceUrl: pageUrl,
+      sourceUrl: fullDetailsUrl || pageUrl,
       rawPayload: {
         platform: "South Carolina Business Opportunities (SCBO)",
         category,
@@ -181,6 +185,7 @@ function parseScboCategory(html: string, pageUrl: string, category: string): Sle
         buyerEmail: email || null,
         description: description || null,
         preBidInformation: preBid || null,
+        fullDetailsUrl,
         sourcePage: pageUrl,
       },
     });
