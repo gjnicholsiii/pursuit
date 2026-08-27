@@ -28,10 +28,67 @@ export async function GET(request: NextRequest) {
   if (!secret) return NextResponse.json({ ok: false, error: "CRON_SECRET is not configured" }, { status: 503 });
   if (request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
+  const sql = getSql();
+
+  // A queue can look empty even when a previously fetched/extracted document is
+  // missing its next-stage job (for example after legacy ingestion, cleanup, or a
+  // partial transaction). Repair those holes idempotently before measuring drain
+  // health so "0 pending" also means open documents can continue through analysis.
+  const repairedExtractJobs = await sql.query(`
+    insert into document_jobs(document_id,stage,host_class,priority)
+    select
+      d.id,
+      'extract',
+      coalesce(acquire.host_class,'other'),
+      greatest(0,coalesce(acquire.priority,100)-10)
+    from opportunity_documents d
+    join opportunities o on o.id=d.opportunity_id
+    left join lateral (
+      select j.host_class,j.priority
+      from document_jobs j
+      where j.document_id=d.id and j.stage='acquire'
+      order by j.id desc
+      limit 1
+    ) acquire on true
+    where d.extraction_status='fetched'
+      and d.storage_key is not null
+      and lower(d.filename) like '%.pdf'
+      and o.status='open'
+      and (o.due_at is null or o.due_at>=now())
+    on conflict(document_id,stage) do nothing
+    returning id
+  `);
+
+  const repairedAnalyzeJobs = await sql.query(`
+    insert into document_jobs(document_id,stage,host_class,priority)
+    select
+      d.id,
+      'analyze',
+      coalesce(extract_job.host_class,'other'),
+      greatest(0,coalesce(extract_job.priority,90)-10)
+    from opportunity_documents d
+    join opportunities o on o.id=d.opportunity_id
+    join extracted_facts ef
+      on ef.document_id=d.id
+     and ef.fact_type='document_text_extract'
+     and ef.normalized_value->>'text_storage_key' is not null
+    left join lateral (
+      select j.host_class,j.priority
+      from document_jobs j
+      where j.document_id=d.id and j.stage='extract'
+      order by j.id desc
+      limit 1
+    ) extract_job on true
+    where d.extraction_status='text_extracted'
+      and o.status='open'
+      and (o.due_at is null or o.due_at>=now())
+    on conflict(document_id,stage) do nothing
+    returning id
+  `);
+
   // Jobs for opportunities that have already closed can never satisfy the worker
   // claim predicates. Classify them explicitly instead of leaving a permanent
   // pending tail that makes launch health look stalled forever.
-  const sql = getSql();
   const stale = await sql.query(`
     with stale_jobs as (
       select j.id
@@ -84,6 +141,8 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     ok: results.length > 0 && results.every(result => result.ok),
+    repairedExtractJobs: repairedExtractJobs.length,
+    repairedAnalyzeJobs: repairedAnalyzeJobs.length,
     staleJobsSkipped: stale.length,
     steps: results.length,
     extractionWorkers: extracts.length,
