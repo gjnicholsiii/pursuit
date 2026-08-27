@@ -288,7 +288,7 @@ export async function consolidateExactK12Duplicates() {
     candidates as (
       select
         u.id,
-        min(a.id) as survivor_id,
+        (array_agg(a.id order by a.id))[1] as survivor_id,
         count(*) as candidate_count
       from unresolved u
       join authoritative a
