@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncNcesDistrictBatch, STATE_FIPS } from "@/lib/k12/nces-districts";
 import { consolidateExactK12Duplicates, reclassifyClearlyNonLeas, repairNcesIdsFromDistrictUrls } from "@/lib/k12/repair-nces";
+import { reconcileExtendedNcesAliases } from "@/lib/k12/reconcile-extended-aliases";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,7 @@ export async function GET(request: NextRequest) {
     const nonLea = await reclassifyClearlyNonLeas();
     const repair = await repairNcesIdsFromDistrictUrls();
     const dedupe = await consolidateExactK12Duplicates();
+    const extendedAliases = await reconcileExtendedNcesAliases();
     const results = await syncNcesDistrictBatch(states);
     const totals = results.reduce(
       (acc, row) => {
@@ -57,6 +59,7 @@ export async function GET(request: NextRequest) {
       nonLea,
       repair,
       dedupe,
+      extendedAliases,
       totals,
       failures,
       results,
