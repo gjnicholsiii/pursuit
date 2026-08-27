@@ -207,17 +207,28 @@ export async function consolidateExactK12Duplicates() {
        and a.authoritative_count=1
       where length(u.host) > 5
     ),
+    ranked_people as (
+      select
+        l.survivor_id,
+        p.*,
+        row_number() over (
+          partition by l.survivor_id, p.full_name, coalesce(p.title,'')
+          order by p.confidence desc nulls last, p.last_verified_at desc nulls last, p.updated_at desc, p.id
+        ) as merge_rank
+      from raven_people p
+      join safe_losers l on l.id=p.agency_id
+    ),
     copied_people as (
       insert into raven_people (
         agency_id, full_name, title, role_family, email, phone, source_url,
         source_type, confidence, last_verified_at, created_at, updated_at
       )
       select
-        l.survivor_id, p.full_name, p.title, p.role_family, p.email, p.phone,
+        p.survivor_id, p.full_name, p.title, p.role_family, p.email, p.phone,
         p.source_url, p.source_type, p.confidence, p.last_verified_at,
         p.created_at, p.updated_at
-      from raven_people p
-      join safe_losers l on l.id=p.agency_id
+      from ranked_people p
+      where p.merge_rank=1
       on conflict (agency_id, full_name, title) do update set
         email=coalesce(excluded.email, raven_people.email),
         phone=coalesce(excluded.phone, raven_people.phone),
