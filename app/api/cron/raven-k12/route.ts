@@ -16,8 +16,13 @@ export async function GET(request: NextRequest) {
     const active=await sql.query(`select count(*)::int n from raven_enrichment_runs where status='running' and started_at>now()-interval '4 minutes'`) as Array<{n:number}>;
     if(Number(active[0]?.n||0)>0)return NextResponse.json({ok:true,skipped:true,reason:'Raven K-12 batch already running',running:Number(active[0]?.n||0)});
     await sql.query(`update raven_enrichment_runs set status='failed',completed_at=now(),diagnostics=coalesce(diagnostics,'{}'::jsonb)||jsonb_build_object('error','stale enrichment lease expired') where status='running' and started_at<=now()-interval '4 minutes'`);
-    const limit = Number(request.nextUrl.searchParams.get("limit") || 9);
-    const identity = await resolveK12OfficialSites(60);
+
+    // Keep each cron invocation comfortably below Vercel's 300s ceiling. The route
+    // runs repeatedly, so smaller deterministic batches increase sustained throughput
+    // by avoiding a full invocation loss when one district site is slow.
+    const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 4);
+    const limit = Math.max(1, Math.min(requestedLimit, 6));
+    const identity = await resolveK12OfficialSites(24);
     const result = await enrichK12Batch(limit);
     const removed=await sql.query(`delete from raven_people where source_type='public_web' and full_name ~* '(quick links|in this section|testing|environmental|air quality|water.*testing|road$|street$|avenue$|boulevard$|highway$|^event details$|^scroll down$|^please register|^new student enrollment$|^view spending$|^committee members$|^term expires$|^current bids$|^watch the latest meeting$)' returning id`);
     return NextResponse.json({ ok: true, identity, ...result, falsePeopleRemoved: removed.length });
