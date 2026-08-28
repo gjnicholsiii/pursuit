@@ -17,9 +17,12 @@ export async function GET(request: NextRequest) {
     if(Number(active[0]?.n||0)>0)return NextResponse.json({ok:true,skipped:true,reason:'Raven K-12 batch already running',running:Number(active[0]?.n||0)});
     await sql.query(`update raven_enrichment_runs set status='failed',completed_at=now(),diagnostics=coalesce(diagnostics,'{}'::jsonb)||jsonb_build_object('error','stale enrichment lease expired') where status='running' and started_at<=now()-interval '6 minutes'`);
 
-    const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 9);
-    const limit = Math.max(1, Math.min(requestedLimit, 9));
-    const identity = await resolveK12OfficialSites(120);
+    // Keep the recurring worker comfortably inside Vercel's 300s ceiling. The
+    // cron runs continuously, so smaller bounded batches increase sustained
+    // throughput by avoiding whole-run losses to timeout.
+    const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 4);
+    const limit = Math.max(1, Math.min(requestedLimit, 4));
+    const identity = await resolveK12OfficialSites(24);
     const result = await enrichK12Batch(limit);
     const removed=await sql.query(`delete from raven_people where source_type='public_web' and full_name ~* '(quick links|in this section|testing|environmental|air quality|water.*testing|road$|street$|avenue$|boulevard$|highway$|^event details$|^scroll down$|^please register|^new student enrollment$|^view spending$|^committee members$|^term expires$|^current bids$|^watch the latest meeting$)' returning id`);
     return NextResponse.json({ ok: true, identity, ...result, falsePeopleRemoved: removed.length });
