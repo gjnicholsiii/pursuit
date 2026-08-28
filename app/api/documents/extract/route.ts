@@ -70,8 +70,9 @@ async function extractOne(document: FetchedDocumentRow) {
 
     if (!text.trim()) {
       await sql.query(`update opportunity_documents set extraction_status='text_empty' where id=$1::uuid`, [document.id]);
+      await sql.query(`insert into document_jobs(document_id,stage,host_class,priority,meta) values($1::uuid,'ocr',$2,$3,jsonb_build_object('reason','text_empty','bytes',$4::bigint)) on conflict(document_id,stage) do update set priority=least(document_jobs.priority,excluded.priority),state=case when document_jobs.state in ('done','leased') then document_jobs.state else 'pending' end,meta=coalesce(document_jobs.meta,'{}'::jsonb)||excluded.meta,updated_at=now()`,[document.id,document.host_class,Math.max(0,document.priority-5),document.bytes]);
       await finishJob(document.job_id);
-      return { ok:false, documentId:document.id, reason:"text_empty", permanent:true };
+      return { ok:false, documentId:document.id, reason:"text_empty_queued_for_ocr", permanent:true };
     }
 
     const textPath = `extracted/${document.opportunity_id}/${document.id}.txt`;
@@ -111,7 +112,7 @@ export async function GET(request: NextRequest) {
            or lower(coalesce(d.filename,'')) like '%(.pdf)%'
            or lower(coalesce(d.source_url,'')) like '%.pdf%'
          )
-         and o.status='open' and (o.due_at is null or o.due_at>=now())
+         and lower(coalesce(o.status,'')) in ('open','active','posted') and (o.due_at is null or o.due_at>=now())
        order by j.priority,j.run_after,j.id limit ${EXTRACTION_BATCH_SIZE} for update skip locked
      ), leased as (
        update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now() from claim where j.id=claim.id returning j.id as job_id,j.document_id,j.host_class,j.priority,j.meta
