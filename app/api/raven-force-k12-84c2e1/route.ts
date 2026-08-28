@@ -1,12 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { enrichK12Batch } from "@/lib/raven/k12-enrichment";
 import { resolveK12OfficialSites } from "@/lib/raven/k12-official-site";
+import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function GET(){
+export async function GET(request: NextRequest){
+  const auth = requireInternalAuth(request);
+  if (auth) return auth;
+
   try {
     const sql=getSql();
     const before=await sql.query(`select count(*)::int people,count(*) filter(where email is not null)::int with_email,count(distinct agency_id)::int organizations from raven_people rp join agencies a on a.id=rp.agency_id where a.agency_type='k12'`);
