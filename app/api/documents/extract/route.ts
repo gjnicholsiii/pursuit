@@ -105,7 +105,13 @@ export async function GET(request: NextRequest) {
   const rows = await sql.query(
     `with claim as (
        select j.id from document_jobs j join opportunity_documents d on d.id=j.document_id join opportunities o on o.id=d.opportunity_id
-       where j.stage='extract' and j.state='pending' and j.run_after<=now() and d.extraction_status='fetched' and d.storage_key is not null and lower(d.filename) like '%.pdf' and o.status='open' and (o.due_at is null or o.due_at>=now())
+       where j.stage='extract' and j.state='pending' and j.run_after<=now() and d.extraction_status='fetched' and d.storage_key is not null
+         and (
+           lower(coalesce(d.filename,'')) like '%.pdf'
+           or lower(coalesce(d.filename,'')) like '%(.pdf)%'
+           or lower(coalesce(d.source_url,'')) like '%.pdf%'
+         )
+         and o.status='open' and (o.due_at is null or o.due_at>=now())
        order by j.priority,j.run_after,j.id limit ${EXTRACTION_BATCH_SIZE} for update skip locked
      ), leased as (
        update document_jobs j set state='leased',leased_until=now()+interval '10 minutes',lease_owner=$1,attempts=attempts+1,updated_at=now() from claim where j.id=claim.id returning j.id as job_id,j.document_id,j.host_class,j.priority,j.meta
