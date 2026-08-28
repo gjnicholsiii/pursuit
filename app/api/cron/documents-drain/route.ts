@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
         or lower(coalesce(d.filename,'')) like '%(.pdf)%'
         or lower(coalesce(d.source_url,'')) like '%.pdf%'
       )
-      and o.status='open'
+      and o.status in ('open','active','posted')
       and (o.due_at is null or o.due_at>=now())
     on conflict(document_id,stage) do update
       set state=case when document_jobs.state='skipped' then 'pending' else document_jobs.state end,
@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
       limit 1
     ) extract_job on true
     where d.extraction_status='text_extracted'
-      and o.status='open'
+      and o.status in ('open','active','posted')
       and (o.due_at is null or o.due_at>=now())
     on conflict(document_id,stage) do update
       set state=case when document_jobs.state='skipped' then 'pending' else document_jobs.state end,
@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
       join opportunities o on o.id=d.opportunity_id
       where j.state='pending'
         and j.stage in ('extract','analyze')
-        and not (o.status='open' and (o.due_at is null or o.due_at>=now()))
+        and not (o.status in ('open','active','posted') and (o.due_at is null or o.due_at>=now()))
       for update skip locked
     )
     update document_jobs j
