@@ -34,6 +34,9 @@ export async function GET(request: NextRequest) {
   // missing its next-stage job (for example after legacy ingestion, cleanup, or a
   // partial transaction). Repair those holes idempotently before measuring drain
   // health so "0 pending" also means open documents can continue through analysis.
+  // A document can also have a skipped job from when its opportunity was closed and
+  // later become active again after an upstream refresh. Revive only those skipped
+  // jobs whose documents are presently eligible for this stage.
   const repairedExtractJobs = await sql.query(`
     insert into document_jobs(document_id,stage,host_class,priority)
     select
@@ -55,7 +58,13 @@ export async function GET(request: NextRequest) {
       and lower(d.filename) like '%.pdf'
       and o.status='open'
       and (o.due_at is null or o.due_at>=now())
-    on conflict(document_id,stage) do nothing
+    on conflict(document_id,stage) do update
+      set state=case when document_jobs.state='skipped' then 'pending' else document_jobs.state end,
+          run_after=case when document_jobs.state='skipped' then now() else document_jobs.run_after end,
+          leased_until=case when document_jobs.state='skipped' then null else document_jobs.leased_until end,
+          lease_owner=case when document_jobs.state='skipped' then null else document_jobs.lease_owner end,
+          last_error=case when document_jobs.state='skipped' then null else document_jobs.last_error end,
+          updated_at=case when document_jobs.state='skipped' then now() else document_jobs.updated_at end
     returning id
   `);
 
@@ -82,7 +91,13 @@ export async function GET(request: NextRequest) {
     where d.extraction_status='text_extracted'
       and o.status='open'
       and (o.due_at is null or o.due_at>=now())
-    on conflict(document_id,stage) do nothing
+    on conflict(document_id,stage) do update
+      set state=case when document_jobs.state='skipped' then 'pending' else document_jobs.state end,
+          run_after=case when document_jobs.state='skipped' then now() else document_jobs.run_after end,
+          leased_until=case when document_jobs.state='skipped' then null else document_jobs.leased_until end,
+          lease_owner=case when document_jobs.state='skipped' then null else document_jobs.lease_owner end,
+          last_error=case when document_jobs.state='skipped' then null else document_jobs.last_error end,
+          updated_at=case when document_jobs.state='skipped' then now() else document_jobs.updated_at end
     returning id
   `);
 
