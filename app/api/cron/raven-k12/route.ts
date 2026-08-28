@@ -20,9 +20,9 @@ export async function GET(request: NextRequest) {
     // Keep the recurring worker comfortably inside Vercel's 300s ceiling. The
     // cron runs continuously, so smaller bounded batches increase sustained
     // throughput by avoiding whole-run losses to timeout.
-    const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 4);
-    const limit = Math.max(1, Math.min(requestedLimit, 4));
-    const identity = await resolveK12OfficialSites(24);
+    const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 2);
+    const limit = Math.max(1, Math.min(requestedLimit, 2));
+    const identity = await resolveK12OfficialSites(12);
     const result = await enrichK12Batch(limit);
     const removed=await sql.query(`delete from raven_people where source_type='public_web' and full_name ~* '(quick links|in this section|testing|environmental|air quality|water.*testing|road$|street$|avenue$|boulevard$|highway$|^event details$|^scroll down$|^please register|^new student enrollment$|^view spending$|^committee members$|^term expires$|^current bids$|^watch the latest meeting$)' returning id`);
     return NextResponse.json({ ok: true, identity, ...result, falsePeopleRemoved: removed.length });
