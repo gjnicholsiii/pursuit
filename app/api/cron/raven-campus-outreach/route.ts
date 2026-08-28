@@ -9,7 +9,7 @@ const CAMPAIGN = "campus-security-advisory-v1";
 const SIZE = 500;
 const TARGET = 1000;
 const CONCURRENCY = 8;
-const MAX_PER_RUN = 300;
+const DAILY_LIMIT = 100;
 const RATE_DELAY_MS = 1100;
 const DEFAULT_FROM = "Joe Nichols <saferschools@blackvane13.com>";
 
@@ -61,6 +61,11 @@ export async function GET(req: NextRequest) {
   const total = Number(totalRows[0]?.n || 0);
   if (total >= TARGET) return NextResponse.json({ ok: true, complete: true, sent: total });
 
+  const todayRows = await sql.query(`select count(*)::int n from raven_outreach_sends s join raven_outreach_batches b on b.id=s.batch_id where b.campaign=$1 and s.status='sent' and timezone('America/Chicago', s.sent_at)::date = timezone('America/Chicago', now())::date`, [CAMPAIGN]) as any[];
+  const sentToday = Number(todayRows[0]?.n || 0);
+  const remainingToday = Math.max(0, DAILY_LIMIT - sentToday);
+  if (remainingToday === 0) return NextResponse.json({ ok: true, dailyLimitReached: true, sentToday, dailyLimit: DAILY_LIMIT, totalSuccessful: total });
+
   const activeRows = await sql.query(`select b.id::text,b.batch_number from raven_outreach_batches b where b.campaign=$1 and b.status in('sending','partial') order by b.batch_number limit 1`, [CAMPAIGN]) as any[];
   let batchId = activeRows[0]?.id as string | undefined;
   let batchNumber = Number(activeRows[0]?.batch_number || 0);
@@ -86,7 +91,7 @@ export async function GET(req: NextRequest) {
   const from = process.env.BLACKVANE_OUTBOUND_FROM || process.env.OUTREACH_FROM_EMAIL || DEFAULT_FROM;
   if (!key) return NextResponse.json({ ok: false, error: "RESEND_API_KEY is not configured for Raven", batch: batchNumber }, { status: 500 });
 
-  const pending = await sql.query(`select s.batch_id::text,s.person_id,s.email,s.first_name,s.full_name,s.institution,s.title from raven_outreach_sends s where s.batch_id=$1 and s.status in('pending','failed') order by s.id limit $2`, [batchId, MAX_PER_RUN]) as any[];
+  const pending = await sql.query(`select s.batch_id::text,s.person_id,s.email,s.first_name,s.full_name,s.institution,s.title from raven_outreach_sends s where s.batch_id=$1 and s.status in('pending','failed') order by s.id limit $2`, [batchId, remainingToday]) as any[];
   let sentNow = 0;
   let failedNow = 0;
   for (let i = 0; i < pending.length; i += CONCURRENCY) {
@@ -103,5 +108,5 @@ export async function GET(req: NextRequest) {
   await sql.query(`update raven_outreach_batches set status=$2,sent_count=$3,failed_count=$4,completed_at=case when $2='sent' then now() else null end where id=$1`, [batchId, done ? "sent" : "partial", batchSent, batchFailed]);
 
   const totalSuccessful = total + sentNow;
-  return NextResponse.json({ ok: true, batch: batchNumber, sent: sentNow, failed: failedNow, batchSent, batchFailed, totalSuccessful, complete: totalSuccessful >= TARGET });
+  return NextResponse.json({ ok: true, batch: batchNumber, sent: sentNow, failed: failedNow, batchSent, batchFailed, sentToday: sentToday + sentNow, dailyLimit: DAILY_LIMIT, totalSuccessful, complete: totalSuccessful >= TARGET });
 }
