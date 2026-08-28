@@ -8,10 +8,13 @@ export const maxDuration = 300;
 const CAMPAIGN = "campus-security-advisory-v1";
 const SIZE = 500;
 const TARGET = 1000;
-const CONCURRENCY = 20;
+const CONCURRENCY = 8;
+const MAX_PER_RUN = 300;
+const RATE_DELAY_MS = 1100;
 const DEFAULT_FROM = "Joe Nichols <saferschools@blackvane13.com>";
 
 const first = (s: string) => (s || "").trim().split(/\s+/)[0] || "there";
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function eligible(title: string, family: string) {
   const t = (title || "").toLowerCase();
@@ -83,13 +86,14 @@ export async function GET(req: NextRequest) {
   const from = process.env.BLACKVANE_OUTBOUND_FROM || process.env.OUTREACH_FROM_EMAIL || DEFAULT_FROM;
   if (!key) return NextResponse.json({ ok: false, error: "RESEND_API_KEY is not configured for Raven", batch: batchNumber }, { status: 500 });
 
-  const pending = await sql.query(`select s.batch_id::text,s.person_id,s.email,s.first_name,s.full_name,s.institution,s.title from raven_outreach_sends s where s.batch_id=$1 and s.status in('pending','failed') order by s.id`, [batchId]) as any[];
+  const pending = await sql.query(`select s.batch_id::text,s.person_id,s.email,s.first_name,s.full_name,s.institution,s.title from raven_outreach_sends s where s.batch_id=$1 and s.status in('pending','failed') order by s.id limit $2`, [batchId, MAX_PER_RUN]) as any[];
   let sentNow = 0;
   let failedNow = 0;
   for (let i = 0; i < pending.length; i += CONCURRENCY) {
     const results = await Promise.all(pending.slice(i, i + CONCURRENCY).map(r => sendOne(sql, r, key, from)));
     sentNow += results.filter(Boolean).length;
     failedNow += results.filter(v => !v).length;
+    if (i + CONCURRENCY < pending.length) await sleep(RATE_DELAY_MS);
   }
 
   const counts = await sql.query(`select count(*) filter(where status='sent')::int sent,count(*) filter(where status='failed')::int failed,count(*)::int total from raven_outreach_sends where batch_id=$1`, [batchId]) as any[];
