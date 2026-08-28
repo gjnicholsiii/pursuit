@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { Activity, Binoculars, Settings2, Target } from "lucide-react";
+import { Activity, Binoculars, Radar, Settings2, Target } from "lucide-react";
 
 const items = [
   { label: "Revenue Today", icon: Activity, href: "/" },
   { label: "Opportunities", icon: Target, href: "/opportunities" },
+  { label: "Overwatch", icon: Radar, href: "/overwatch" },
   { label: "Raven", icon: Binoculars, href: "/raven" },
   { label: "Profile", icon: Settings2, href: "/profile" },
 ];
@@ -29,7 +30,7 @@ export function Sidebar({ active = "Revenue Today" }: { active?: string }) {
       <div className="sidebar-bottom">
         <div className="source-health">
           <div className="source-health-top"><span>Data sources</span><strong>Federal + SLED live</strong></div>
-          <small>SAM.gov · state · local · K-12 · higher ed</small>
+          <small>SAM.gov · USAspending · state · local · K-12 · higher ed</small>
         </div>
       </div>
     </aside>
