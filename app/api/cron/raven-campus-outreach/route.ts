@@ -14,10 +14,11 @@ const first = (s: string) => (s || "").trim().split(/\s+/)[0] || "there";
 
 function eligible(title: string, family: string) {
   const t = (title || "").toLowerCase();
-  if (/principal|teacher|board|finance|financial|procurement|purchasing|facilit|maintenance|vendor/.test(t)) return false;
+  if (/principal|teacher|finance|financial|procurement|purchasing|facilit|maintenance|vendor/.test(t)) return false;
   if (family === "Executive") return /\b(superintendent|assistant superintendent|deputy superintendent)\b/.test(t);
   if (family === "Security") return /(chief|director|executive director|manager).*(security|safety|school safety|public safety|emergency management)|(security|safety|school safety|public safety|emergency management).*(chief|director|executive director|manager)/.test(t);
   if (family === "Technology") return /\b(cio|cto)\b|director.*(it|information technology|technology|information systems|infrastructure|network services)|(it|technology) manager|chief.*(information|technology)/.test(t);
+  if (family === "Board") return /\b(board member|board chair|board president|board vice president|board trustee|school board member|school board chair|school board president|school board trustee)\b/.test(t);
   return false;
 }
 
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
     batchNumber = Number(existing[0]?.n || 0) + 1;
     if (batchNumber > 2) return NextResponse.json({ ok: true, complete: total >= TARGET, sent: total });
 
-    const rows = await sql.query(`select distinct on(lower(rp.email)) rp.id::text person_id,rp.full_name,rp.title,rp.role_family,rp.email,a.canonical_name institution from raven_people rp join agencies a on a.id=rp.agency_id where a.agency_type='k12' and rp.email is not null and btrim(rp.email)<>'' and rp.role_family in('Executive','Security','Technology') and not exists(select 1 from raven_outreach_sends s where lower(s.email)=lower(rp.email)) order by lower(rp.email),rp.confidence desc nulls last,rp.last_verified_at desc nulls last`) as any[];
+    const rows = await sql.query(`select distinct on(lower(rp.email)) rp.id::text person_id,rp.full_name,rp.title,rp.role_family,rp.email,a.canonical_name institution from raven_people rp join agencies a on a.id=rp.agency_id where a.agency_type='k12' and rp.email is not null and btrim(rp.email)<>'' and rp.role_family in('Executive','Security','Technology','Board') and not exists(select 1 from raven_outreach_sends s where lower(s.email)=lower(rp.email)) order by lower(rp.email),rp.confidence desc nulls last,rp.last_verified_at desc nulls last`) as any[];
     const qualified = rows.filter(r => eligible(r.title, r.role_family));
     if (qualified.length < SIZE) return NextResponse.json({ ok: true, skipped: true, qualified: qualified.length, needed: SIZE, totalSuccessful: total });
 
