@@ -37,6 +37,9 @@ export async function GET(request: NextRequest) {
   // A document can also have a skipped job from when its opportunity was closed and
   // later become active again after an upstream refresh. Revive only those skipped
   // jobs whose documents are presently eligible for this stage.
+  // Some procurement platforms label PDFs with display names such as "RFP (.pdf)"
+  // or extensionless filenames while retaining .pdf in the source URL. Treat those
+  // as PDFs too; filename suffix alone was silently stranding fetched packages.
   const repairedExtractJobs = await sql.query(`
     insert into document_jobs(document_id,stage,host_class,priority)
     select
@@ -55,7 +58,11 @@ export async function GET(request: NextRequest) {
     ) acquire on true
     where d.extraction_status='fetched'
       and d.storage_key is not null
-      and lower(d.filename) like '%.pdf'
+      and (
+        lower(coalesce(d.filename,'')) like '%.pdf'
+        or lower(coalesce(d.filename,'')) like '%(.pdf)%'
+        or lower(coalesce(d.source_url,'')) like '%.pdf%'
+      )
       and o.status='open'
       and (o.due_at is null or o.due_at>=now())
     on conflict(document_id,stage) do update
@@ -126,9 +133,6 @@ export async function GET(request: NextRequest) {
      returning j.id
   `);
 
-  // Heavy extraction stays in separate serverless invocations. Four workers drain
-  // safely in parallel because /api/documents/extract claims jobs with FOR UPDATE SKIP LOCKED.
-  // This is launch-drain capacity; idle workers return immediately once the queue is empty.
   const origin = workerOrigin(request);
   const results: Array<{ path: string; status: number; ok: boolean; body: unknown }> = [];
   const startedAt = Date.now();
@@ -141,9 +145,6 @@ export async function GET(request: NextRequest) {
   ]);
   results.push(...extracts);
 
-  // Analysis is independently claim-safe. Do not let one extraction worker failure
-  // strand already-extracted documents in the analysis queue. Run analyzers whenever
-  // there is enough function budget left, then report partial worker failure normally.
   if (Date.now() - startedAt < 240_000) {
     const analyses = await Promise.all([
       capture(origin, "/api/documents/analyze-all", secret),
