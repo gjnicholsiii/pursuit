@@ -8,7 +8,7 @@ export const maxDuration = 300;
 const UA = "Mozilla/5.0 PursuitGovernmentRevenue/1.0";
 const FILE_RE = /\.(pdf|docx?|xlsx?|csv|zip|txt)(?:$|[?#])/i;
 const STRONG_DOWNLOAD_RE = /download\.jsp|attachment[_-]?id=|downloadFile(?:Nbr)?=|\/attachments?(?:\/|\?|$)|\/documents?(?:\/|\?|$)|\/files?(?:\/|\?|$)|\/download(?:\/|\?|$)/i;
-const REJECT_RE = /\.(?:js|css)(?:$|[?#])|\/signin(?:[/?]|$)|\/login(?:[/?]|$)|GenerateSearchPdf|\/solicitations\/?(?:\?|$)|\/solicitations\/details\/?(?:\?|$)|\/solicitations\/details\/(?:bid|existingbid)\/?(?:\?|$)|\/solicitations\/details\/~\/?(?:\?|$)/i;
+const REJECT_RE = /\.(?:js|css|png|jpe?g|gif|svg|ico|webp|bmp|avif)(?:$|[?#])|\/(?:favicon|apple-touch-icon)(?:[-._/]|$)|\/signin(?:[/?]|$)|\/login(?:[/?]|$)|GenerateSearchPdf|\/solicitations\/?(?:\?|$)|\/solicitations\/details\/?(?:\?|$)|\/solicitations\/details\/(?:bid|existingbid)\/?(?:\?|$)|\/solicitations\/details\/~\/?(?:\?|$)/i;
 
 type Row = { id:string; external_id:string|null; source_url:string; adapter_key:string; raw_payload:Record<string,unknown>|null };
 type Found = { url:string; filename:string };
@@ -25,6 +25,7 @@ function add(found:Map<string,Found>,base:string,raw:string,label?:string){
   if(REJECT_RE.test(url)||sameResource(base,url)||!isStrongDocumentUrl(url))return;
   let filename=label||"";
   try{const u=new URL(url);filename=filename||u.searchParams.get("filename")||u.searchParams.get("fileName")||u.searchParams.get("attachment_name")||decodeURIComponent(u.pathname.split("/").filter(Boolean).pop()||"")}catch{}
+  if(REJECT_RE.test(filename))return;
   if(/^(sign in|log in|solicitations?|respond to solicitation|submit a bid|existing bid|-)?$/i.test(filename.trim()))filename="package-document";
   found.set(url,{url,filename:safeName(filename||"package-document")});
 }
