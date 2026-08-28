@@ -9,6 +9,7 @@ const CAMPAIGN = "campus-security-advisory-v1";
 const SIZE = 500;
 const TARGET = 1000;
 const CONCURRENCY = 20;
+const DEFAULT_FROM = "Joe Nichols <saferschools@blackvane13.com>";
 
 const first = (s: string) => (s || "").trim().split(/\s+/)[0] || "there";
 
@@ -79,8 +80,8 @@ export async function GET(req: NextRequest) {
   }
 
   const key = process.env.RESEND_API_KEY;
-  const from = process.env.BLACKVANE_OUTBOUND_FROM || process.env.OUTREACH_FROM_EMAIL;
-  if (!key || !from) return NextResponse.json({ ok: false, error: "Blackvane outbound sender is not configured for Raven", batch: batchNumber }, { status: 500 });
+  const from = process.env.BLACKVANE_OUTBOUND_FROM || process.env.OUTREACH_FROM_EMAIL || DEFAULT_FROM;
+  if (!key) return NextResponse.json({ ok: false, error: "RESEND_API_KEY is not configured for Raven", batch: batchNumber }, { status: 500 });
 
   const pending = await sql.query(`select s.batch_id::text,s.person_id,s.email,s.first_name,s.full_name,s.institution,s.title from raven_outreach_sends s where s.batch_id=$1 and s.status in('pending','failed') order by s.id`, [batchId]) as any[];
   let sentNow = 0;
