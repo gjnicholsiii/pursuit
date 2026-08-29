@@ -10,6 +10,37 @@ export async function GET(req: NextRequest) {
   if (auth) return auth;
   const sql = getSql();
 
+  // Remove records that can never qualify under the user's outreach rules.
+  // The state School Safety administrator is the sole intentional exception because
+  // the current ALSDE title explicitly includes School Safety ownership.
+  await sql.query(`
+    update raven_state_contacts
+    set verification_status='rejected',verified_at=null,
+      evidence_note=coalesce(evidence_note,'') || ' Rejected by strict outreach-role audit: facilities/plant/maintenance/buildings/grounds/generic operations are excluded.',
+      updated_at=now()
+    where state_code='AL' and scope<>'state'
+      and verification_status in ('verified','candidate')
+      and lower(coalesce(title,'')) ~ '(facilit|plant|maintenance|buildings|grounds|(^|[^a-z])operations([^a-z]|$))'
+  `);
+
+  // Known stale role: BCBE's current official page now identifies Marty McRae as
+  // Superintendent. A legacy Safety/Prevention page still shows his prior job.
+  await sql.query(`
+    update raven_state_contacts
+    set verification_status='rejected',verified_at=null,
+      evidence_note='Rejected as stale: current official BCBE superintendent page identifies Marty McRae as Superintendent; prior safety-role page has not been updated.',updated_at=now()
+    where state_code='AL' and county='Baldwin' and role_key='security_director' and lower(full_name)=lower('Marty McRae')
+  `);
+
+  // Coordinator of Technology is not the requested IT Director role. Preserve the
+  // source as a rejected discovery rather than promoting an adjacent title.
+  await sql.query(`
+    update raven_state_contacts
+    set verification_status='rejected',verified_at=null,
+      evidence_note='Rejected for outreach role: Coordinator of Technology is not the requested IT Director title.',updated_at=now()
+    where state_code='AL' and county='Autauga' and role_key='it_director' and lower(full_name)=lower('William Conyers')
+  `);
+
   for (const r of ALABAMA_STATE_SEEDS) {
     const agencies = r.scope === 'state' ? [] : await sql.query(
       `select id from agencies where state_code=$1 and agency_type='k12' and lower(coalesce(county,''))=lower($2) order by (canonical_name ilike $2||'%') desc,id limit 1`,
@@ -38,6 +69,16 @@ export async function GET(req: NextRequest) {
   await sql.query(`delete from raven_state_contacts m where state_code='AL' and verification_status='missing' and full_name is null and exists(select 1 from raven_state_contacts v where v.state_code=m.state_code and coalesce(v.county,'')=coalesce(m.county,'') and v.scope=m.scope and v.role_key=m.role_key and v.verification_status='verified' and v.full_name is not null)`);
 
   const counts = await sql.query(`select count(*)::int slots,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts where state_code='AL'`) as any[];
+  const byCounty = await sql.query(`
+    select coalesce(county,'STATE') county,
+      count(*) filter(where verification_status='verified')::int verified,
+      count(*) filter(where verification_status='candidate')::int candidate,
+      count(*) filter(where verification_status='missing')::int missing,
+      count(*) filter(where verification_status='rejected')::int rejected
+    from raven_state_contacts where state_code='AL'
+    group by county order by county nulls first
+  `) as any[];
   console.log('RAVEN_ALABAMA_V2_PROGRESS', JSON.stringify(counts[0]));
-  return NextResponse.json({ok:true,state:'AL',counts:counts[0]});
+  console.log('RAVEN_ALABAMA_COUNTY_AUDIT', JSON.stringify(byCounty));
+  return NextResponse.json({ok:true,state:'AL',counts:counts[0],counties:byCounty});
 }
