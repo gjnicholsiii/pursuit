@@ -54,10 +54,43 @@ export async function GET(req: NextRequest) {
     on conflict do nothing
   `);
 
+  await sql.query(`
+    insert into raven_state_contacts(state_code,county,agency_id,scope,role_key,full_name,title,email,phone,source_url,verification_status,evidence_note)
+    select a.state_code,a.county,a.id,'district',
+      case
+        when lower(rp.title) ~ '(assistant|asst\\.?)[[:space:]-]+superintendent' then 'assistant_superintendent'
+        when lower(rp.title) ~ '(^|[[:space:]])superintendent([[:space:]]|$)' and lower(rp.title) !~ '(assistant|asst\\.?|deputy|associate)' then 'superintendent'
+        when lower(rp.title) ~ '(director|chief).*(security|school safety|public safety)|(security|school safety|public safety).*(director|chief)' then 'security_director'
+        when lower(rp.title) ~ 'director.*(information technology|technology|information systems|it services)|(information technology|technology|information systems).*(director)' then 'it_director'
+        when lower(rp.title) ~ '(school )?board (member|chair|chairman|chairwoman|president|vice president|trustee)|board trustee' then 'school_board'
+      end,
+      rp.full_name,rp.title,rp.email,rp.phone,rp.source_url,'candidate','Imported from existing Raven record; requires state-by-state official-source verification before sending.'
+    from raven_people rp
+    join agencies a on a.id=rp.agency_id
+    where a.agency_type='k12'
+      and a.state_code is not null
+      and a.county is not null
+      and btrim(a.county)<>''
+      and (a.jurisdiction_level='county' or a.canonical_name ilike '%county%')
+      and rp.full_name is not null and btrim(rp.full_name)<>''
+      and rp.title is not null and btrim(rp.title)<>''
+      and rp.source_url is not null and btrim(rp.source_url)<>''
+      and (
+        lower(rp.title) ~ '(assistant|asst\\.?)[[:space:]-]+superintendent'
+        or (lower(rp.title) ~ '(^|[[:space:]])superintendent([[:space:]]|$)' and lower(rp.title) !~ '(assistant|asst\\.?|deputy|associate)')
+        or lower(rp.title) ~ '(director|chief).*(security|school safety|public safety)|(security|school safety|public safety).*(director|chief)'
+        or lower(rp.title) ~ 'director.*(information technology|technology|information systems|it services)|(information technology|technology|information systems).*(director)'
+        or lower(rp.title) ~ '(school )?board (member|chair|chairman|chairwoman|president|vice president|trustee)|board trustee'
+      )
+      and lower(rp.title) !~ '(facilit|plant|maintenance|operations|buildings|grounds)'
+    on conflict do nothing
+  `);
+
   const rows = await sql.query(`
     select state_code,
       count(*)::int slots,
       count(*) filter(where verification_status='verified')::int verified,
+      count(*) filter(where verification_status='candidate')::int candidates,
       count(*) filter(where verification_status='missing')::int missing
     from raven_state_contacts
     group by state_code
