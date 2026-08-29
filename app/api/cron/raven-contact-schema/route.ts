@@ -95,13 +95,35 @@ export async function GET(req: NextRequest) {
   ] as const;
 
   for (const [role, fullName, title, email, phone, source] of verified) {
-    await sql.query(`
+    // Prefer promoting an existing named candidate. This keeps repeated cron runs
+    // idempotent and avoids colliding with the unique contact-slot index.
+    const promoted = await sql.query(`
       update raven_state_contacts c
-      set full_name=$3,title=$4,email=$5,phone=$6,source_url=$7,verification_status='verified',verified_at=now(),evidence_note='Verified against current official Blount County Schools source.',updated_at=now()
+      set title=$4,email=$5,phone=$6,source_url=$7,verification_status='verified',verified_at=now(),evidence_note='Verified against current official Blount County Schools source.',updated_at=now()
       from agencies a
-      where c.agency_id=a.id and c.state_code=$1 and c.role_key=$2 and c.verification_status='missing'
+      where c.agency_id=a.id and c.state_code=$1 and c.role_key=$2
+        and lower(c.full_name)=lower($3)
         and a.canonical_name ilike 'Blount County%'
-    `, ['AL', role, fullName, title, email, phone, source]);
+      returning c.id
+    `, ['AL', role, fullName, title, email, phone, source]) as any[];
+
+    if (promoted.length === 0) {
+      await sql.query(`
+        update raven_state_contacts c
+        set full_name=$3,title=$4,email=$5,phone=$6,source_url=$7,verification_status='verified',verified_at=now(),evidence_note='Verified against current official Blount County Schools source.',updated_at=now()
+        from agencies a
+        where c.agency_id=a.id and c.state_code=$1 and c.role_key=$2 and c.verification_status='missing'
+          and a.canonical_name ilike 'Blount County%'
+          and not exists (
+            select 1 from raven_state_contacts existing
+            where existing.agency_id=c.agency_id
+              and existing.state_code=c.state_code
+              and existing.scope=c.scope
+              and existing.role_key=c.role_key
+              and lower(existing.full_name)=lower($3)
+          )
+      `, ['AL', role, fullName, title, email, phone, source]);
+    }
   }
 
   const rows = await sql.query(`
