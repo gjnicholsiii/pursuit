@@ -41,15 +41,16 @@ export async function GET(request: NextRequest) {
   const states = ALL_STATES.filter((_, index) => index % SHARD_COUNT === shard);
 
   try {
-    // Cleanup/reconciliation is valuable, but it must never prevent the
-    // authoritative NCES shard itself from syncing. Each statement is atomic,
-    // so a failed cleanup can be reported and retried on the next cycle while
-    // fresh national coverage continues to ingest.
-    const nonLea = await runCleanupStep("reclassify-non-lea", reclassifyClearlyNonLeas);
-    const repair = await runCleanupStep("repair-nces-ids", repairNcesIdsFromDistrictUrls);
-    const dedupe = await runCleanupStep("consolidate-duplicates", consolidateExactK12Duplicates);
-    const websiteHostAliases = await runCleanupStep("website-host-aliases", reconcileNcesAliasesByWebsiteHost);
-    const extendedAliases = await runCleanupStep("extended-aliases", reconcileExtendedNcesAliases);
+    // Cleanup/reconciliation must never consume the shard's runtime serially.
+    // Each statement is independent and atomic, so run them concurrently while
+    // preserving per-step failure reporting before the authoritative NCES sync.
+    const [nonLea, repair, dedupe, websiteHostAliases, extendedAliases] = await Promise.all([
+      runCleanupStep("reclassify-non-lea", reclassifyClearlyNonLeas),
+      runCleanupStep("repair-nces-ids", repairNcesIdsFromDistrictUrls),
+      runCleanupStep("consolidate-duplicates", consolidateExactK12Duplicates),
+      runCleanupStep("website-host-aliases", reconcileNcesAliasesByWebsiteHost),
+      runCleanupStep("extended-aliases", reconcileExtendedNcesAliases),
+    ]);
 
     const results = await syncNcesDistrictBatch(states);
     const totals = results.reduce(
