@@ -31,31 +31,14 @@ export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET!;
   const sql = getSql();
 
-  // A queue can look empty even when a previously fetched/extracted document is
-  // missing its next-stage job (for example after legacy ingestion, cleanup, or a
-  // partial transaction). Repair those holes idempotently before measuring drain
-  // health so "0 pending" also means open documents can continue through analysis.
-  // A document can also have a skipped job from when its opportunity was closed and
-  // later become active again after an upstream refresh. Revive only those skipped
-  // jobs whose documents are presently eligible for this stage.
-  // Some procurement platforms label PDFs with display names such as "RFP (.pdf)"
-  // or extensionless filenames while retaining .pdf in the source URL. Treat those
-  // as PDFs too; filename suffix alone was silently stranding fetched packages.
   const repairedExtractJobs = await sql.query(`
     insert into document_jobs(document_id,stage,host_class,priority)
-    select
-      d.id,
-      'extract',
-      coalesce(acquire.host_class,'other'),
-      greatest(0,coalesce(acquire.priority,100)-10)
+    select d.id,'extract',coalesce(acquire.host_class,'other'),greatest(0,coalesce(acquire.priority,100)-10)
     from opportunity_documents d
     join opportunities o on o.id=d.opportunity_id
     left join lateral (
-      select j.host_class,j.priority
-      from document_jobs j
-      where j.document_id=d.id and j.stage='acquire'
-      order by j.id desc
-      limit 1
+      select j.host_class,j.priority from document_jobs j
+      where j.document_id=d.id and j.stage='acquire' order by j.id desc limit 1
     ) acquire on true
     where d.extraction_status='fetched'
       and d.storage_key is not null
@@ -78,23 +61,15 @@ export async function GET(request: NextRequest) {
 
   const repairedAnalyzeJobs = await sql.query(`
     insert into document_jobs(document_id,stage,host_class,priority)
-    select
-      d.id,
-      'analyze',
-      coalesce(extract_job.host_class,'other'),
-      greatest(0,coalesce(extract_job.priority,90)-10)
+    select d.id,'analyze',coalesce(extract_job.host_class,'other'),greatest(0,coalesce(extract_job.priority,90)-10)
     from opportunity_documents d
     join opportunities o on o.id=d.opportunity_id
-    join extracted_facts ef
-      on ef.document_id=d.id
-     and ef.fact_type='document_text_extract'
-     and ef.normalized_value->>'text_storage_key' is not null
+    join extracted_facts ef on ef.document_id=d.id
+      and ef.fact_type='document_text_extract'
+      and ef.normalized_value->>'text_storage_key' is not null
     left join lateral (
-      select j.host_class,j.priority
-      from document_jobs j
-      where j.document_id=d.id and j.stage='extract'
-      order by j.id desc
-      limit 1
+      select j.host_class,j.priority from document_jobs j
+      where j.document_id=d.id and j.stage='extract' order by j.id desc limit 1
     ) extract_job on true
     where d.extraction_status='text_extracted'
       and o.status in ('open','active','posted')
@@ -109,9 +84,6 @@ export async function GET(request: NextRequest) {
     returning id
   `);
 
-  // Jobs for opportunities that have already closed can never satisfy the worker
-  // claim predicates. Classify them explicitly instead of leaving a permanent
-  // pending tail that makes launch health look stalled forever.
   const stale = await sql.query(`
     with stale_jobs as (
       select j.id
@@ -119,18 +91,14 @@ export async function GET(request: NextRequest) {
       join opportunity_documents d on d.id=j.document_id
       join opportunities o on o.id=d.opportunity_id
       where j.state='pending'
-        and j.stage in ('extract','analyze')
+        and j.stage in ('extract','analyze','ocr')
         and not (o.status in ('open','active','posted') and (o.due_at is null or o.due_at>=now()))
       for update skip locked
     )
     update document_jobs j
-       set state='skipped',
-           leased_until=null,
-           lease_owner=null,
-           last_error='opportunity_closed_before_document_processing',
-           updated_at=now()
-      from stale_jobs s
-     where j.id=s.id
+       set state='skipped',leased_until=null,lease_owner=null,
+           last_error='opportunity_closed_before_document_processing',updated_at=now()
+      from stale_jobs s where j.id=s.id
      returning j.id
   `);
 
@@ -138,13 +106,19 @@ export async function GET(request: NextRequest) {
   const results: Array<{ path: string; status: number; ok: boolean; body: unknown }> = [];
   const startedAt = Date.now();
 
-  const extracts = await Promise.all([
+  // OCR is deliberately one-at-a-time because it is CPU/WASM heavy. Run it beside
+  // the regular extraction pool so image-only PDFs can drain without starving the
+  // high-throughput native-text path.
+  const firstWave = await Promise.all([
     capture(origin, "/api/documents/extract", secret),
     capture(origin, "/api/documents/extract", secret),
     capture(origin, "/api/documents/extract", secret),
     capture(origin, "/api/documents/extract", secret),
+    capture(origin, "/api/documents/ocr", secret),
   ]);
-  results.push(...extracts);
+  results.push(...firstWave);
+  const extracts = firstWave.filter(result => result.path === "/api/documents/extract");
+  const ocrWorkers = firstWave.filter(result => result.path === "/api/documents/ocr");
 
   if (Date.now() - startedAt < 240_000) {
     const analyses = await Promise.all([
@@ -156,31 +130,26 @@ export async function GET(request: NextRequest) {
     results.push(...analyses);
   }
 
-  // Emit compact production-state aggregates from the same database connection the
-  // workers use. This makes queue leaks and inert stages observable even when the
-  // external database console/API is unavailable, without exposing document data.
   const queueAudit = await sql.query(`
     select stage,state,count(*)::int as count
-    from document_jobs
-    group by stage,state
-    order by stage,state
+    from document_jobs group by stage,state order by stage,state
   `);
   const documentAudit = await sql.query(`
     select extraction_status,count(*)::int as count
-    from opportunity_documents
-    group by extraction_status
-    order by extraction_status
+    from opportunity_documents group by extraction_status order by extraction_status
   `);
   console.info("DOCUMENT_PIPELINE_AUDIT", { queueAudit, documentAudit });
 
   return NextResponse.json({
-    ok: results.length > 0 && results.every(result => result.ok),
+    ok: results.length > 0 && results.every(result => result.ok || result.status === 207),
     repairedExtractJobs: repairedExtractJobs.length,
     repairedAnalyzeJobs: repairedAnalyzeJobs.length,
     staleJobsSkipped: stale.length,
     steps: results.length,
     extractionWorkers: extracts.length,
     extractionFailures: extracts.filter(result => !result.ok).length,
+    ocrWorkers: ocrWorkers.length,
+    ocrFailures: ocrWorkers.filter(result => !result.ok && result.status !== 207).length,
     analysisWorkers: results.filter(result => result.path === "/api/documents/analyze-all").length,
     queueAudit,
     documentAudit,
