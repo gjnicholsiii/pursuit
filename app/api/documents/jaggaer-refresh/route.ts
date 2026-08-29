@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
        and lower(coalesce(d.filename,'')) like '%-event.pdf'
        and d.storage_key is null
        and coalesce(d.is_missing,false)=false
-       and o.status='open'
+       and o.status in ('open','active','posted')
        and (o.due_at is null or o.due_at>=now())
      order by case when j.state='dead' then 0 else 1 end,j.run_after asc,j.updated_at asc
      limit 1200`,
