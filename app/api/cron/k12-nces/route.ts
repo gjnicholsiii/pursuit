@@ -3,6 +3,7 @@ import { syncNcesDistrictBatch, STATE_FIPS } from "@/lib/k12/nces-districts";
 import { consolidateExactK12Duplicates, reclassifyClearlyNonLeas, repairNcesIdsFromDistrictUrls } from "@/lib/k12/repair-nces";
 import { reconcileExtendedNcesAliases } from "@/lib/k12/reconcile-extended-aliases";
 import { reconcileNcesAliasesByWebsiteHost } from "@/lib/k12/reconcile-website-hosts";
+import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,15 @@ type CleanupStep = {
   error?: string;
 };
 
+type RegistryAudit = {
+  k12_total: number;
+  with_nces_id: number;
+  missing_nces_id: number;
+  state_count: number;
+  duplicate_nces_ids: number;
+  duplicate_state_names: number;
+};
+
 async function runCleanupStep(name: string, fn: () => Promise<unknown>): Promise<CleanupStep> {
   try {
     return { ok: true, result: await fn() };
@@ -30,6 +40,49 @@ async function runCleanupStep(name: string, fn: () => Promise<unknown>): Promise
     console.error("NCES reconciliation cleanup failed", { step: name, error: message });
     return { ok: false, error: message };
   }
+}
+
+async function auditNationalRegistry(): Promise<RegistryAudit> {
+  const sql = getSql();
+  const rows = await sql.query(`
+    select
+      count(*)::int as k12_total,
+      count(*) filter (where nullif(trim(nces_id),'') is not null)::int as with_nces_id,
+      count(*) filter (where nullif(trim(nces_id),'') is null)::int as missing_nces_id,
+      count(distinct state_code) filter (where nullif(trim(state_code),'') is not null)::int as state_count,
+      (
+        select count(*)::int
+        from (
+          select nces_id
+          from agencies
+          where agency_type='k12' and nullif(trim(nces_id),'') is not null
+          group by nces_id
+          having count(*) > 1
+        ) duplicate_ids
+      ) as duplicate_nces_ids,
+      (
+        select count(*)::int
+        from (
+          select state_code, lower(trim(canonical_name)) as normalized_name
+          from agencies
+          where agency_type='k12'
+            and nullif(trim(state_code),'') is not null
+            and nullif(trim(canonical_name),'') is not null
+          group by state_code, lower(trim(canonical_name))
+          having count(*) > 1
+        ) duplicate_names
+      ) as duplicate_state_names
+    from agencies
+    where agency_type='k12'
+  `) as RegistryAudit[];
+  return rows[0] ?? {
+    k12_total: 0,
+    with_nces_id: 0,
+    missing_nces_id: 0,
+    state_count: 0,
+    duplicate_nces_ids: 0,
+    duplicate_state_names: 0,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -69,6 +122,14 @@ export async function GET(request: NextRequest) {
     const cleanupFailures = Object.entries(cleanup)
       .filter(([, value]) => !value.ok)
       .map(([step, value]) => ({ step, error: value.error }));
+    const registryAudit = await auditNationalRegistry();
+    const registryHealthy = registryAudit.duplicate_nces_ids === 0 && registryAudit.duplicate_state_names === 0;
+
+    console.info("NCES_REGISTRY_AUDIT", {
+      shard,
+      ...registryAudit,
+      registryHealthy,
+    });
 
     if (failures.length) {
       console.warn("NCES shard partial failure", {
@@ -80,13 +141,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: failures.length === 0,
-      partial: failures.length > 0 || cleanupFailures.length > 0,
+      partial: failures.length > 0 || cleanupFailures.length > 0 || !registryHealthy,
       shard,
       shardCount: SHARD_COUNT,
       states,
       cleanup,
       cleanupFailures,
       totals,
+      registryAudit,
+      registryHealthy,
       failures,
       results,
     }, { status: failures.length ? 207 : 200 });
