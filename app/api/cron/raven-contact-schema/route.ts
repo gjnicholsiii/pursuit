@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
       update raven_state_contacts c
       set full_name=$3,title=$4,email=$5,phone=$6,source_url=$7,verification_status='verified',verified_at=now(),evidence_note='Verified against current official Blount County Schools source.',updated_at=now()
       from agencies a
-      where c.agency_id=a.id and c.state_code='AL' and c.role_key=$2 and c.verification_status='missing'
+      where c.agency_id=a.id and c.state_code=$1 and c.role_key=$2 and c.verification_status='missing'
         and a.canonical_name ilike 'Blount County%'
     `, ['AL', role, fullName, title, email, phone, source]);
   }
