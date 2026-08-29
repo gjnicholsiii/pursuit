@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
       id bigserial primary key,
       state_code text not null,
       county text,
-      agency_id bigint references agencies(id) on delete set null,
+      agency_id uuid references agencies(id) on delete set null,
       scope text not null check (scope in ('state','county','district')),
       role_key text not null check (role_key in ('state_security_director','security_director','school_board','superintendent','assistant_superintendent','it_director')),
       full_name text,
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     )
   `);
 
-  await sql.query(`create unique index if not exists raven_state_contacts_unique_slot on raven_state_contacts(state_code,coalesce(county,''),coalesce(agency_id,0),scope,role_key,coalesce(lower(full_name),''))`);
+  await sql.query(`create unique index if not exists raven_state_contacts_unique_slot on raven_state_contacts(state_code,coalesce(county,''),coalesce(agency_id,'00000000-0000-0000-0000-000000000000'::uuid),scope,role_key,coalesce(lower(full_name),''))`);
   await sql.query(`create index if not exists raven_state_contacts_state_idx on raven_state_contacts(state_code,county,role_key,verification_status)`);
 
   await sql.query(`
