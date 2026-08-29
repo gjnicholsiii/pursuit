@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { getSql } from "@/lib/db";
+import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -81,7 +82,7 @@ async function recoverHtmlSource(row:Row){
 }
 
 export async function GET(request:NextRequest){
-  const secret=process.env.CRON_SECRET;if(!secret)return NextResponse.json({ok:false,error:"CRON_SECRET is not configured"},{status:503});if(request.headers.get("authorization")!==`Bearer ${secret}`)return NextResponse.json({ok:false,error:"Unauthorized"},{status:401});
+  const auth=requireInternalAuth(request);if(auth)return auth;
   const sql=getSql();
   const rows=await sql.query(`with candidates as(select o.id::text,o.external_id,o.source_url,s.adapter_key,o.raw_payload,row_number() over(partition by s.adapter_key order by case when (o.title||' '||coalesce(o.description,''))~*'(access control|video surveillance|security system|security camera|cctv|fire alarm|nurse call|low voltage|structured cabling|intrusion|audiovisual|av systems)' then 0 else 1 end,coalesce((o.raw_payload->>'pursuitPackageCheckedAt')::timestamptz,'epoch'::timestamptz),o.due_at asc nulls last) rn from opportunities o join sources s on s.id=o.source_id where o.status in('open','active','posted') and (o.due_at is null or o.due_at>=now()) and coalesce(o.raw_payload->>'pursuitPackageStatus','')<>'access_required' and s.adapter_key in('mfmp_vip_fl','peoplesoft_ca','peoplesoft_mn','peoplesoft_ks','cgi_advantage_mi','cgi_advantage_wv','cgi_advantage_ky','cgi_advantage_co','cgi_advantage_legacy_me','eva_vbo_va','hands_hi','south_carolina_scbo_sc','delaware_open_bids_de','esm_posting_board_sd','ivalua_app_az','powerpages_nc') and not exists(select 1 from opportunity_documents d where d.opportunity_id=o.id and coalesce(d.is_missing,false)=false)) select id,external_id,source_url,adapter_key,raw_payload from candidates where rn<=12 order by adapter_key,rn`) as Row[];
   const results=[] as Array<Record<string,unknown>>;
