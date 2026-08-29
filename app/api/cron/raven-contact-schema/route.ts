@@ -31,8 +31,6 @@ export async function GET(req: NextRequest) {
     )
   `);
 
-  // Older builds created a second row for a candidate/verified person beside the required
-  // role slot. Collapse each state/county/agency/role to exactly one review row first.
   await sql.query(`drop index if exists raven_state_contacts_unique_slot`);
   await sql.query(`
     with ranked as (
@@ -68,8 +66,6 @@ export async function GET(req: NextRequest) {
     on conflict do nothing
   `);
 
-  // Strict title matching only. Facilities, plant, maintenance, buildings/grounds,
-  // procurement, finance and generic operations are never candidates for this review list.
   const candidates = await sql.query(`
     with mapped as (
       select distinct on (a.id, role_key)
@@ -111,7 +107,6 @@ export async function GET(req: NextRequest) {
     `,[r.state_code,r.agency_id,r.role_key,r.full_name,r.title,r.email,r.phone,r.source_url]);
   }
 
-  // Current official-source verifications already completed for Blount County Schools.
   const verified = [
     ['Blount County','superintendent','Rodney Green','Superintendent, Blount County Schools','rgreen@blountboe.net','205-775-1950','https://www.blountboe.net/about-us/superintendent'],
     ['Blount County','assistant_superintendent','Christopher Lakey','Assistant Superintendent','clakey@blountboe.net','205-775-1950','https://www.blountboe.net/link-3'],
@@ -123,7 +118,7 @@ export async function GET(req: NextRequest) {
   for (const [county, role, fullName, title, email, phone, source] of verified) {
     await sql.query(`
       update raven_state_contacts c
-      set full_name=$4,title=$5,email=$6,phone=$7,source_url=$8,verification_status='verified',verified_at=now(),
+      set full_name=$3,title=$4,email=$5,phone=$6,source_url=$7,verification_status='verified',verified_at=now(),
           evidence_note='Verified against current official district source.',updated_at=now()
       from agencies a
       where c.agency_id=a.id and c.state_code='AL' and c.county=$1 and c.role_key=$2
