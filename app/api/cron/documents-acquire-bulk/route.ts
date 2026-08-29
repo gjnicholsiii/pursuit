@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -23,9 +24,11 @@ async function runAcquire(origin: string, secret: string, worker: number) {
 }
 
 export async function GET(request: NextRequest) {
+  const authError = requireInternalAuth(request);
+  if (authError) return authError;
+
   const secret = process.env.CRON_SECRET;
   if (!secret) return NextResponse.json({ ok: false, error: "CRON_SECRET is not configured" }, { status: 503 });
-  if (request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const origin = workerOrigin(request);
   // The child acquisition route already uses bounded concurrency and SKIP LOCKED.
