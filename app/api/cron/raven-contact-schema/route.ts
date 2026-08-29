@@ -112,7 +112,16 @@ export async function GET(req: NextRequest) {
     ['Blount County','assistant_superintendent','Christopher Lakey','Assistant Superintendent','clakey@blountboe.net','205-775-1950','https://www.blountboe.net/link-3'],
     ['Blount County','it_director','Brad Williams','Technology Director','bdwilliams@blountboe.net','205-775-1950','https://www.blountboe.net/departments/technology'],
     ['Blount County','security_director','Meagan Holt','Federal Programs Coordinator, EL/Migrant Coordinator, Safety Coordinator','mholt@blountboe.net','205-775-1950','https://www.blountboe.net/link-3'],
-    ['Blount County','school_board','Chris Latta','Board Member, President, District V',null,'205-775-1950','https://www.blountboe.net/about-us/school-board']
+    ['Blount County','school_board','Chris Latta','Board Member, President, District V',null,'205-775-1950','https://www.blountboe.net/about-us/school-board'],
+    ['Bullock County','superintendent','Sean C. Dees','Superintendent of Education',null,'334-513-1416','https://www.bullockco.org/about-us/superintendent'],
+    ['Bullock County','school_board','LaDerrick Caldwell','Board President',null,'334-513-1416','https://www.bullockco.org/about-us/board-of-education/board-members'],
+    ['Butler County','superintendent','Joseph Eiland','Superintendent','joe.eiland@butlerco.k12.al.us','334-382-2665','https://www.butlerco.k12.al.us/our-district/superintendents-message'],
+    ['Butler County','assistant_superintendent','Lisa Adair','Assistant Superintendent',null,'334-382-2665 ext 1219','https://www.butlerco.k12.al.us/'],
+    ['Butler County','it_director','Matthew Shell','Technology Director',null,'334-382-2665 ext 1411','https://www.butlerco.k12.al.us/departments/technology'],
+    ['Butler County','school_board','Michael Nimmer','Board Member - District 1',null,'334-382-2104','https://www.butlerco.k12.al.us/our-district/board-of-education'],
+    ['Calhoun County','superintendent','Tony Willis','Superintendent','twillis@ccboe.us','256-741-7400','https://www.calhouncountyschools.com/our-district/board-of-education'],
+    ['Calhoun County','school_board','Michael Webb','Board President','ccboewebb@gmail.com','256-741-7400','https://www.calhouncountyschools.com/our-district/board-of-education'],
+    ['Calhoun County','it_director','Lance Driskell','Technology Director','ldriskell@ccboe.us','256-741-7483','https://www.calhouncountyschools.com/departments/technology/staff']
   ] as const;
 
   for (const [county, role, fullName, title, email, phone, source] of verified) {
