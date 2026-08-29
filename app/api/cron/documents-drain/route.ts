@@ -156,6 +156,23 @@ export async function GET(request: NextRequest) {
     results.push(...analyses);
   }
 
+  // Emit compact production-state aggregates from the same database connection the
+  // workers use. This makes queue leaks and inert stages observable even when the
+  // external database console/API is unavailable, without exposing document data.
+  const queueAudit = await sql.query(`
+    select stage,state,count(*)::int as count
+    from document_jobs
+    group by stage,state
+    order by stage,state
+  `);
+  const documentAudit = await sql.query(`
+    select extraction_status,count(*)::int as count
+    from opportunity_documents
+    group by extraction_status
+    order by extraction_status
+  `);
+  console.info("DOCUMENT_PIPELINE_AUDIT", { queueAudit, documentAudit });
+
   return NextResponse.json({
     ok: results.length > 0 && results.every(result => result.ok),
     repairedExtractJobs: repairedExtractJobs.length,
@@ -165,6 +182,8 @@ export async function GET(request: NextRequest) {
     extractionWorkers: extracts.length,
     extractionFailures: extracts.filter(result => !result.ok).length,
     analysisWorkers: results.filter(result => result.path === "/api/documents/analyze-all").length,
+    queueAudit,
+    documentAudit,
     results,
   });
 }
