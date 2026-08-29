@@ -86,6 +86,24 @@ export async function GET(req: NextRequest) {
     on conflict do nothing
   `);
 
+  const verified = [
+    ['superintendent','Rodney Green','Superintendent, Blount County Schools','rgreen@blountboe.net','205-775-1950','https://www.blountboe.net/about-us/superintendent'],
+    ['assistant_superintendent','Christopher Lakey','Assistant Superintendent','clakey@blountboe.net','205-775-1950','https://www.blountboe.net/link-3'],
+    ['it_director','Brad Williams','Technology Director','bdwilliams@blountboe.net','205-775-1950','https://www.blountboe.net/departments/technology'],
+    ['security_director','Meagan Holt','Federal Programs Coordinator, EL/Migrant Coordinator, Safety Coordinator','mholt@blountboe.net','205-775-1950','https://www.blountboe.net/link-3'],
+    ['school_board','Chris Latta','Board Member, President, District V',null,'205-775-1950','https://www.blountboe.net/about-us/school-board']
+  ] as const;
+
+  for (const [role, fullName, title, email, phone, source] of verified) {
+    await sql.query(`
+      update raven_state_contacts c
+      set full_name=$3,title=$4,email=$5,phone=$6,source_url=$7,verification_status='verified',verified_at=now(),evidence_note='Verified against current official Blount County Schools source.',updated_at=now()
+      from agencies a
+      where c.agency_id=a.id and c.state_code='AL' and c.role_key=$2 and c.verification_status='missing'
+        and a.canonical_name ilike 'Blount County%'
+    `, ['AL', role, fullName, title, email, phone, source]);
+  }
+
   const rows = await sql.query(`
     select state_code,
       count(*)::int slots,
