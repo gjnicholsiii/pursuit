@@ -39,7 +39,7 @@ async function ensureReviewTable(sql: ReturnType<typeof getSql>) {
       and (a.jurisdiction_level='county' or a.canonical_name ilike '%county%')
     on conflict do nothing`);
   await sql.query(`insert into raven_state_contacts(state_code,county,agency_id,scope,role_key,verification_status)
-    select distinct a.state_code,null,null,'state','state_security_director','missing'
+    select distinct a.state_code,null::text,null::uuid,'state','state_security_director','missing'
     from agencies a where a.agency_type='k12' and a.state_code is not null
     on conflict do nothing`);
   await sql.query(`insert into raven_state_contacts(state_code,county,agency_id,scope,role_key,full_name,title,email,phone,source_url,verification_status,evidence_note)
