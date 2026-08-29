@@ -54,7 +54,7 @@ export async function GET(request:NextRequest){
     from opportunities o
     join sources s on s.id=o.source_id
     where s.adapter_key='ionwave_k12'
-      and o.status='open'
+      and o.status in ('open','active','posted')
       and (o.due_at is null or o.due_at>=now())
     order by case when exists(
                select 1 from opportunity_documents d
