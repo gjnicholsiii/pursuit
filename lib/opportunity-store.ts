@@ -238,6 +238,7 @@ const CURRENT_SLED_FILTER = `
   s.source_family = 'sled'
   and o.status = 'open'
   and (o.due_at is null or o.due_at >= now())
+  and not (lower(a.canonical_name) = 'sampleville' and lower(o.title) = 'pranjal testing crd')
 `;
 
 export async function getStoredFederalOpportunities(limit = 50): Promise<Opportunity[]> {
@@ -310,7 +311,7 @@ export async function getStoredFederalCount(): Promise<number> {
 }
 
 export async function getStoredSledCount(): Promise<number> {
-  return countWhere(CURRENT_SLED_FILTER);
+  return countWhere(CURRENT_SLED_FILTER, true);
 }
 
 export async function getStoredSledMarketCounts(): Promise<SledMarketCounts> {
