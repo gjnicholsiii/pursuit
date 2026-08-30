@@ -17,21 +17,39 @@ type FetchedRow = {
   priority: number;
 };
 
-async function readMagic(storageKey: string) {
+type PayloadKind = "pdf" | "zip" | "legacy_office" | "rtf" | "html" | "text_or_other" | "unavailable" | "empty";
+
+async function readMagic(storageKey: string): Promise<PayloadKind> {
   const blob = await get(storageKey, { access: "private" });
-  if (!blob || blob.statusCode !== 200 || !blob.stream) return "unavailable" as const;
+  if (!blob || blob.statusCode !== 200 || !blob.stream) return "unavailable";
   const reader = blob.stream.getReader();
   try {
     const { value } = await reader.read();
-    if (!value || value.length === 0) return "empty" as const;
-    const head = value.slice(0, 8);
-    const ascii = String.fromCharCode(...head);
-    if (ascii.startsWith("%PDF")) return "pdf" as const;
-    if (head[0] === 0x50 && head[1] === 0x4b) return "zip" as const;
-    return "other" as const;
+    if (!value || value.length === 0) return "empty";
+    const sample = value.slice(0, Math.min(value.length, 4096));
+    const ascii = new TextDecoder("latin1").decode(sample);
+    // Some public portals prepend whitespace/BOM-like bytes before a real PDF.
+    // Search a bounded prefix instead of requiring %PDF to be byte zero.
+    if (ascii.indexOf("%PDF") >= 0 && ascii.indexOf("%PDF") < 1024) return "pdf";
+    if (sample[0] === 0x50 && sample[1] === 0x4b) return "zip";
+    if (sample.length >= 8 && sample[0] === 0xd0 && sample[1] === 0xcf && sample[2] === 0x11 && sample[3] === 0xe0 && sample[4] === 0xa1 && sample[5] === 0xb1 && sample[6] === 0x1a && sample[7] === 0xe1) return "legacy_office";
+    const trimmed = ascii.replace(/^\uFEFF/, "").trimStart().toLowerCase();
+    if (trimmed.startsWith("{\\rtf")) return "rtf";
+    if (trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html") || trimmed.startsWith("<head") || trimmed.startsWith("<body")) return "html";
+    return "text_or_other";
   } finally {
     try { await reader.cancel(); } catch {}
   }
+}
+
+async function markExternal(row: FetchedRow, kind: PayloadKind) {
+  await getSql().query(
+    `update opportunity_documents
+        set extraction_status='external_processing_required'
+      where id=$1::uuid and extraction_status='fetched'`,
+    [row.id]
+  );
+  return { kind, queued: false, externalized: true };
 }
 
 async function reconcileOne(row: FetchedRow) {
@@ -58,22 +76,18 @@ async function reconcileOne(row: FetchedRow) {
                updated_at=now()`,
         [row.id, row.host_class || "other", row.priority ?? 100]
       );
-      return { kind, queued: true };
+      return { kind, queued: true, externalized: false };
     }
 
-    if (kind === "zip" && /\.(docx|xlsx|pptx|zip)$/i.test(row.filename || "")) {
-      await sql.query(
-        `update opportunity_documents
-            set extraction_status='external_processing_required'
-          where id=$1::uuid and extraction_status='fetched'`,
-        [row.id]
-      );
-      return { kind: "office_archive", queued: false };
-    }
+    // The native extractor is intentionally PDF-only. Any verified non-PDF payload
+    // must leave the fetched queue instead of being rescanned forever. This includes
+    // modern Office ZIP containers, legacy OLE Office files, RTF, HTML returned by a
+    // portal download endpoint, and text/unknown binary attachments.
+    if (kind !== "unavailable") return markExternal(row, kind);
 
-    return { kind, queued: false };
+    return { kind, queued: false, externalized: false };
   } catch (error) {
-    return { kind: "error", queued: false, error: error instanceof Error ? error.message : "reconcile_failed" };
+    return { kind: "error", queued: false, externalized: false, error: error instanceof Error ? error.message : "reconcile_failed" };
   }
 }
 
@@ -106,7 +120,7 @@ export async function GET(request: NextRequest) {
       limit ${BATCH_SIZE}`
   ) as FetchedRow[];
 
-  const results: Array<{ kind: string; queued: boolean; error?: string }> = [];
+  const results: Array<{ kind: string; queued: boolean; externalized: boolean; error?: string }> = [];
   for (let i = 0; i < rows.length; i += CONCURRENCY) {
     results.push(...await Promise.all(rows.slice(i, i + CONCURRENCY).map(reconcileOne)));
   }
@@ -116,8 +130,9 @@ export async function GET(request: NextRequest) {
     return acc;
   }, {});
   const queued = results.filter(result => result.queued).length;
+  const externalized = results.filter(result => result.externalized).length;
   const errors = results.filter(result => result.kind === "error").length;
 
-  console.info("DOCUMENT_FETCHED_RECONCILE", { scanned: rows.length, queued, errors, summary });
-  return NextResponse.json({ ok: errors === 0, scanned: rows.length, queued, errors, summary });
+  console.info("DOCUMENT_FETCHED_RECONCILE", { scanned: rows.length, queued, externalized, errors, summary });
+  return NextResponse.json({ ok: errors === 0, scanned: rows.length, queued, externalized, errors, summary });
 }
