@@ -12,7 +12,6 @@
     "app/api/cron/raven-schools-fast/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/raven-higher-ed-fast/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/raven-campus-outreach/route.ts": { "memory": 3009, "maxDuration": 300 },
-    "app/api/cron/raven-contact-schema/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/documents/acquire/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/documents-drain/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/k12-portal-discovery/route.ts": { "memory": 3009, "maxDuration": 300 }
