@@ -15,6 +15,7 @@
     "app/api/documents/acquire/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/documents-drain/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/document-fetched-reconcile/route.ts": { "memory": 3009, "maxDuration": 300 },
+    "app/api/cron/document-external-process/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/k12-portal-discovery/route.ts": { "memory": 3009, "maxDuration": 300 }
   },
   "crons": [
@@ -48,6 +49,7 @@
     { "path": "/api/cron/documents-acquire-bulk", "schedule": "* * * * *" },
     { "path": "/api/cron/documents-acquire-large", "schedule": "5,15,25,35,45,55 * * * *" },
     { "path": "/api/cron/document-fetched-reconcile", "schedule": "*/2 * * * *" },
+    { "path": "/api/cron/document-external-process", "schedule": "*/2 * * * *" },
     { "path": "/api/cron/documents-drain", "schedule": "* * * * *" }
   ]
 }
