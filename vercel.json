@@ -46,6 +46,7 @@
     { "path": "/api/cron/periscope-recover", "schedule": "4,14,24,34,44,54 * * * *" },
     { "path": "/api/cron/documents-acquire-bulk", "schedule": "* * * * *" },
     { "path": "/api/cron/documents-acquire-large", "schedule": "5,15,25,35,45,55 * * * *" },
-    { "path": "/api/cron/documents-drain", "schedule": "* * * * *" }
+    { "path": "/api/cron/documents-drain", "schedule": "* * * * *" },
+    { "path": "/api/cron/raven-alabama-ingest", "schedule": "* * * * *" }
   ]
 }
