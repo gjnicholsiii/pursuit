@@ -50,6 +50,7 @@
     { "path": "/api/cron/documents-acquire-large", "schedule": "5,15,25,35,45,55 * * * *" },
     { "path": "/api/cron/document-fetched-reconcile", "schedule": "*/2 * * * *" },
     { "path": "/api/cron/document-external-process", "schedule": "*/2 * * * *" },
-    { "path": "/api/cron/documents-drain", "schedule": "* * * * *" }
+    { "path": "/api/cron/documents-drain", "schedule": "* * * * *" },
+    { "path": "/api/cron/raven-alabama-seed", "schedule": "*/10 * * * *" }
   ]
 }
