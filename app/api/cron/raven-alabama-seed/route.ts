@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   const results: any[] = [];
 
   for (const c of contacts) {
-    const agencies = await sql.query(`select id::bigint id,canonical_name from agencies where state_code=$1 and agency_type='k12' and (canonical_name ilike $2 or coalesce(county,'') ilike $3) order by case when canonical_name ilike $2 then 0 else 1 end limit 1`, [c.state_code, `%${c.agency}%`, `%${c.county}%`]) as any[];
+    const agencies = await sql.query(`select id::text id,canonical_name from agencies where state_code=$1 and agency_type='k12' and (canonical_name ilike $2 or coalesce(county,'') ilike $3) order by case when canonical_name ilike $2 then 0 else 1 end limit 1`, [c.state_code, `%${c.agency}%`, `%${c.county}%`]) as any[];
     const agencyId = agencies[0]?.id || null;
 
     const existing = await sql.query(`select id from raven_state_contacts where state_code=$1 and county=$2 and role_key=$3 and (agency_id=$4 or ($4 is null and agency_id is null)) and verification_status in ('missing','candidate') order by case when verification_status='missing' then 0 else 1 end,id limit 1`, [c.state_code,c.county,c.role_key,agencyId]) as any[];
