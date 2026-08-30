@@ -32,12 +32,12 @@ export async function GET(req: NextRequest) {
   `, [state]) as any[];
 
   const incomplete = await sql.query(`
-    select coalesce(county,'STATE') county, coalesce(a.canonical_name,'State-level') organization, role_key, verification_status,
-      full_name, title
+    select coalesce(c.county,'STATE') county, coalesce(a.canonical_name,'State-level') organization, c.role_key, c.verification_status,
+      c.full_name, c.title
     from raven_state_contacts c
     left join agencies a on a.id=c.agency_id
     where c.state_code=$1 and c.verification_status<>'verified'
-    order by coalesce(county,''), organization, role_key, verification_status
+    order by coalesce(c.county,''), organization, c.role_key, c.verification_status
   `, [state]) as any[];
 
   const snapshot = { state, ...counts[0], byRole, incomplete };
