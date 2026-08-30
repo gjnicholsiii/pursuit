@@ -31,7 +31,7 @@
     { "path": "/api/cron/state-heavy-secondary", "schedule": "15,45 * * * *" },
     { "path": "/api/cron/k12-nces", "schedule": "*/5 * * * *" },
     { "path": "/api/ingest/ionwave", "schedule": "6,21,36,51 * * * *" },
-    { "path": "/api/cron/k12-portal-discovery", "schedule": "3,13,23,33,43,53 * * * *" },
+    { "path": "/api/cron/k12-portal-discovery", "schedule": "3,8,13,18,23,28,33,38,43,48,53,58 * * * *" },
     { "path": "/api/cron/raven-k12", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/raven-campus-outreach", "schedule": "* * * * *" },
     { "path": "/api/cron/raven-higher-ed", "schedule": "15 8 * * *" },
