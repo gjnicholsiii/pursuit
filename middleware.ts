@@ -11,6 +11,7 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/api/cron/:path*",
     "/api/documents/acquire",
     "/api/documents/analyze-all",
     "/api/documents/analyze",
