@@ -12,6 +12,7 @@
     "app/api/cron/raven-schools-fast/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/raven-higher-ed-fast/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/raven-campus-outreach/route.ts": { "memory": 3009, "maxDuration": 300 },
+    "app/api/cron/raven-contact-schema/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/documents/acquire/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/documents-drain/route.ts": { "memory": 3009, "maxDuration": 300 },
     "app/api/cron/k12-portal-discovery/route.ts": { "memory": 3009, "maxDuration": 300 }
@@ -31,6 +32,7 @@
     { "path": "/api/ingest/ionwave", "schedule": "6,21,36,51 * * * *" },
     { "path": "/api/cron/k12-portal-discovery", "schedule": "3,13,23,33,43,53 * * * *" },
     { "path": "/api/cron/raven-k12", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/raven-contact-schema", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/raven-campus-outreach", "schedule": "* * * * *" },
     { "path": "/api/cron/raven-higher-ed", "schedule": "15 8 * * *" },
     { "path": "/api/cron/raven-higher-ed-fast", "schedule": "7,27,47 * * * *" },
