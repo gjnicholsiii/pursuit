@@ -60,9 +60,14 @@ async function scanAgency(agency:Agency){ const seed=safeUrl(agency.website); if
 function ionWavePortalFromHit(hit:PortalHit):IonWavePortal|null{const u=safeUrl(hit.url);if(!u||!/ionwave\.net$/i.test(u.hostname)||!hit.agency.state_code)return null;return{key:`${u.hostname.replace(/\.ionwave\.net$/i,"").replace(/[^a-z0-9]+/gi,"_")}_${hit.agency.state_code.toLowerCase()}`,agencyName:hit.agency.canonical_name,baseUrl:`${u.protocol}//${u.hostname}`,stateCode:hit.agency.state_code.trim(),city:hit.agency.city||undefined,county:hit.agency.county||undefined};}
 
 export async function GET(request:NextRequest){
-  const auth=requireInternalAuth(request); if(auth)return auth; const sql=getSql(); const shardCount=120; const shard=Math.floor(Date.now()/60000)%shardCount;
+  const auth=requireInternalAuth(request); if(auth)return auth;
+  const sql=getSql();
+  const shardCount=240;
+  const slotMs=5*60*1000;
+  const shard=Math.floor(Date.now()/slotMs)%shardCount;
   const rows=await sql.query(`select id::text, canonical_name, state_code::text, city, county, website from agencies where agency_type='k12' and website is not null and website<>'' and mod(abs(hashtextextended(id::text,0)), $1::bigint)=$2::bigint order by canonical_name`,[shardCount,shard]) as Agency[];
-  const scanned:Awaited<ReturnType<typeof scanAgency>>[]=[]; for(let i=0;i<rows.length;i+=16)scanned.push(...await Promise.all(rows.slice(i,i+16).map(scanAgency)));
+  const scanned:Awaited<ReturnType<typeof scanAgency>>[]=[];
+  for(let i=0;i<rows.length;i+=12) scanned.push(...await Promise.all(rows.slice(i,i+12).map(scanAgency)));
   const hits=scanned.flatMap(r=>r.hits); const directRecords=[...new Map(scanned.flatMap(r=>r.direct).map(r=>[r.externalId,r])).values()]; let directStored=0; if(directRecords.length){const p=await persistSledOpportunities(DIRECT_K12_SOURCE,directRecords,{mode:"k12-direct-web",recordChanges:false,closeMissing:false});directStored=p.stored;}
   const ionwave=[...new Map(hits.filter(h=>h.platform==="ionwave").map(ionWavePortalFromHit).filter((p):p is IonWavePortal=>Boolean(p)).map(p=>[p.baseUrl,p])).values()]; let ionwaveStored=0; const ionwaveDiagnostics:Array<Record<string,unknown>>=[];
   for(let i=0;i<ionwave.length;i+=4){const results=await Promise.all(ionwave.slice(i,i+4).map(async portal=>{try{const opportunities=await discoverIonWavePortal(portal);const persisted=await persistSledOpportunities(IONWAVE_SOURCE,opportunities,{mode:"k12-portal-discovery",recordChanges:false,closeMissing:false});return{portal:portal.baseUrl,ok:true,discovered:opportunities.length,stored:persisted.stored};}catch(error){return{portal:portal.baseUrl,ok:false,error:error instanceof Error?error.message:String(error)};}})); for(const r of results){ionwaveDiagnostics.push(r);if(r.ok)ionwaveStored+=Number(r.stored||0);}}
