@@ -238,7 +238,7 @@ const CURRENT_SLED_FILTER = `
   s.source_family = 'sled'
   and o.status = 'open'
   and (o.due_at is null or o.due_at >= now())
-  and not (lower(a.canonical_name) = 'sampleville' and lower(o.title) = 'pranjal testing crd')
+  and lower(a.canonical_name) <> 'sampleville'
 `;
 
 export async function getStoredFederalOpportunities(limit = 50): Promise<Opportunity[]> {
