@@ -6,79 +6,171 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+const FETCH_TIMEOUT_MS = 8_000;
+const RUN_BUDGET_MS = 165_000;
+const MAX_CANDIDATES = 24;
+const CONCURRENCY = 4;
+
 const BANNED = /\b(facilit(?:y|ies)|plant|maintenance|buildings?\s*(?:&|and)\s*grounds|procurement|purchasing|finance|financial|principal|teacher|operations?|transportation|food service|human resources|\bhr\b)\b/i;
+const SECURITY = /\b(?:director|chief|executive director|senior director|associate superintendent|program coordinator)\b.{0,80}\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b|\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b.{0,80}\b(?:director|chief|executive director|senior director|associate superintendent|program coordinator)\b/i;
 const STRICT: Record<string, RegExp> = {
-  security_director: /\b(?:director|chief|executive director|senior director)\b.{0,60}\b(?:security|school safety|public safety|safety and security|security and safety|emergency management)\b|\b(?:security|school safety|public safety|safety and security|security and safety|emergency management)\b.{0,60}\b(?:director|chief|executive director|senior director)\b/i,
+  state_security_director: SECURITY,
+  security_director: SECURITY,
   superintendent: /^((?!assistant|deputy|associate).)*\bsuperintendent\b/i,
   assistant_superintendent: /\b(?:assistant|asst\.?)\s+superintendent\b/i,
   it_director: /\b(?:director|executive director|chief information officer|chief technology officer|cio|cto)\b.{0,60}\b(?:information technology|technology|information systems|it services|network services|tech infrastructure|cybersecurity)\b|\b(?:information technology|technology|information systems|it services|network services|tech infrastructure|cybersecurity)\b.{0,60}\b(?:director|chief information officer|chief technology officer|cio|cto)\b/i,
   school_board: /\b(?:school\s+|governing\s+)?board\s+(?:member|chair|chairman|chairwoman|president|vice president|trustee|clerk)\b|\bboard trustee\b/i,
 };
 
-type Seed = readonly [string,string|null,'state'|'district','state_security_director'|'security_director'|'superintendent'|'assistant_superintendent'|'it_director'|'school_board',string,string,string|null,string|null,string,string];
+function norm(v: string) {
+  return v.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function host(v: string | null) {
+  if (!v) return "";
+  try {
+    return new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+function relatedHost(a: string, b: string) {
+  return !!a && !!b && (a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`));
+}
+async function fetchText(url: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      redirect: "follow",
+      cache: "no-store",
+      signal: controller.signal,
+      headers: {
+        "user-agent": "Mozilla/5.0 (compatible; Pursuit-Raven-Verifier/1.0; public-contact-verification)",
+        accept: "text/html,application/xhtml+xml,text/plain;q=0.9",
+      },
+    });
+    if (!response.ok) return null;
+    const type = (response.headers.get("content-type") || "").toLowerCase();
+    if (!type.includes("html") && !type.includes("text")) return null;
+    const body = await response.text();
+    return { text: norm(cheerio.load(body)("body").text()), finalUrl: response.url || url };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-const seeds: readonly Seed[] = [
-  ['AL','Blount','district','superintendent','Rodney Green','Superintendent','rgreen@blountboe.net','205-775-1950','https://www.blountboe.net/link-3','Official Blount County Schools directory lists Rodney Green as Superintendent with direct district email.'],
-  ['AL','Blount','district','assistant_superintendent','Christopher Lakey','Assistant Superintendent','clakey@blountboe.net','205-775-1950','https://www.blountboe.net/link-3','Official Blount County Schools directory lists Christopher Lakey as Assistant Superintendent with direct district email.'],
-  ['AL','Blount','district','it_director','Brad Williams','Technology Director','bdwilliams@blountboe.net','205-775-1950','https://www.blountboe.net/departments/technology','Official Blount County Schools Technology page lists Brad Williams as Technology Director with direct district email.'],
-  ['AL','Blount','district','school_board','Chris Latta','Board Member, President, District V',null,'205-775-1950','https://www.blountboe.net/about-us/school-board','Official Blount County Schools School Board page lists Chris Latta as Board Member and President; no individual email published on cited page.'],
+export async function GET(req: NextRequest) {
+  const auth = requireInternalAuth(req);
+  if (auth) return auth;
 
-  ['AK',null,'state','state_security_director','Pat Sidmore','Program Coordinator II — School Health and School Emergency Management',null,'907-465-2939','https://education.alaska.gov/safeschools/safeandemerg','Alaska DEED School Safety and Emergency Management page identifies Pat Sidmore as Program Coordinator II and contact for school emergency management.'],
-  ['AK','Anchorage Municipality','district','superintendent','Dr. Jharrett Bryantt','Superintendent','officeofthesuperintendent@asdk12.org','907-742-4312','https://www.asdk12.org/aboutasd/superintendent','Official Anchorage School District superintendent page identifies Dr. Jharrett Bryantt and publishes office email and phone.'],
-  ['AK','Anchorage Municipality','district','security_director','Jared Woody','Senior Director, Emergency Management','woody_jared@asdk12.org','907-744-4476','https://www.asdk12.org/departments/support-services/security-emergency-management/welcome/overview-and-services','Official Anchorage School District Emergency Management page identifies Jared Woody as Senior Director and publishes direct district email and phone.'],
-  ['AK','Anchorage Municipality','district','it_director','Mike Fleckenstein','Chief Information Officer',null,'907-742-1584','https://www.asdk12.org/departments/information-technology','Official Anchorage School District IT page identifies Mike Fleckenstein as Chief Information Officer and publishes phone; no direct personal email on cited page.'],
-  ['AK','Anchorage Municipality','district','school_board','Carl Jacobs','School Board President','jacobs_carl@asdk12.org','907-742-1101 ext. 5','https://www.asdk12.org/school-board/board-members','Official Anchorage School District Board Members page identifies Carl Jacobs as School Board President and publishes individual district email and phone extension.'],
-  ['AK','Juneau City and Borough','district','superintendent','Shawn Arnold','Superintendent of Schools',null,'907-523-1700','https://www.juneauschools.org/en-US','Official Juneau School District page identifies Shawn Arnold as Superintendent of Schools and publishes district office phone.'],
-  ['AK','Juneau City and Borough','district','school_board','Juneau Board of Education','Board of Education','schoolboard@juneauschools.org','907-523-1700','https://www.juneauschools.org/en-US','Official Juneau School District page publishes the Board of Education group email and district office phone.'],
-  ['AK','Fairbanks North Star Borough','district','superintendent','Dr. Luke Meinert','Superintendent','superintendent@k12northstar.org','907-452-2000 ext. 11401','https://www.k12northstar.org/about/superintendent','Official FNSBSD superintendent page identifies Dr. Luke Meinert and publishes superintendent email and phone.'],
-  ['AK','Fairbanks North Star Borough','district','assistant_superintendent','Sarah Gillam','Assistant Superintendent, Secondary','sarah.gillam@k12northstar.org','907-452-2000 ext. 11411','https://www.k12northstar.org/about/assistant-superintendents','Official FNSBSD Assistant Superintendents page identifies Sarah Gillam and publishes direct email and phone.'],
-  ['AK','Fairbanks North Star Borough','district','it_director','Chris Rose','Director of Network Services','chris.rose@k12northstar.org','907-452-2000 ext. 11285','https://www.k12northstar.org/departments/technology/network-computer-services','Official FNSBSD technology page identifies Chris Rose as Director of Network Services and publishes direct email and phone.'],
-  ['AK','Fairbanks North Star Borough','district','school_board','Robert Burgess','School Board President','robert.burgess@k12northstar.org','907-799-7549','https://www.k12northstar.org/school-board/board-members','Official FNSBSD Board Members page identifies Robert Burgess as School Board President and publishes direct email and phone.'],
+  const started = Date.now();
+  const sql = getSql();
+  let verified = 0;
+  let rejected = 0;
+  let unchanged = 0;
 
-  ['AZ',null,'state','state_security_director','Mike Kurtenbach','Associate Superintendent, School Safety Division',null,null,'https://www.azed.gov/sites/default/files/2025/07/FY26%20SSP%20Manual%20for%20SRO%2C%20SSO%20%26%20JPO%20schools.pdf','Current Arizona Department of Education School Safety Program materials identify Mike Kurtenbach as Associate Superintendent, School Safety Division. No direct email or phone is published in the cited material.'],
-  ['AZ','Maricopa','district','superintendent','Dr. Jared Ryan','Superintendent',null,'480-497-3300','https://www.gilbertschools.net/contact','Current Gilbert Public Schools directory identifies Dr. Jared Ryan as Superintendent.'],
-  ['AZ','Maricopa','district','assistant_superintendent','Dr. Jason Martin','Assistant Superintendent - Elementary Schools',null,'480-497-3300','https://www.gilbertschools.net/contact','Current Gilbert Public Schools directory identifies Dr. Jason Martin as Assistant Superintendent - Elementary Schools.'],
-  ['AZ','Maricopa','district','security_director','Carrie Soderman','Director - Safety and Security','gpssecurity@gilbertschools.net','480-497-3165','https://www.gilbertschools.net/families/safety-security','Current Gilbert Public Schools Safety & Security page identifies Carrie Soderman as Director - Safety and Security and publishes the department email and phone.'],
-  ['AZ','Maricopa','district','it_director','Jon Castelhano','Chief Technology Officer',null,'480-497-3300','https://www.gilbertschools.net/contact','Current Gilbert Public Schools staff directory identifies Jon Castelhano as Chief Technology Officer.'],
-  ['AZ','Maricopa','district','school_board','Chad Thompson','Board President','board@gilbertschools.net','480-497-3397','https://www.gilbertschools.net/about/governing-board-superintendent','Current Gilbert Public Schools Governing Board page identifies Chad Thompson as Board President and publishes board email and phone.'],
-  ['AZ','Pima','district','superintendent','Dr. Gabriel Trujillo','Superintendent',null,'520-225-6060','https://www.tusd1.org/Information/Superintendent','Current Tucson Unified superintendent page identifies Dr. Gabriel Trujillo as Superintendent and publishes office phone; no direct personal email is exposed on the cited page.'],
-  ['AZ','Pima','district','assistant_superintendent','Dr. Flori Huitt','Assistant Superintendent',null,'520-225-6282','https://www.tusd1.org/article-LGBTQIA-Resources-TUSD','Current Tucson Unified official page identifies Dr. Flori Huitt as Assistant Superintendent and publishes phone; no direct personal email is exposed on the cited page.'],
-  ['AZ','Pima','district','security_director','Joseph Hallums','Director of School Safety',null,'520-584-7676','https://www.tusd1.org/school-safety','Current Tucson Unified School Safety page identifies Joseph Hallums as Director and publishes the department phone; no direct personal email is exposed on the cited page.'],
-  ['AZ','Pima','district','it_director','Rabih K. Hamadeh','Executive Director, Technology Services',null,'520-225-6262','https://www.tusd1.org/technology-services','Current Tucson Unified Technology Services page identifies Rabih K. Hamadeh as Executive Director and publishes department phone; no direct personal email is exposed on the cited page.'],
-  ['AZ','Pima','district','school_board','Dr. Ravi Shah','Governing Board President','governingboard@tusd1.org','520-225-6070','https://govboard.tusd1.org/Meetings/Agenda-Items','Current Tucson Unified Governing Board page identifies Dr. Ravi Shah as Board President and publishes the board contact email and phone.'],
+  const removed = (await sql.query(`
+    delete from raven_state_contacts m
+    where m.verification_status='missing'
+      and m.full_name is null
+      and exists (
+        select 1 from raven_state_contacts x
+        where x.id<>m.id
+          and x.state_code=m.state_code
+          and regexp_replace(lower(coalesce(x.county,'')),'\\s+(county|municipality|city and borough|borough)$','')=
+              regexp_replace(lower(coalesce(m.county,'')),'\\s+(county|municipality|city and borough|borough)$','')
+          and x.scope=m.scope
+          and x.role_key=m.role_key
+          and x.verification_status in ('candidate','verified')
+          and x.full_name is not null
+      )
+    returning id
+  `)) as any[];
 
-  ['AR',null,'state','state_security_director','Jerry Keefer','Director, Safe Schools Unit','jerry.keefer@ade.arkansas.gov','501-683-5266','https://dese.ade.arkansas.gov/Offices/District-Operations/school-safety','Current Arkansas DESE School Safety page identifies Jerry Keefer as Director of the Safe Schools Unit and publishes direct email and phone.'],
-  ['AR','Pulaski','district','superintendent','Jeff Senn','Superintendent','jsenn@pcssd.org','501-234-2001','https://www.pcssd.org/page/report-a-concern','Current PCSSD Report a Concern page identifies Jeff Senn as Superintendent and publishes direct district email; current staff directory publishes phone.'],
-  ['AR','Pulaski','district','assistant_superintendent','Dr. Janice Warren','Assistant Superintendent for Student Services','jwarren@pcssd.org','501-234-2015','https://www.pcssd.org/page/report-a-concern','Current PCSSD Report a Concern and staff pages identify Dr. Janice Warren as Assistant Superintendent for Student Services and publish direct email and phone.'],
-  ['AR','Pulaski','district','it_director','Scott Young','Director of Technology',null,null,'https://www.pcssd.org/article/2213503','Official PCSSD article identifies Scott Young as incumbent Director of Technology. Direct email and phone were not published in the cited source.'],
-  ['AR','Pulaski','district','school_board','Stephen Delaney','Board President','sdelaney@pcssd.org',null,'https://www.pcssd.org/page/meet-our-board','Current PCSSD Board page identifies Stephen Delaney as Board President and publishes direct district email.']
-];
+  const candidates = (await sql.query(`
+    select c.id::text,c.state_code,c.role_key,c.full_name,c.title,c.source_url,a.website agency_website
+    from raven_state_contacts c
+    left join agencies a on a.id=c.agency_id
+    where c.verification_status='candidate'
+      and c.full_name is not null
+      and c.title is not null
+      and c.source_url is not null
+    order by c.updated_at asc nulls first,c.state_code,c.id
+    limit $1
+  `, [MAX_CANDIDATES])) as any[];
 
-function norm(v:string){return v.toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();}
-function host(v:string|null){if(!v)return'';try{return new URL(/^https?:\/\//i.test(v)?v:`https://${v}`).hostname.toLowerCase().replace(/^www\./,'');}catch{return'';}}
-function relatedHost(a:string,b:string){return !!a&&!!b&&(a===b||a.endsWith(`.${b}`)||b.endsWith(`.${a}`));}
-async function fetchText(url:string){const c=new AbortController();const t=setTimeout(()=>c.abort(),12000);try{const r=await fetch(url,{redirect:'follow',cache:'no-store',signal:c.signal,headers:{'user-agent':'Mozilla/5.0 (compatible; Pursuit-Raven-Verifier/1.0; public-contact-verification)',accept:'text/html,application/xhtml+xml'}});if(!r.ok)return null;const type=(r.headers.get('content-type')||'').toLowerCase();if(!type.includes('html')&&!type.includes('text'))return null;return{text:norm(cheerio.load(await r.text())('body').text()),finalUrl:r.url||url};}catch{return null;}finally{clearTimeout(t);}}
+  async function verify(row: any) {
+    if (Date.now() - started > RUN_BUDGET_MS) return;
+    const title = String(row.title || "");
+    const rule = STRICT[String(row.role_key)] || null;
+    if (!rule || BANNED.test(title) || !rule.test(title)) {
+      await sql.query(
+        `update raven_state_contacts set verification_status='rejected',evidence_note=$2,updated_at=now() where id=$1 and verification_status='candidate'`,
+        [row.id, "Rejected by strict outreach-role verifier; title is outside approved school-security contact roles."]
+      );
+      rejected++;
+      return;
+    }
 
-export async function GET(req:NextRequest){
-  const auth=requireInternalAuth(req);if(auth)return auth;const sql=getSql();
-  let seeded=0;
-  for(const r of seeds){
-    const [state,county,scope,role,name,title,email,phone,url,note]=r;
-    const existing=await sql.query(`select id from raven_state_contacts where state_code=$1 and regexp_replace(lower(coalesce(county,'')),'\\s+(county|municipality|city and borough|borough)$','')=regexp_replace(lower(coalesce($2,'')),'\\s+(county|municipality|city and borough|borough)$','') and scope=$3 and role_key=$4 order by case when verification_status='verified' then 0 else 1 end,id limit 1`,[state,county,scope,role]) as any[];
-    if(existing.length){await sql.query(`update raven_state_contacts set full_name=$1,title=$2,email=$3,phone=$4,source_url=$5,verification_status='verified',verified_at=now(),evidence_note=$6,updated_at=now() where id=$7`,[name,title,email,phone,url,note,existing[0].id]);}
-    else {await sql.query(`insert into raven_state_contacts(state_code,county,scope,role_key,full_name,title,email,phone,source_url,verification_status,verified_at,evidence_note) values($1,$2,$3,$4,$5,$6,$7,$8,$9,'verified',now(),$10)`,[state,county,scope,role,name,title,email,phone,url,note]);}
-    seeded++;
+    const sourceHost = host(String(row.source_url));
+    const agencyHost = host(row.agency_website ? String(row.agency_website) : null);
+    if (agencyHost && !relatedHost(sourceHost, agencyHost)) {
+      unchanged++;
+      return;
+    }
+
+    const page = await fetchText(String(row.source_url));
+    if (!page) {
+      unchanged++;
+      return;
+    }
+    const finalHost = host(page.finalUrl);
+    if (agencyHost && !relatedHost(finalHost, agencyHost)) {
+      unchanged++;
+      return;
+    }
+
+    const person = norm(String(row.full_name));
+    const normalizedTitle = norm(title);
+    const nameOk = person.length >= 5 && page.text.includes(person);
+    const titleOk = normalizedTitle.length >= 4 && page.text.includes(normalizedTitle);
+    if (nameOk && titleOk) {
+      await sql.query(
+        `update raven_state_contacts set verification_status='verified',verified_at=now(),evidence_note='Live official organization page revalidated: exact person and title present.',updated_at=now() where id=$1 and verification_status='candidate'`,
+        [row.id]
+      );
+      verified++;
+    } else {
+      unchanged++;
+    }
   }
 
-  const removed=await sql.query(`delete from raven_state_contacts m where m.verification_status='missing' and m.full_name is null and exists(select 1 from raven_state_contacts x where x.id<>m.id and x.state_code=m.state_code and regexp_replace(lower(coalesce(x.county,'')),'\\s+(county|municipality|city and borough|borough)$','')=regexp_replace(lower(coalesce(m.county,'')),'\\s+(county|municipality|city and borough|borough)$','') and x.scope=m.scope and x.role_key=m.role_key and x.verification_status in ('candidate','verified') and x.full_name is not null) returning id`) as any[];
-
-  const states=await sql.query(`select state_code from raven_state_contacts group by state_code having count(*) filter(where verification_status in ('missing','candidate'))>0 order by state_code limit 4`) as any[];
-  let verified=0,rejected=0,unchanged=0;
-  for(const s of states){
-    const state=String(s.state_code);
-    const candidates=await sql.query(`select c.id::text,c.role_key,c.full_name,c.title,c.source_url,a.website agency_website from raven_state_contacts c left join agencies a on a.id=c.agency_id where c.state_code=$1 and c.verification_status='candidate' and c.full_name is not null and c.title is not null and c.source_url is not null order by c.updated_at asc,c.id limit 32`,[state]) as any[];
-    for(const row of candidates){const title=String(row.title||'');const rule=STRICT[String(row.role_key)]||null;if(!rule||BANNED.test(title)||!rule.test(title)){await sql.query(`update raven_state_contacts set verification_status='rejected',evidence_note=$2,updated_at=now() where id=$1`,[row.id,'Rejected by strict outreach-role verifier; title is outside approved school-security contact roles.']);rejected++;continue;}const sourceHost=host(String(row.source_url));const agencyHost=host(row.agency_website?String(row.agency_website):null);if(agencyHost&&!relatedHost(sourceHost,agencyHost)){unchanged++;continue;}const page=await fetchText(String(row.source_url));if(!page){unchanged++;continue;}const finalHost=host(page.finalUrl);if(agencyHost&&!relatedHost(finalHost,agencyHost)){unchanged++;continue;}const nameOk=norm(String(row.full_name)).length>=5&&page.text.includes(norm(String(row.full_name)));const titleOk=norm(title).length>=4&&page.text.includes(norm(title));if(nameOk&&titleOk){await sql.query(`update raven_state_contacts set verification_status='verified',verified_at=now(),evidence_note='Live official organization page revalidated: exact person and title present.',updated_at=now() where id=$1`,[row.id]);verified++;}else unchanged++;}
+  for (let i = 0; i < candidates.length && Date.now() - started <= RUN_BUDGET_MS; i += CONCURRENCY) {
+    await Promise.all(candidates.slice(i, i + CONCURRENCY).map(verify));
   }
-  const counts=await sql.query(`select state_code,count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts group by state_code order by state_code`) as any[];
-  const snapshot={seeded,statesProcessed:states.map((s:any)=>s.state_code),verifiedThisRun:verified,rejectedThisRun:rejected,unchangedThisRun:unchanged,placeholdersRemoved:removed.length,counts};console.log('RAVEN_CONTACT_VERIFY',JSON.stringify(snapshot));return NextResponse.json({ok:true,...snapshot});
+
+  const counts = (await sql.query(`
+    select
+      count(*)::int total,
+      count(*) filter(where verification_status='verified')::int verified,
+      count(*) filter(where verification_status='candidate')::int candidate,
+      count(*) filter(where verification_status='missing')::int missing,
+      count(*) filter(where verification_status='rejected')::int rejected,
+      count(distinct state_code)::int states
+    from raven_state_contacts
+  `)) as any[];
+
+  return NextResponse.json({
+    ok: true,
+    mode: "bulk-only",
+    examined: candidates.length,
+    verifiedThisRun: verified,
+    rejectedThisRun: rejected,
+    unchangedThisRun: unchanged,
+    duplicateMissingRemoved: removed.length,
+    elapsedMs: Date.now() - started,
+    totals: counts[0] || null,
+  });
 }
