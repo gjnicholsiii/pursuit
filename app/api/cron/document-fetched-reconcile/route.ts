@@ -6,8 +6,11 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const BATCH_SIZE = 80;
-const CONCURRENCY = 8;
+const BATCH_SIZE = 48;
+const CONCURRENCY = 4;
+const PROBE_TIMEOUT_MS = 10_000;
+const ITEM_TIMEOUT_MS = 20_000;
+const RUN_BUDGET_MS = 200_000;
 
 type FetchedRow = {
   id: string;
@@ -19,12 +22,22 @@ type FetchedRow = {
 
 type PayloadKind = "pdf" | "zip" | "legacy_office" | "rtf" | "html" | "text_or_other" | "unavailable" | "empty";
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label}_timeout`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 async function readMagic(storageKey: string): Promise<PayloadKind> {
-  const blob = await get(storageKey, { access: "private" });
+  const blob = await withTimeout(get(storageKey, { access: "private" }), PROBE_TIMEOUT_MS, "blob_open");
   if (!blob || blob.statusCode !== 200 || !blob.stream) return "unavailable";
   const reader = blob.stream.getReader();
   try {
-    const { value } = await reader.read();
+    const { value } = await withTimeout(reader.read(), PROBE_TIMEOUT_MS, "blob_read");
     if (!value || value.length === 0) return "empty";
     const sample = value.slice(0, Math.min(value.length, 4096));
     const ascii = new TextDecoder("latin1").decode(sample);
@@ -89,6 +102,7 @@ export async function GET(request: NextRequest) {
   const unauthorized = requireInternalAuth(request);
   if (unauthorized) return unauthorized;
 
+  const startedAt = Date.now();
   const sql = getSql();
   const rows = await sql.query(
     `select d.id,d.filename,d.storage_key,
@@ -120,8 +134,19 @@ export async function GET(request: NextRequest) {
   ) as FetchedRow[];
 
   const results: Array<{ kind: string; queued: boolean; externalized: boolean; error?: string }> = [];
+  let budgetExhausted = false;
   for (let i = 0; i < rows.length; i += CONCURRENCY) {
-    results.push(...await Promise.all(rows.slice(i, i + CONCURRENCY).map(reconcileOne)));
+    if (Date.now() - startedAt >= RUN_BUDGET_MS) {
+      budgetExhausted = true;
+      break;
+    }
+    const chunk = rows.slice(i, i + CONCURRENCY);
+    results.push(...await Promise.all(chunk.map(row => withTimeout(reconcileOne(row), ITEM_TIMEOUT_MS, "reconcile_item").catch(error => ({
+      kind: "error",
+      queued: false,
+      externalized: false,
+      error: error instanceof Error ? error.message : "reconcile_item_failed",
+    })))));
   }
 
   const summary = results.reduce<Record<string, number>>((acc, result) => {
@@ -132,6 +157,6 @@ export async function GET(request: NextRequest) {
   const externalized = results.filter(result => result.externalized).length;
   const errors = results.filter(result => result.kind === "error").length;
 
-  console.info("DOCUMENT_FETCHED_RECONCILE", { scanned: rows.length, queued, externalized, errors, summary });
-  return NextResponse.json({ ok: errors === 0, scanned: rows.length, queued, externalized, errors, summary });
+  console.info("DOCUMENT_FETCHED_RECONCILE", { selected: rows.length, processed: results.length, queued, externalized, errors, budgetExhausted, summary });
+  return NextResponse.json({ ok: errors === 0, selected: rows.length, processed: results.length, queued, externalized, errors, budgetExhausted, summary });
 }
