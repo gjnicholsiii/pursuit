@@ -30,7 +30,7 @@ async function finishJob(jobId:string){
 
 async function retryJob(jobId:string,error:string){
   const sql=getSql();
-  await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,attempts))),leased_until=null,lease_owner=null,last_error=$2,updated_at=now() where id=$1::bigint`,[jobId,error.slice(0,1000)]);
+  await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,least(attempts,10)))),leased_until=null,lease_owner=null,last_error=$2,updated_at=now() where id=$1::bigint`,[jobId,error.slice(0,1000)]);
 }
 
 async function releaseJob(jobId:string){
@@ -101,7 +101,7 @@ async function extractOne(document: FetchedDocumentRow) {
 export async function GET(request: NextRequest) {
   const unauthorized=requireInternalAuth(request); if(unauthorized)return unauthorized;
   const sql = getSql();
-  await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,attempts))),leased_until=null,lease_owner=null,last_error=coalesce(last_error,'lease expired'),updated_at=now() where state='leased' and leased_until<now()`);
+  await sql.query(`update document_jobs set state=case when attempts>=max_attempts then 'dead' else 'pending' end,run_after=now()+(interval '1 second'*least(600,power(2,least(attempts,10)))),leased_until=null,lease_owner=null,last_error=coalesce(last_error,'lease expired'),updated_at=now() where state='leased' and leased_until<now()`);
   const owner=`vercel-extract-${crypto.randomUUID()}`;
   const rows = await sql.query(
     `with claim as (
