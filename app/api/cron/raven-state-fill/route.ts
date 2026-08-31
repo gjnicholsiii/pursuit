@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
       and not exists (
         select 1 from raven_state_contacts x
         where x.state_code=a.state_code
-          and coalesce(x.agency_id,0)=a.id
+          and x.agency_id=a.id
           and x.scope='district'
           and x.role_key=r.role_key
       )
