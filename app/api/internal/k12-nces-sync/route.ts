@@ -5,7 +5,7 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const auth = requireInternalAuth(request);
   if (auth) return auth;
 
