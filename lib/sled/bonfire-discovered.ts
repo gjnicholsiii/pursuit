@@ -103,7 +103,10 @@ async function fetchPortal(portal: DiscoveredBonfirePortal) {
   });
   if (!response.ok) throw new Error(`Bonfire ${portal.slug} returned ${response.status}`);
   const payload = await response.json() as unknown;
-  return recordsFromPayload(payload).map(row => map(portal,row)).filter((item): item is SledOpportunityRecord => Boolean(item) && item.status === "open");
+  return recordsFromPayload(payload)
+    .map(row => map(portal,row))
+    .filter((item): item is SledOpportunityRecord => item !== null)
+    .filter(item => item.status === "open");
 }
 
 export async function syncDiscoveredBonfirePortals(portals: DiscoveredBonfirePortal[]) {
