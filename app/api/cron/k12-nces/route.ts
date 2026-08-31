@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncNcesDistrictBatch, STATE_FIPS } from "@/lib/k12/nces-districts";
-import { consolidateExactK12Duplicates, reclassifyClearlyNonLeas, repairNcesIdsFromDistrictUrls } from "@/lib/k12/repair-nces";
+import { reclassifyClearlyNonLeas, repairNcesIdsFromDistrictUrls } from "@/lib/k12/repair-nces";
+import { consolidateExactK12DuplicatesSafe } from "@/lib/k12/consolidate-safe";
 import { reconcileExtendedNcesAliases } from "@/lib/k12/reconcile-extended-aliases";
 import { reconcileNcesAliasesByWebsiteHost } from "@/lib/k12/reconcile-website-hosts";
 import { getSql } from "@/lib/db";
@@ -71,13 +72,14 @@ export async function GET(request: NextRequest) {
       websiteHostAliases:{ok:true,skipped:true}, extendedAliases:{ok:true,skipped:true},
     };
     if (runCleanup) {
-      const [nonLea, repair, dedupe, websiteHostAliases, extendedAliases] = await Promise.all([
-        runCleanupStep("reclassify-non-lea", reclassifyClearlyNonLeas),
-        runCleanupStep("repair-nces-ids", repairNcesIdsFromDistrictUrls),
-        runCleanupStep("consolidate-duplicates", consolidateExactK12Duplicates),
-        runCleanupStep("website-host-aliases", reconcileNcesAliasesByWebsiteHost),
-        runCleanupStep("extended-aliases", reconcileExtendedNcesAliases),
-      ]);
+      // These jobs all mutate the same agency registry. Running them in parallel
+      // created avoidable FK/race failures. Reconcile deterministically, then
+      // dedupe only after aliases and authoritative IDs have settled.
+      const nonLea = await runCleanupStep("reclassify-non-lea", reclassifyClearlyNonLeas);
+      const repair = await runCleanupStep("repair-nces-ids", repairNcesIdsFromDistrictUrls);
+      const websiteHostAliases = await runCleanupStep("website-host-aliases", reconcileNcesAliasesByWebsiteHost);
+      const extendedAliases = await runCleanupStep("extended-aliases", reconcileExtendedNcesAliases);
+      const dedupe = await runCleanupStep("consolidate-duplicates", consolidateExactK12DuplicatesSafe);
       cleanup = { nonLea, repair, dedupe, websiteHostAliases, extendedAliases };
     }
 
@@ -98,7 +100,7 @@ export async function GET(request: NextRequest) {
       registryAudit, registryHealthy, failures, results,
     }, { status: failures.length ? 207 : 200 });
   } catch (error) {
-    console.error("NCES shard failed", { shard, states, error: error instanceof Error ? error.message : String(error) });
+    console.error("NCES shard failed", { shard, states, error: error instanceof Error?error.message:String(error) });
     return NextResponse.json({ ok:false, shard, states, error:error instanceof Error?error.message:String(error) }, { status:500 });
   }
 }
