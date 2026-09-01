@@ -9,14 +9,27 @@ const STATE_CODES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'
 ];
 
+const INVALID_AGENCY = `(sheriff|juvenile (detention|justice)|department of corrections|correctional|school superintendent office|county school superintendent|education service agency|educational service agency|education service center|educational service center|special services)`;
+
 export async function GET(req: NextRequest) {
   const auth = requireInternalAuth(req);
   if (auth) return auth;
   const sql = getSql();
 
-  // Build the entire national review skeleton up front. One row per required
-  // county-system role, plus one state-level school-safety/security role.
-  const countySlots = await sql.query(`
+  // Remove review slots accidentally created for law-enforcement, detention,
+  // county-office, and service-agency records that are not public school systems.
+  const removedInvalid = await sql.query(`
+    delete from raven_state_contacts c
+    using agencies a
+    where c.agency_id=a.id
+      and c.scope='district'
+      and a.canonical_name ~* $1
+    returning c.id
+  `,[INVALID_AGENCY]) as any[];
+
+  // Seed real K-12 district/LEA records. Do not require the word "county";
+  // that filter was the source of the corrupt national skeleton.
+  const districtSlots = await sql.query(`
     insert into raven_state_contacts(state_code,county,agency_id,scope,role_key,verification_status)
     select a.state_code,a.county,a.id,'district',r.role_key,'missing'
     from agencies a
@@ -29,8 +42,7 @@ export async function GET(req: NextRequest) {
     ) r(role_key)
     where a.agency_type='k12'
       and a.state_code = any($1::text[])
-      and a.county is not null and btrim(a.county)<>''
-      and (a.jurisdiction_level='county' or a.canonical_name ilike '%county%')
+      and a.canonical_name !~* $2
       and not exists (
         select 1 from raven_state_contacts x
         where x.state_code=a.state_code
@@ -39,7 +51,7 @@ export async function GET(req: NextRequest) {
           and x.role_key=r.role_key
       )
     returning id
-  `,[STATE_CODES]) as any[];
+  `,[STATE_CODES,INVALID_AGENCY]) as any[];
 
   const stateSlots = await sql.query(`
     insert into raven_state_contacts(state_code,county,agency_id,scope,role_key,verification_status)
@@ -52,13 +64,10 @@ export async function GET(req: NextRequest) {
     returning id
   `,[STATE_CODES]) as any[];
 
-  // Promote strict, already-enriched public contacts into review candidates in bulk.
-  // The separate verifier still has to re-open the official source and see the exact
-  // person/title before these become verified.
   const filled = await sql.query(`
     with ranked as (
       select c.id contact_id,p.full_name,p.title,p.email,p.phone,p.source_url,p.confidence,
-        row_number() over(partition by c.id order by p.confidence desc, (p.email is not null) desc, p.full_name) rn
+        row_number() over(partition by c.id order by p.confidence desc,(p.email is not null) desc,p.full_name) rn
       from raven_state_contacts c
       join raven_people p on p.agency_id=c.agency_id
       where c.verification_status='missing'
@@ -70,19 +79,15 @@ export async function GET(req: NextRequest) {
         and (
           (c.role_key='superintendent' and p.title ~* 'superintendent' and p.title !~* '(assistant|deputy|associate)[[:space:]]+superintendent')
           or (c.role_key='assistant_superintendent' and p.title ~* '(assistant|asst\\.?)[[:space:]]+superintendent')
-          or (c.role_key='security_director' and p.title ~* '(director|chief|executive director|senior director|associate superintendent|program coordinator).{0,80}(security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)|(security|school safety|public safety|safety and security|security and safety|emergency management|safe schools).{0,80}(director|chief|executive director|senior director|associate superintendent|program coordinator)')
+          or (c.role_key='security_director' and p.title ~* '(director|chief|executive director|senior director|associate superintendent).{0,80}(security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)|(security|school safety|public safety|safety and security|security and safety|emergency management|safe schools).{0,80}(director|chief|executive director|senior director|associate superintendent)')
           or (c.role_key='it_director' and p.title ~* '(director|executive director|chief information officer|chief technology officer|(^|[^a-z])cio([^a-z]|$)|(^|[^a-z])cto([^a-z]|$)).{0,60}(information technology|technology|information systems|it services|network services|tech infrastructure|cybersecurity)|(information technology|technology|information systems|it services|network services|tech infrastructure|cybersecurity).{0,60}(director|chief information officer|chief technology officer|(^|[^a-z])cio([^a-z]|$)|(^|[^a-z])cto([^a-z]|$))')
           or (c.role_key='school_board' and p.title ~* '(school|governing)?[[:space:]]*board[[:space:]]+(member|chair|chairman|chairwoman|president|vice president|trustee|clerk)|board trustee')
         )
     )
     update raven_state_contacts c
-    set full_name=r.full_name,
-        title=r.title,
-        email=r.email,
-        phone=r.phone,
-        source_url=r.source_url,
+    set full_name=r.full_name,title=r.title,email=r.email,phone=r.phone,source_url=r.source_url,
         verification_status='candidate',
-        evidence_note='Bulk candidate from Raven public K-12 enrichment; awaiting live official-source revalidation.',
+        evidence_note='Candidate from official K-12 source; awaiting strict live revalidation.',
         updated_at=now()
     from ranked r
     where c.id=r.contact_id and r.rn=1
@@ -90,22 +95,13 @@ export async function GET(req: NextRequest) {
   `) as any[];
 
   const totals = await sql.query(`
-    select state_code,
-      count(*)::int slots,
+    select state_code,count(*)::int slots,
       count(*) filter(where verification_status='verified')::int verified,
       count(*) filter(where verification_status='candidate')::int candidate,
       count(*) filter(where verification_status='missing')::int missing,
       count(*) filter(where verification_status='rejected')::int rejected
-    from raven_state_contacts
-    group by state_code
-    order by state_code
+    from raven_state_contacts group by state_code order by state_code
   `) as any[];
 
-  return NextResponse.json({
-    ok:true,
-    countySlotsAdded:countySlots.length,
-    stateSlotsAdded:stateSlots.length,
-    candidatesFilled:filled.length,
-    states:totals
-  });
+  return NextResponse.json({ok:true,invalidSlotsRemoved:removedInvalid.length,districtSlotsAdded:districtSlots.length,stateSlotsAdded:stateSlots.length,candidatesFilled:filled.length,states:totals});
 }
