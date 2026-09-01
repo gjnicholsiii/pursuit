@@ -6,13 +6,13 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const FETCH_TIMEOUT_MS = 8_000;
-const RUN_BUDGET_MS = 220_000;
-const MAX_CANDIDATES = 80;
-const CONCURRENCY = 8;
+const FETCH_TIMEOUT_MS = 7_000;
+const RUN_BUDGET_MS = 260_000;
+const MAX_CANDIDATES = 240;
+const CONCURRENCY = 24;
 
 const BANNED = /\b(facilit(?:y|ies)|plant|maintenance|buildings?\s*(?:&|and)\s*grounds|procurement|purchasing|finance|financial|principal|teacher|operations?|transportation|food service|human resources|\bhr\b)\b/i;
-const SECURITY = /\b(?:director|chief|executive director|senior director|associate superintendent|program coordinator)\b.{0,80}\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b|\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b.{0,80}\b(?:director|chief|executive director|senior director|associate superintendent|program coordinator)\b/i;
+const SECURITY = /\b(?:director|chief|executive director|senior director|associate superintendent)\b.{0,80}\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b|\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b.{0,80}\b(?:director|chief|executive director|senior director|associate superintendent)\b/i;
 const STRICT: Record<string, RegExp> = {
   state_security_director: SECURITY,
   security_director: SECURITY,
@@ -45,7 +45,7 @@ async function fetchText(url: string) {
       cache: "no-store",
       signal: controller.signal,
       headers: {
-        "user-agent": "Mozilla/5.0 (compatible; Pursuit-Raven-Verifier/1.0; public-contact-verification)",
+        "user-agent": "Mozilla/5.0 (compatible; Pursuit-Raven-Verifier/2.0; public-contact-verification)",
         accept: "text/html,application/xhtml+xml,text/plain;q=0.9",
       },
     });
