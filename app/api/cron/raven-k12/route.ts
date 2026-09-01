@@ -16,17 +16,26 @@ export async function GET(request: NextRequest) {
     if(Number(active[0]?.n||0)>0)return NextResponse.json({ok:true,skipped:true,reason:'Raven K-12 bulk batch already running',running:Number(active[0]?.n||0)});
     await sql.query(`update raven_enrichment_runs set status='failed',completed_at=now(),diagnostics=coalesce(diagnostics,'{}'::jsonb)||jsonb_build_object('error','stale enrichment lease expired') where status='running' and started_at<=now()-interval '6 minutes'`);
 
-    // One expensive invocation should do real work. The old cap of 8 districts
-    // forced hundreds of tiny Vercel invocations and made nationwide completion
-    // unnecessarily slow. Run a much larger district batch inside the same 300s
-    // function budget; the enrichment layer stops naturally when the invocation ends.
-    const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 24);
-    const limit = Math.max(1, Math.min(requestedLimit, 24));
-    const result = await enrichK12Batch(limit);
+    // enrichK12Batch has a legacy internal ceiling of nine agencies. Calling it once
+    // made the route's advertised 24-district limit meaningless. Run successive
+    // nine-agency batches in the same invocation; completed agencies are excluded by
+    // the enrichment query, so each pass advances immediately to the next districts.
+    const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 27);
+    const target = Math.max(1, Math.min(requestedLimit, 27));
+    const batches=[] as any[];
+    let attempted=0, peopleFound=0, pagesScanned=0;
+    while(attempted < target){
+      const remaining=target-attempted;
+      const result=await enrichK12Batch(Math.min(9,remaining));
+      batches.push(result);
+      attempted += Number(result.attempted||0);
+      peopleFound += Number(result.peopleFound||0);
+      pagesScanned += Number(result.pagesScanned||0);
+      if(Number(result.attempted||0)===0)break;
+    }
 
     const removed=await sql.query(`delete from raven_people where source_type='public_web' and full_name ~* '(quick links|in this section|testing|environmental|air quality|water.*testing|road$|street$|avenue$|boulevard$|highway$|^event details$|^scroll down$|^please register|^new student enrollment$|^view spending$|^committee members$|^term expires$|^current bids$|^watch the latest meeting$)' returning id`);
 
-    // Immediately move newly discovered strict-role matches into the review queue.
     const promoted=await sql.query(`
       with ranked as (
         select c.id contact_id,p.full_name,p.title,p.email,p.phone,p.source_url,p.confidence,
@@ -54,8 +63,8 @@ export async function GET(request: NextRequest) {
       returning c.id
     `);
 
-    return NextResponse.json({ ok: true, ...result, falsePeopleRemoved: removed.length, candidatesPromoted: promoted.length });
+    return NextResponse.json({ ok:true, target, attempted, peopleFound, pagesScanned, batches:batches.length, falsePeopleRemoved:removed.length, candidatesPromoted:promoted.length });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return NextResponse.json({ ok:false, error:error instanceof Error ? error.message : String(error) }, { status:500 });
   }
 }
