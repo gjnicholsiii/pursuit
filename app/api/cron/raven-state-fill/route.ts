@@ -1,3 +1,4 @@
+import * as cheerio from "cheerio";
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
@@ -10,6 +11,121 @@ const STATE_CODES = [
 ];
 
 const INVALID_AGENCY = `(sheriff|juvenile (detention|justice)|department of corrections|correctional|school superintendent office|county school superintendent|education service agency|educational service agency|education service center|educational service center|special services)`;
+const FLDOE_SUPERINTENDENTS = "https://www.fldoe.org/accountability/data-sys/school-dis-data/superintendents.stml";
+
+type FlSuperintendent = { district: string; fullName: string; title: string; email: string; phone: string };
+
+function clean(value: string) {
+  return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function stripHonorific(value: string) {
+  return clean(value).replace(/^(Dr\.|Mr\.|Mrs\.|Ms\.|Miss)\s+/i, "");
+}
+
+async function fetchFloridaSuperintendents(): Promise<FlSuperintendent[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(FLDOE_SUPERINTENDENTS, {
+      cache: "no-store",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "user-agent": "Mozilla/5.0 (compatible; Pursuit-Raven/3.0; authoritative-public-directory)",
+        accept: "text/html,application/xhtml+xml"
+      }
+    });
+    if (!res.ok) throw new Error(`Florida DOE roster HTTP ${res.status}`);
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const lines = $("body").text().split(/\r?\n/).map(clean).filter(Boolean);
+    const rows: FlSuperintendent[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!/\b(?:Interim\s+)?Superintendent\b/i.test(line)) continue;
+      if (/superintendents? of florida|school superintendents|superintendent and school district/i.test(line)) continue;
+      const comma = line.indexOf(",");
+      if (comma < 2) continue;
+      const fullName = stripHonorific(line.slice(0, comma));
+      const title = clean(line.slice(comma + 1));
+      const district = clean(lines[i - 1]).replace(/^\*+|\*+$/g, "");
+      if (!district || district.length > 60 || /home|district data|florida public school/i.test(district)) continue;
+
+      let email = "";
+      let phone = "";
+      for (let j = i + 1; j < Math.min(lines.length, i + 10); j++) {
+        const next = lines[j];
+        const emailMatch = next.match(/(?:E-?mail|Email)\s*:\s*([^\s]+@[^\s]+)/i);
+        if (emailMatch) email = emailMatch[1].replace(/[;,]+$/, "").trim();
+        const phoneMatch = next.match(/Supt\.\s*Phone\s*:\s*(.+)$/i);
+        if (phoneMatch) phone = clean(phoneMatch[1]);
+        if (email && phone) break;
+      }
+      if (!fullName || (!email && !phone)) continue;
+      if (email && !/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(email)) email = "";
+      if (!email && !phone) continue;
+      rows.push({ district, fullName, title, email, phone });
+    }
+
+    const deduped = new Map<string, FlSuperintendent>();
+    for (const row of rows) deduped.set(row.district.toLowerCase(), row);
+    return [...deduped.values()];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function ingestFloridaSuperintendents(sql: ReturnType<typeof getSql>) {
+  let roster: FlSuperintendent[] = [];
+  try {
+    roster = await fetchFloridaSuperintendents();
+  } catch (error) {
+    console.error("RAVEN_FLDOE_FETCH", error);
+    return { fetched: 0, matched: 0, filled: 0, error: error instanceof Error ? error.message : String(error) };
+  }
+
+  let matched = 0;
+  let filled = 0;
+  for (const row of roster) {
+    const districtKey = row.district.replace(/\s+County$/i, "").trim();
+    const updated = await sql.query(`
+      with target as (
+        select c.id
+        from raven_state_contacts c
+        left join agencies a on a.id=c.agency_id
+        where c.state_code='FL'
+          and c.scope='district'
+          and c.role_key='superintendent'
+          and c.verification_status='missing'
+          and (
+            lower(regexp_replace(coalesce(c.county,''),'[[:space:]]+county$','','i'))=lower($1)
+            or lower(coalesce(a.canonical_name,'')) like '%' || lower($1) || '%'
+          )
+        order by case when lower(regexp_replace(coalesce(c.county,''),'[[:space:]]+county$','','i'))=lower($1) then 0 else 1 end
+        limit 1
+      )
+      update raven_state_contacts c
+      set full_name=$2,
+          title=$3,
+          email=nullif($4,''),
+          phone=nullif($5,''),
+          source_url=$6,
+          verification_status='candidate',
+          evidence_note='Reachable superintendent from authoritative Florida Department of Education district superintendent directory; awaiting strict live revalidation.',
+          updated_at=now()
+      from target t
+      where c.id=t.id
+      returning c.id
+    `,[districtKey,row.fullName,row.title,row.email,row.phone,FLDOE_SUPERINTENDENTS]) as any[];
+    if (updated.length) {
+      matched++;
+      filled += updated.length;
+    }
+  }
+  return { fetched: roster.length, matched, filled, error: null };
+}
 
 export async function GET(req: NextRequest) {
   const auth = requireInternalAuth(req);
@@ -34,8 +150,6 @@ export async function GET(req: NextRequest) {
     returning c.id
   `,[INVALID_AGENCY]) as any[];
 
-  // District-slot inventory is owned by the curated Raven/NCES rebuild path.
-  // Do not recreate slots from every agencies.agency_type='k12' row here.
   const districtSlotsAdded = 0;
 
   const stateSlots = await sql.query(`
@@ -48,6 +162,8 @@ export async function GET(req: NextRequest) {
     )
     returning id
   `,[STATE_CODES]) as any[];
+
+  const floridaDoe = await ingestFloridaSuperintendents(sql);
 
   const filled = await sql.query(`
     with ranked as (
@@ -109,7 +225,7 @@ export async function GET(req: NextRequest) {
 
   const before = beforeRows[0] || null;
   const after = afterRows[0] || null;
-  const summary = { before, after, invalidSlotsRemoved: removedInvalid.length, districtSlotsAdded, stateSlotsAdded: stateSlots.length, candidatesFilled: filled.length };
+  const summary = { before, after, invalidSlotsRemoved: removedInvalid.length, districtSlotsAdded, stateSlotsAdded: stateSlots.length, floridaDoe, candidatesFilled: filled.length };
   console.log('RAVEN_STATE_FILL', summary);
 
   return NextResponse.json({ok:true,...summary,states});
