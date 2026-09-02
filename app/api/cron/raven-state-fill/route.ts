@@ -35,9 +35,7 @@ export async function GET(req: NextRequest) {
   `,[INVALID_AGENCY]) as any[];
 
   // District-slot inventory is owned by the curated Raven/NCES rebuild path.
-  // Do not recreate slots from every agencies.agency_type='k12' row here: that
-  // previously re-added ~26k non-durable slots every run which were removed by
-  // the next curated pass, causing churn and corrupting the missing-slot queue.
+  // Do not recreate slots from every agencies.agency_type='k12' row here.
   const districtSlotsAdded = 0;
 
   const stateSlots = await sql.query(`
@@ -54,7 +52,13 @@ export async function GET(req: NextRequest) {
   const filled = await sql.query(`
     with ranked as (
       select c.id contact_id,p.full_name,p.title,p.email,p.phone,p.source_url,p.confidence,
-        row_number() over(partition by c.id order by p.confidence desc,(p.email is not null) desc,p.full_name) rn
+        row_number() over(
+          partition by c.id
+          order by (p.email is not null and btrim(p.email)<>'') desc,
+                   (p.phone is not null and btrim(p.phone)<>'') desc,
+                   p.confidence desc,
+                   p.full_name
+        ) rn
       from raven_state_contacts c
       join raven_people p on p.agency_id=c.agency_id
       where c.verification_status='missing'
@@ -62,6 +66,10 @@ export async function GET(req: NextRequest) {
         and p.full_name is not null and btrim(p.full_name)<>''
         and p.title is not null and btrim(p.title)<>''
         and p.source_url is not null and btrim(p.source_url)<>''
+        and (
+          (p.email is not null and btrim(p.email)<>'')
+          or (p.phone is not null and btrim(p.phone)<>'')
+        )
         and p.title !~* '(facilit(y|ies)|plant|maintenance|buildings?[[:space:]]*(and|&)[[:space:]]*grounds|procurement|purchasing|finance|financial|principal|teacher|operations?|transportation|food service|human resources|(^|[^a-z])hr([^a-z]|$))'
         and (
           (c.role_key='superintendent' and p.title ~* 'superintendent' and p.title !~* '(assistant|deputy|associate)[[:space:]]+superintendent')
@@ -74,7 +82,7 @@ export async function GET(req: NextRequest) {
     update raven_state_contacts c
     set full_name=r.full_name,title=r.title,email=r.email,phone=r.phone,source_url=r.source_url,
         verification_status='candidate',
-        evidence_note='Candidate from official K-12 source; awaiting strict live revalidation.',
+        evidence_note='Reachable candidate from official K-12 source; email or phone present; awaiting strict live revalidation.',
         updated_at=now()
     from ranked r
     where c.id=r.contact_id and r.rn=1
