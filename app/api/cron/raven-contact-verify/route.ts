@@ -12,6 +12,9 @@ const MAX_CANDIDATES = 240;
 const CONCURRENCY = 24;
 
 const BANNED = /\b(facilit(?:y|ies)|plant|maintenance|buildings?\s*(?:&|and)\s*grounds|procurement|purchasing|finance|financial|principal|teacher|operations?|transportation|food service|human resources|\bhr\b)\b/i;
+const GENERIC_PERSON = /\b(find us|about us|important files|in this section|upcoming meetings|help ticket|acceptable use policy|get in touch|news announcements|horizontal nav|school district|county usd|district office|our schools|quick links|contact us|learn more|read more|staff directory|board of education)\b/i;
+const GENERIC_TOKEN = /^(find|about|important|files?|section|upcoming|meetings?|help|ticket|acceptable|use|policy|get|touch|news|announcements?|horizontal|nav|district|county|school|schools|usd|office|quick|links?|contact|learn|read|more)$/i;
+const HONORIFIC = /^(dr|mr|mrs|ms|miss|chief|rev|reverend)\.?$/i;
 const SECURITY = /\b(?:director|chief|executive director|senior director|associate superintendent)\b.{0,80}\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b|\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b.{0,80}\b(?:director|chief|executive director|senior director|associate superintendent)\b/i;
 const STRICT: Record<string, RegExp> = {
   state_security_director: SECURITY,
@@ -24,6 +27,15 @@ const STRICT: Record<string, RegExp> = {
 
 function norm(v: string) {
   return v.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function plausiblePerson(v: string) {
+  const raw = v.trim();
+  if (raw.length < 5 || raw.length > 80 || GENERIC_PERSON.test(raw)) return false;
+  const parts = raw.replace(/[,()]/g, " ").split(/\s+/).filter(Boolean);
+  const meaningful = parts.filter((p) => !HONORIFIC.test(p));
+  if (meaningful.length < 2 || meaningful.length > 5) return false;
+  if (meaningful.some((p) => GENERIC_TOKEN.test(p))) return false;
+  return meaningful.every((p) => /^[A-Za-z][A-Za-z.'-]*$/.test(p));
 }
 function host(v: string | null) {
   if (!v) return "";
@@ -45,7 +57,7 @@ async function fetchText(url: string) {
       cache: "no-store",
       signal: controller.signal,
       headers: {
-        "user-agent": "Mozilla/5.0 (compatible; Pursuit-Raven-Verifier/2.0; public-contact-verification)",
+        "user-agent": "Mozilla/5.0 (compatible; Pursuit-Raven-Verifier/3.0; public-contact-verification)",
         accept: "text/html,application/xhtml+xml,text/plain;q=0.9",
       },
     });
@@ -70,6 +82,22 @@ export async function GET(req: NextRequest) {
   let verified = 0;
   let rejected = 0;
   let unchanged = 0;
+
+  const falseVerified = (await sql.query(`
+    update raven_state_contacts
+    set verification_status='rejected', verified_at=null,
+        evidence_note='Rejected: navigation, organization, or page label was misidentified as a person.',
+        updated_at=now()
+    where verification_status='verified'
+      and (
+        lower(coalesce(full_name,'')) in (
+          'find us','about us','important files','in this section','upcoming meetings','help ticket',
+          'acceptable use policy','get in touch','news announcements','horizontal nav','comanche county usd'
+        )
+        or lower(coalesce(full_name,'')) ~ '(school district|county usd|district office|staff directory|board of education)'
+      )
+    returning id
+  `)) as any[];
 
   const removed = (await sql.query(`
     delete from raven_state_contacts m
@@ -104,11 +132,12 @@ export async function GET(req: NextRequest) {
   async function verify(row: any) {
     if (Date.now() - started > RUN_BUDGET_MS) return;
     const title = String(row.title || "");
+    const fullName = String(row.full_name || "");
     const rule = STRICT[String(row.role_key)] || null;
-    if (!rule || BANNED.test(title) || !rule.test(title)) {
+    if (!plausiblePerson(fullName) || !rule || BANNED.test(title) || !rule.test(title)) {
       await sql.query(
         `update raven_state_contacts set verification_status='rejected',evidence_note=$2,updated_at=now() where id=$1 and verification_status='candidate'`,
-        [row.id, "Rejected by strict outreach-role verifier; title is outside approved school-security contact roles."]
+        [row.id, !plausiblePerson(fullName) ? "Rejected by person-name verifier; candidate is a page label, organization label, or otherwise not a plausible individual." : "Rejected by strict outreach-role verifier; title is outside approved school-security contact roles."]
       );
       rejected++;
       return;
@@ -132,13 +161,13 @@ export async function GET(req: NextRequest) {
       return;
     }
 
-    const person = norm(String(row.full_name));
+    const person = norm(fullName);
     const normalizedTitle = norm(title);
     const nameOk = person.length >= 5 && page.text.includes(person);
     const titleOk = normalizedTitle.length >= 4 && page.text.includes(normalizedTitle);
     if (nameOk && titleOk) {
       await sql.query(
-        `update raven_state_contacts set verification_status='verified',verified_at=now(),evidence_note='Live official organization page revalidated: exact person and title present.',updated_at=now() where id=$1 and verification_status='candidate'`,
+        `update raven_state_contacts set verification_status='verified',verified_at=now(),evidence_note='Live official organization page revalidated: exact plausible person and title present.',updated_at=now() where id=$1 and verification_status='candidate'`,
         [row.id]
       );
       verified++;
@@ -164,10 +193,11 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    mode: "bulk-only",
+    mode: "bulk-only-strict-person-gate",
     examined: candidates.length,
     verifiedThisRun: verified,
     rejectedThisRun: rejected,
+    falseVerifiedRemoved: falseVerified.length,
     unchangedThisRun: unchanged,
     duplicateMissingRemoved: removed.length,
     elapsedMs: Date.now() - started,
