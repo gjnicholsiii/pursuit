@@ -11,7 +11,7 @@ const STATE_CODES = [
 ];
 
 const INVALID_AGENCY = `(sheriff|juvenile (detention|justice)|department of corrections|correctional|school superintendent office|county school superintendent|education service agency|educational service agency|education service center|educational service center|special services)`;
-const FLDOE_SUPERINTENDENTS = "https://www.fldoe.org/accountability/data-sys/school-dis-data/superintendents.stml";
+const FLDOE_SUPERINTENDENTS = "https://cdn.fldoe.org/accountability/data-sys/school-dis-data/superintendents.stml";
 
 type FlSuperintendent = { district: string; fullName: string; title: string; email: string; phone: string };
 
