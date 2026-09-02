@@ -16,8 +16,15 @@ export async function GET(req: NextRequest) {
   if (auth) return auth;
   const sql = getSql();
 
-  // Remove review slots accidentally created for law-enforcement, detention,
-  // county-office, and service-agency records that are not public school systems.
+  const beforeRows = await sql.query(`
+    select count(*)::int slots,
+      count(*) filter(where verification_status='verified')::int verified,
+      count(*) filter(where verification_status='candidate')::int candidate,
+      count(*) filter(where verification_status='missing')::int missing,
+      count(*) filter(where verification_status='rejected')::int rejected
+    from raven_state_contacts
+  `) as any[];
+
   const removedInvalid = await sql.query(`
     delete from raven_state_contacts c
     using agencies a
@@ -27,8 +34,6 @@ export async function GET(req: NextRequest) {
     returning c.id
   `,[INVALID_AGENCY]) as any[];
 
-  // Seed real K-12 district/LEA records. Do not require the word "county";
-  // that filter was the source of the corrupt national skeleton.
   const districtSlots = await sql.query(`
     insert into raven_state_contacts(state_code,county,agency_id,scope,role_key,verification_status)
     select a.state_code,a.county,a.id,'district',r.role_key,'missing'
@@ -94,7 +99,7 @@ export async function GET(req: NextRequest) {
     returning c.id
   `) as any[];
 
-  const totals = await sql.query(`
+  const states = await sql.query(`
     select state_code,count(*)::int slots,
       count(*) filter(where verification_status='verified')::int verified,
       count(*) filter(where verification_status='candidate')::int candidate,
@@ -103,5 +108,19 @@ export async function GET(req: NextRequest) {
     from raven_state_contacts group by state_code order by state_code
   `) as any[];
 
-  return NextResponse.json({ok:true,invalidSlotsRemoved:removedInvalid.length,districtSlotsAdded:districtSlots.length,stateSlotsAdded:stateSlots.length,candidatesFilled:filled.length,states:totals});
+  const afterRows = await sql.query(`
+    select count(*)::int slots,
+      count(*) filter(where verification_status='verified')::int verified,
+      count(*) filter(where verification_status='candidate')::int candidate,
+      count(*) filter(where verification_status='missing')::int missing,
+      count(*) filter(where verification_status='rejected')::int rejected
+    from raven_state_contacts
+  `) as any[];
+
+  const before = beforeRows[0] || null;
+  const after = afterRows[0] || null;
+  const summary = { before, after, invalidSlotsRemoved: removedInvalid.length, districtSlotsAdded: districtSlots.length, stateSlotsAdded: stateSlots.length, candidatesFilled: filled.length };
+  console.log('RAVEN_STATE_FILL', summary);
+
+  return NextResponse.json({ok:true,...summary,states});
 }
