@@ -12,8 +12,9 @@ const STATE_CODES = [
 
 const INVALID_AGENCY = `(sheriff|juvenile (detention|justice)|department of corrections|correctional|school superintendent office|county school superintendent|education service agency|educational service agency|education service center|educational service center|special services)`;
 const FLDOE_SUPERINTENDENTS = "https://cdn.fldoe.org/accountability/data-sys/school-dis-data/superintendents.stml";
+const NDE_PUBLIC_DISTRICTS = "https://educdirsrc.education.ne.gov/QuickDisplay.aspx?code=pda&sort=name";
 
-type FlSuperintendent = { district: string; fullName: string; title: string; email: string; phone: string };
+type ReachableSuperintendent = { district: string; fullName: string; title: string; email: string; phone: string };
 
 function clean(value: string) {
   return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
@@ -23,7 +24,11 @@ function stripHonorific(value: string) {
   return clean(value).replace(/^(Dr\.|Mr\.|Mrs\.|Ms\.|Miss)\s+/i, "");
 }
 
-async function fetchFloridaSuperintendents(): Promise<FlSuperintendent[]> {
+function validEmail(value: string) {
+  return /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(value);
+}
+
+async function fetchFloridaSuperintendents(): Promise<ReachableSuperintendent[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
@@ -40,7 +45,7 @@ async function fetchFloridaSuperintendents(): Promise<FlSuperintendent[]> {
     const html = await res.text();
     const $ = cheerio.load(html);
     const lines = $("body").text().split(/\r?\n/).map(clean).filter(Boolean);
-    const rows: FlSuperintendent[] = [];
+    const rows: ReachableSuperintendent[] = [];
 
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
@@ -64,12 +69,12 @@ async function fetchFloridaSuperintendents(): Promise<FlSuperintendent[]> {
         if (email && phone) break;
       }
       if (!fullName || (!email && !phone)) continue;
-      if (email && !/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(email)) email = "";
+      if (email && !validEmail(email)) email = "";
       if (!email && !phone) continue;
       rows.push({ district, fullName, title, email, phone });
     }
 
-    const deduped = new Map<string, FlSuperintendent>();
+    const deduped = new Map<string, ReachableSuperintendent>();
     for (const row of rows) deduped.set(row.district.toLowerCase(), row);
     return [...deduped.values()];
   } finally {
@@ -77,48 +82,98 @@ async function fetchFloridaSuperintendents(): Promise<FlSuperintendent[]> {
   }
 }
 
-async function ingestFloridaSuperintendents(sql: ReturnType<typeof getSql>) {
-  let roster: FlSuperintendent[] = [];
+async function fetchNebraskaSuperintendents(): Promise<ReachableSuperintendent[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    roster = await fetchFloridaSuperintendents();
+    const res = await fetch(NDE_PUBLIC_DISTRICTS, {
+      cache: "no-store",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "user-agent": "Mozilla/5.0 (compatible; Pursuit-Raven/3.0; authoritative-public-directory)",
+        accept: "text/html,application/xhtml+xml"
+      }
+    });
+    if (!res.ok) throw new Error(`Nebraska NDE roster HTTP ${res.status}`);
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const rows: ReachableSuperintendent[] = [];
+
+    $("tr").each((_, element) => {
+      const cells = $(element).find("th,td").map((__, cell) => clean($(cell).text())).get();
+      if (cells.length < 6) return;
+      const joined = cells.join(" | ");
+      if (/ADMINISTRATOR.*AGENCYID.*NAME.*PHONE/i.test(joined)) return;
+      const email = cells.find(cell => validEmail(cell)) || "";
+      const phone = cells.find(cell => /^\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}$/.test(cell)) || "";
+      const agencyIndex = cells.findIndex(cell => /^\d{2}-\d{4}-\d{3}$/.test(cell));
+      if (agencyIndex < 1 || agencyIndex + 1 >= cells.length) return;
+      const fullName = stripHonorific(cells[agencyIndex - 1]);
+      const district = clean(cells[agencyIndex + 1]);
+      if (!fullName || !district || !/(school|district)/i.test(district) || (!email && !phone)) return;
+      if (fullName.length < 4 || fullName.length > 80 || /administrator/i.test(fullName)) return;
+      rows.push({ district, fullName, title: "Superintendent", email, phone });
+    });
+
+    const deduped = new Map<string, ReachableSuperintendent>();
+    for (const row of rows) deduped.set(row.district.toLowerCase(), row);
+    return [...deduped.values()];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function ingestStateSuperintendents(sql: ReturnType<typeof getSql>, stateCode: string, sourceUrl: string, fetcher: () => Promise<ReachableSuperintendent[]>) {
+  let roster: ReachableSuperintendent[] = [];
+  try {
+    roster = await fetcher();
   } catch (error) {
-    console.error("RAVEN_FLDOE_FETCH", error);
+    console.error(`RAVEN_${stateCode}_ROSTER_FETCH`, error);
     return { fetched: 0, matched: 0, filled: 0, error: error instanceof Error ? error.message : String(error) };
   }
 
   let matched = 0;
   let filled = 0;
   for (const row of roster) {
-    const districtKey = row.district.replace(/\s+County$/i, "").trim();
+    const districtKey = row.district
+      .replace(/\s+County$/i, "")
+      .replace(/\s+(Public|Community|Consolidated)?\s*Schools?$/i, "")
+      .replace(/\s+School District$/i, "")
+      .trim();
     const updated = await sql.query(`
       with target as (
         select c.id
         from raven_state_contacts c
         left join agencies a on a.id=c.agency_id
-        where c.state_code='FL'
+        where c.state_code=$1
           and c.scope='district'
           and c.role_key='superintendent'
           and c.verification_status='missing'
           and (
-            lower(regexp_replace(coalesce(c.county,''),'[[:space:]]+county$','','i'))=lower($1)
-            or lower(coalesce(a.canonical_name,'')) like '%' || lower($1) || '%'
+            lower(regexp_replace(coalesce(c.county,''),'[[:space:]]+county$','','i'))=lower($2)
+            or lower(coalesce(a.canonical_name,''))=lower($3)
+            or lower(coalesce(a.canonical_name,'')) like '%' || lower($2) || '%'
           )
-        order by case when lower(regexp_replace(coalesce(c.county,''),'[[:space:]]+county$','','i'))=lower($1) then 0 else 1 end
+        order by case
+          when lower(coalesce(a.canonical_name,''))=lower($3) then 0
+          when lower(regexp_replace(coalesce(c.county,''),'[[:space:]]+county$','','i'))=lower($2) then 1
+          else 2 end
         limit 1
       )
       update raven_state_contacts c
-      set full_name=$2,
-          title=$3,
-          email=nullif($4,''),
-          phone=nullif($5,''),
-          source_url=$6,
+      set full_name=$4,
+          title=$5,
+          email=nullif($6,''),
+          phone=nullif($7,''),
+          source_url=$8,
           verification_status='candidate',
-          evidence_note='Reachable superintendent from authoritative Florida Department of Education district superintendent directory; awaiting strict live revalidation.',
+          evidence_note='Reachable superintendent from authoritative state education directory; email or phone published by the state; awaiting strict live revalidation.',
           updated_at=now()
       from target t
       where c.id=t.id
       returning c.id
-    `,[districtKey,row.fullName,row.title,row.email,row.phone,FLDOE_SUPERINTENDENTS]) as any[];
+    `,[stateCode,districtKey,row.district,row.fullName,row.title,row.email,row.phone,sourceUrl]) as any[];
     if (updated.length) {
       matched++;
       filled += updated.length;
@@ -163,7 +218,8 @@ export async function GET(req: NextRequest) {
     returning id
   `,[STATE_CODES]) as any[];
 
-  const floridaDoe = await ingestFloridaSuperintendents(sql);
+  const floridaDoe = await ingestStateSuperintendents(sql, "FL", FLDOE_SUPERINTENDENTS, fetchFloridaSuperintendents);
+  const nebraskaNde = await ingestStateSuperintendents(sql, "NE", NDE_PUBLIC_DISTRICTS, fetchNebraskaSuperintendents);
 
   const filled = await sql.query(`
     with ranked as (
@@ -225,7 +281,7 @@ export async function GET(req: NextRequest) {
 
   const before = beforeRows[0] || null;
   const after = afterRows[0] || null;
-  const summary = { before, after, invalidSlotsRemoved: removedInvalid.length, districtSlotsAdded, stateSlotsAdded: stateSlots.length, floridaDoe, candidatesFilled: filled.length };
+  const summary = { before, after, invalidSlotsRemoved: removedInvalid.length, districtSlotsAdded, stateSlotsAdded: stateSlots.length, floridaDoe, nebraskaNde, candidatesFilled: filled.length };
   console.log('RAVEN_STATE_FILL', summary);
 
   return NextResponse.json({ok:true,...summary,states});
