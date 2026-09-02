@@ -34,29 +34,11 @@ export async function GET(req: NextRequest) {
     returning c.id
   `,[INVALID_AGENCY]) as any[];
 
-  const districtSlots = await sql.query(`
-    insert into raven_state_contacts(state_code,county,agency_id,scope,role_key,verification_status)
-    select a.state_code,a.county,a.id,'district',r.role_key,'missing'
-    from agencies a
-    cross join (values
-      ('security_director'),
-      ('school_board'),
-      ('superintendent'),
-      ('assistant_superintendent'),
-      ('it_director')
-    ) r(role_key)
-    where a.agency_type='k12'
-      and a.state_code = any($1::text[])
-      and a.canonical_name !~* $2
-      and not exists (
-        select 1 from raven_state_contacts x
-        where x.state_code=a.state_code
-          and x.agency_id=a.id
-          and x.scope='district'
-          and x.role_key=r.role_key
-      )
-    returning id
-  `,[STATE_CODES,INVALID_AGENCY]) as any[];
+  // District-slot inventory is owned by the curated Raven/NCES rebuild path.
+  // Do not recreate slots from every agencies.agency_type='k12' row here: that
+  // previously re-added ~26k non-durable slots every run which were removed by
+  // the next curated pass, causing churn and corrupting the missing-slot queue.
+  const districtSlotsAdded = 0;
 
   const stateSlots = await sql.query(`
     insert into raven_state_contacts(state_code,county,agency_id,scope,role_key,verification_status)
@@ -119,7 +101,7 @@ export async function GET(req: NextRequest) {
 
   const before = beforeRows[0] || null;
   const after = afterRows[0] || null;
-  const summary = { before, after, invalidSlotsRemoved: removedInvalid.length, districtSlotsAdded: districtSlots.length, stateSlotsAdded: stateSlots.length, candidatesFilled: filled.length };
+  const summary = { before, after, invalidSlotsRemoved: removedInvalid.length, districtSlotsAdded, stateSlotsAdded: stateSlots.length, candidatesFilled: filled.length };
   console.log('RAVEN_STATE_FILL', summary);
 
   return NextResponse.json({ok:true,...summary,states});
