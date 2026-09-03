@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const KDE_DIRECTORY = "https://applications.education.ky.gov/SDCI/District.aspx/1000";
+const KDE_CHECKED = "Authoritative Kentucky KDE statewide directory checked; district identity did not match this slot on this pass.";
 
 type KdeRow = { district: string; fullName: string; phone: string };
 type MissingSlot = { id: string; county: string | null; canonical_name: string | null };
@@ -79,9 +80,10 @@ export async function GET(req: NextRequest) {
     from raven_state_contacts c
     left join agencies a on a.id=c.agency_id
     where c.state_code='KY' and c.scope='district' and c.role_key='superintendent' and c.verification_status='missing'
+      and coalesce(c.evidence_note,'') <> $1
     order by coalesce(c.updated_at,c.created_at) asc,c.id asc
     limit 80
-  `) as MissingSlot[];
+  `,[KDE_CHECKED]) as MissingSlot[];
 
   const byKey = new Map(roster.map(row => [key(row.district), row]));
   let filled = 0;
@@ -112,14 +114,14 @@ export async function GET(req: NextRequest) {
       unmatched++;
       await sql.query(`
         update raven_state_contacts
-        set evidence_note='Authoritative Kentucky KDE statewide directory checked; district identity did not match this slot on this pass.',updated_at=now()
+        set evidence_note=$2,updated_at=now()
         where id=$1 and verification_status='missing'
-      `,[slot.id]);
+      `,[slot.id,KDE_CHECKED]);
     }
   }
 
   const afterRows = await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[];
-  const summary = { ok:true, source:KDE_DIRECTORY, rosterFetched:roster.length, districtsNewlyAttempted:attemptedIds.length, filled, unmatched, before:beforeRows[0] || null, after:afterRows[0] || null };
+  const summary = { ok:true, source:KDE_DIRECTORY, rosterFetched:roster.length, districtsNewlyAttempted:attemptedIds.length, filled, unmatched, exhaustedCurrentSource: attemptedIds.length === 0, before:beforeRows[0] || null, after:afterRows[0] || null };
   console.log("RAVEN_KY_AUTHORITATIVE", summary);
   return NextResponse.json(summary);
 }
