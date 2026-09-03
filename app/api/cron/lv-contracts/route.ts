@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { authorizeLVCron } from "@/lib/lv-cron-auth";
 import { discoverFederalLVContracts } from "@/lib/lv-usaspending";
 import { persistLVContract } from "@/lib/lv-contract-persistence";
 import { lowVoltageDatabaseConfigured } from "@/lib/lv-persistence";
@@ -6,7 +7,9 @@ import { lowVoltageDatabaseConfigured } from "@/lib/lv-persistence";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const unauthorized = authorizeLVCron(request);
+  if (unauthorized) return unauthorized;
   if (!lowVoltageDatabaseConfigured()) {
     return NextResponse.json({ ok: false, error: "LOW_VOLTAGE_DATABASE_URL not configured" }, { status: 503 });
   }
@@ -18,12 +21,5 @@ export async function GET() {
     if (saved.stored) stored += 1;
   }
 
-  return NextResponse.json({
-    ok: result.failures.length === 0,
-    source: "USAspending",
-    scanned: result.scanned,
-    accepted: result.accepted,
-    stored,
-    failures: result.failures,
-  });
+  return NextResponse.json({ ok: result.failures.length === 0, source: "USAspending", scanned: result.scanned, accepted: result.accepted, stored, failures: result.failures });
 }
