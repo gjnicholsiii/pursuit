@@ -2,6 +2,8 @@ import { Sidebar } from "@/components/sidebar";
 import { money } from "@/lib/low-voltage";
 import { getSignalsData, liveDatabaseConfigured } from "@/lib/lv-live-data";
 
+export const dynamic = "force-dynamic";
+
 export default async function SignalsPage() {
   const signals = await getSignalsData();
   const live = liveDatabaseConfigured();
