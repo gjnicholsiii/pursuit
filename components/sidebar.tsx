@@ -1,23 +1,28 @@
 import Link from "next/link";
-import { Activity, Binoculars, Radar, Settings2, Target } from "lucide-react";
+import { Activity, Crosshair, FileSearch, Radar, RefreshCcw, ScanSearch, ShieldCheck } from "lucide-react";
 
 const items = [
-  { label: "Revenue Today", icon: Activity, href: "/" },
-  { label: "Opportunities", icon: Target, href: "/opportunities" },
-  { label: "Overwatch", icon: Radar, href: "/overwatch" },
-  { label: "Raven", icon: Binoculars, href: "/raven" },
-  { label: "Profile", icon: Settings2, href: "/profile" },
+  { label: "Overwatch", icon: Radar, href: "/" },
+  { label: "Signals", icon: Activity, href: "/signals" },
+  { label: "Pursuits", icon: Crosshair, href: "/pursuits" },
+  { label: "Rebids", icon: RefreshCcw, href: "/rebids" },
+  { label: "Incumbents", icon: ShieldCheck, href: "/incumbents" },
+  { label: "Spec", icon: FileSearch, href: "/spec" },
 ];
 
-export function Sidebar({ active = "Revenue Today" }: { active?: string }) {
+export function Sidebar({ active = "Overwatch" }: { active?: string }) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">P</div>
+        <div className="brand-mark"><ScanSearch size={18} /></div>
         <div>
-          <strong>Pursuit</strong>
-          <span>Government Revenue Intelligence</span>
+          <strong>PURSUIT</strong>
+          <span>LOW VOLTAGE INTELLIGENCE</span>
         </div>
+      </div>
+      <div className="overwatch-sequence">
+        <span>OVERWATCH</span>
+        <strong>DISCOVER → PREDICT → IDENTIFY → PURSUE</strong>
       </div>
       <nav>
         {items.map(({ label, icon: Icon, href }) => (
@@ -29,8 +34,8 @@ export function Sidebar({ active = "Revenue Today" }: { active?: string }) {
       </nav>
       <div className="sidebar-bottom">
         <div className="source-health">
-          <div className="source-health-top"><span>Data sources</span><strong>Federal + SLED live</strong></div>
-          <small>SAM.gov · USAspending · state · local · K-12 · higher ed</small>
+          <div className="source-health-top"><span>LV TAXONOMY</span><strong>9 disciplines</strong></div>
+          <small>Security · fire · cabling · AV · nurse call · DAS</small>
         </div>
       </div>
     </aside>
