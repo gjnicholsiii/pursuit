@@ -33,7 +33,27 @@ const CONTACTS: Contact[] = [
   {district:"Harris County",fullName:"Michael Barden",title:"Superintendent",email:"barden-m@harris.k12.ga.us",phone:"706-628-4206",sourceUrl:"https://www.gssaweb.org/superintendents/"},
   {district:"Bleckley County",fullName:"Trey Belflower",title:"Superintendent",email:"treyb@bleckleyschools.org",phone:"478-230-2871",sourceUrl:"https://bleckleyschools.org/apps/pages/index.jsp?type=d&uREC_ID=370818"},
   {district:"Mitchell County",fullName:"Veronica Brown",title:"Superintendent",email:"veronica_brown@mitchell.k12.ga.us",phone:"229-321-7002",sourceUrl:"https://www.mitchell.k12.ga.us/apps/staff/"},
-  {district:"Baker County",fullName:"Roy Brooks",title:"Superintendent",email:"rbrooks@baker.k12.ga.us",phone:"229-734-5274",sourceUrl:"https://www.baker.k12.ga.us/apps/pages/index.jsp?pREC_ID=2388058&type=d&uREC_ID=3445655"}
+  {district:"Baker County",fullName:"Roy Brooks",title:"Superintendent",email:"rbrooks@baker.k12.ga.us",phone:"229-734-5274",sourceUrl:"https://www.baker.k12.ga.us/apps/pages/index.jsp?pREC_ID=2388058&type=d&uREC_ID=3445655"},
+  {district:"Taylor County",fullName:"Jennifer Albritton",title:"Superintendent",email:"albritton.jennifer@taylorboe.org",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Wheeler County",fullName:"Alex Alvarez",title:"Superintendent",email:"alex.alvarez@wheeler.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Evans County",fullName:"Bradley Anderson",title:"Interim Superintendent",email:"BradleyAnderson@evanscountyschools.org",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Newton County",fullName:"Duke Bradley",title:"Superintendent",email:"bradley.duke@newton.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Baldwin County",fullName:"Kristie Brooks",title:"Superintendent",email:"kristina.brooks@baldwin.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Dodge County",fullName:"Wade Burnette",title:"Superintendent",email:"wade.burnette@dodge.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Franklin County",fullName:"Melanie Burton-Brown",title:"Superintendent",email:"melanie.burton-brown@franklin.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Oconee County",fullName:"Melissa Butler",title:"Superintendent",email:"mbutler@oconeeschools.org",phone:"706-769-5130",sourceUrl:"https://www.oconeeschools.org/board/superintendent/superintendents-office"},
+  {district:"Schley County",fullName:"Harley Calhoun",title:"Superintendent",email:"hcalhoun@schleyk12.org",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Hart County",fullName:"Jennifer Carter",title:"Superintendent",email:"jcarter@hart.k12.ga.us",phone:"706-376-5141",sourceUrl:"https://www.hart.k12.ga.us/departments/superintendent/about-the-superintendent"},
+  {district:"Buford City",fullName:"Amy Chafin",title:"Superintendent",email:"amy.chafin@bufordcityschools.org",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Colquitt County",fullName:"Dan Chappuis",title:"Superintendent",email:"daniel.chappuis@colquitt.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Bremen City",fullName:"Shannon Christian",title:"Superintendent",email:"shannon.christian@bremencs.com",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Richmond County",fullName:"Malinda Cobb",title:"Superintendent",email:"cobbma@boe.richmond.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Rabun County",fullName:"Steven Cole",title:"Superintendent",email:"scole@rabuncountyschools.org",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Dalton City",fullName:"Steven Craft",title:"Superintendent",email:"steven.craft@dalton.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Long County",fullName:"Heath Crane",title:"Superintendent",email:"hcrane@longcountyschools.org",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Lanier County",fullName:"Brooks Culpepper",title:"Superintendent",email:"gene.culpepper@lanier.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Worth County",fullName:"Nehemiah Cummings",title:"Superintendent",email:"ncummings@worthschools.net",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Jefferson County",fullName:"Samuel Dasher",title:"Superintendent",email:"dashers@jefferson.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"}
 ];
 
 function key(v:string){
