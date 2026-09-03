@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { classifyLowVoltage } from "@/lib/lv-classifier";
+import { VERIFIED_K12_IONWAVE_PORTALS } from "@/lib/k12/ionwave-portals";
 import { discoverIonWaveK12 } from "@/lib/sled/ionwave";
 import { lowVoltageDatabaseConfigured, persistLVPursuit } from "@/lib/lv-persistence";
 
@@ -8,7 +9,7 @@ export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   const persist = request.nextUrl.searchParams.get("persist") === "1";
-  const result = await discoverIonWaveK12();
+  const result = await discoverIonWaveK12(VERIFIED_K12_IONWAVE_PORTALS);
 
   const accepted = result.opportunities
     .map(opportunity => ({
@@ -25,6 +26,7 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
+    portals: VERIFIED_K12_IONWAVE_PORTALS.length,
     scanned: result.opportunities.length,
     accepted: accepted.length,
     rejected: result.opportunities.length - accepted.length,
