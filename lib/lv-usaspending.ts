@@ -74,10 +74,12 @@ async function fetchPage(page: number) {
   return await response.json() as { results?: RawAward[]; page_metadata?: { hasNext?: boolean } };
 }
 
-export async function discoverFederalLVContracts(maxPages = 3) {
+export async function discoverFederalLVContracts(maxPages = 3, startPage = 1) {
   const raw: RawAward[] = [];
   const failures: string[] = [];
-  for (let page = 1; page <= Math.max(1, Math.min(8, maxPages)); page += 1) {
+  const firstPage = Math.max(1, Math.floor(startPage));
+  const pageCount = Math.max(1, Math.min(20, Math.floor(maxPages)));
+  for (let page = firstPage; page < firstPage + pageCount; page += 1) {
     try {
       const result = await fetchPage(page);
       raw.push(...(result.results || []));
@@ -132,5 +134,5 @@ export async function discoverFederalLVContracts(maxPages = 3) {
   }
 
   contracts.sort((a, b) => b.rebid.score - a.rebid.score || b.amount - a.amount);
-  return { naics: LV_NAICS, scanned: raw.length, accepted: contracts.length, contracts, failures };
+  return { naics: LV_NAICS, startPage: firstPage, pagesRequested: pageCount, scanned: raw.length, accepted: contracts.length, contracts, failures };
 }
