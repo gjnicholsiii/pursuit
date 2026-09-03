@@ -4,7 +4,7 @@ import { persistLVPursuit, persistLVSignal } from "@/lib/lv-persistence";
 export const dynamic = "force-static";
 
 export default async function LVBootstrapPage() {
-  const offsets = [50, 100, 150, 200, 250];
+  const offsets = [300, 350, 400, 450, 500];
   const batches = await Promise.all(offsets.map(offset => discoverOpenGovLVBatch(offset, 50)));
   const signals = batches.flatMap(batch => batch.signals);
   const pursuits = batches.flatMap(batch => batch.pursuits);
@@ -22,7 +22,7 @@ export default async function LVBootstrapPage() {
     if (stored.stored) storedPursuits += 1;
   }
 
-  console.log("LV_OPENGOV_SWEEP", JSON.stringify({
+  console.log("LV_OPENGOV_SWEEP_FINAL", JSON.stringify({
     offsets,
     processed: batches.reduce((sum, batch) => sum + batch.processed, 0),
     signals: signals.length,
@@ -36,7 +36,7 @@ export default async function LVBootstrapPage() {
 
   return (
     <main style={{ padding: 32, fontFamily: "monospace" }}>
-      <h1>LV OpenGov Sweep Complete</h1>
+      <h1>LV OpenGov Final Sweep Complete</h1>
       <p>Portals processed: {batches.reduce((sum, batch) => sum + batch.processed, 0)}</p>
       <p>Signals: {signals.length}</p>
       <p>Pursuits: {pursuits.length}</p>
