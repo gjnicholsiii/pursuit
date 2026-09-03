@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import "./brief.css";
 
 export const metadata: Metadata = {
-  title: "Pursuit | Government Revenue Intelligence",
-  description: "Government revenue intelligence for federal, state, local, K-12 and higher education markets.",
+  title: "Pursuit | Low Voltage Intelligence",
+  description: "Low-voltage market intelligence for projects before the RFP, live pursuits, rebids, incumbents and product specifications.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
