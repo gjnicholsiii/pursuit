@@ -12,6 +12,18 @@ const RULES: Record<Discipline, string[]> = {
   "DAS": ["distributed antenna system", "das system", "public safety das", "errcs", "emergency responder radio", "bda system", "bi-directional amplifier", "in-building radio coverage"],
 };
 
+const TITLE_ANCHORS: Record<Discipline, string[]> = {
+  "Access Control": ["access control", "card reader", "badge reader", "electronic access"],
+  "Video Surveillance": ["video surveillance", "cctv", "security camera", "camera system", "video management system"],
+  "Intrusion": ["intrusion detection", "burglar alarm", "duress alarm", "panic alarm", "intrusion alarm"],
+  "Fire Alarm": ["fire alarm", "fire detection"],
+  "Structured Cabling / Fiber": ["structured cabling", "low voltage cabling", "data cabling", "fiber optic", "fiber backbone", "telecommunications cabling"],
+  "Intercom / Mass Notification": ["intercom", "public address system", "mass notification", "paging system"],
+  "AV": ["audio visual", "audiovisual", "av system", "video wall", "digital signage"],
+  "Nurse Call": ["nurse call", "patient communication"],
+  "DAS": ["distributed antenna system", "public safety das", "errcs", "emergency responder radio", "bda system", "bi-directional amplifier"],
+};
+
 const STRONG_EXCLUSIONS = [
   "traffic signal",
   "traffic camera enforcement",
@@ -65,12 +77,17 @@ function termMatches(text: string, terms: string[]) {
 }
 
 export function classifyLowVoltage(input: { title?: string | null; description?: string | null; scope?: string | null }): LVClassification {
+  const title = normalize(input.title || "");
   const text = normalize([input.title, input.description, input.scope].filter(Boolean).join(" \n "));
   const exclusions = STRONG_EXCLUSIONS.filter(term => text.includes(term));
+
   const disciplines = (Object.entries(RULES) as Array<[Discipline, string[]]>)
     .map(([discipline, terms]) => {
       const matchedTerms = termMatches(text, terms);
-      const score = Math.min(100, matchedTerms.reduce((sum, term) => sum + (term.includes(" ") ? 28 : 18), 0));
+      const titleAnchors = termMatches(title, TITLE_ANCHORS[discipline]);
+      const evidenceScore = matchedTerms.reduce((sum, term) => sum + (term.includes(" ") ? 28 : 18), 0);
+      const titleScore = titleAnchors.length ? 58 + Math.min(18, (titleAnchors.length - 1) * 9) : 0;
+      const score = Math.min(100, Math.max(evidenceScore, titleScore));
       return { discipline, score, matchedTerms };
     })
     .filter(item => item.score > 0)
