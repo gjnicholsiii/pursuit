@@ -21,32 +21,45 @@ function districtKey(v:string){
     .replace(/\b(public|community|consolidated|independent|county|city|school|schools|district|unit|union|unified|elementary|high|cusd|csd|ccsd|sd|uhsd)\b/g," ")
     .replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();
 }
-function pick(row:Record<string,any>, patterns:RegExp[]){
-  for(const [k,v] of Object.entries(row)) if(patterns.some(rx=>rx.test(clean(k)))) { const x=clean(v); if(x) return x; }
-  return "";
-}
+function col(headers:string[], patterns:RegExp[]){ return headers.findIndex(h=>patterns.some(rx=>rx.test(clean(h)))); }
 
 async function illinois():Promise<Contact[]> {
-  const res=await fetch(SOURCE,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/7.0; authoritative-state-roster)",accept:"application/vnd.ms-excel,application/octet-stream,*/*"}});
+  const res=await fetch(SOURCE,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/7.1; authoritative-state-roster)",accept:"application/vnd.ms-excel,application/octet-stream,*/*"}});
   if(!res.ok) throw new Error(`Illinois ISBE directory HTTP ${res.status}`);
   const buf=Buffer.from(await res.arrayBuffer());
   const wb=XLSX.read(buf,{type:"buffer"});
   const contacts:Contact[]=[];
   for(const sheetName of wb.SheetNames){
-    if(!/(public|district)/i.test(sheetName)) continue;
-    const rows=XLSX.utils.sheet_to_json<Record<string,any>>(wb.Sheets[sheetName],{defval:""});
-    for(const row of rows){
-      const district=pick(row,[/^entity\s*name$/i,/^district\s*name$/i,/^name$/i]);
-      const admin=pick(row,[/administrator/i,/superintendent/i,/chief administrator/i]);
-      const phone=pick(row,[/^phone/i,/telephone/i]);
-      const email=pick(row,[/e-?mail/i]);
+    if(!/(public.*(sch|dist)|district)/i.test(sheetName)) continue;
+    const matrix=XLSX.utils.sheet_to_json<any[]>(wb.Sheets[sheetName],{header:1,defval:"",raw:false}) as any[][];
+    const headerIndex=matrix.findIndex(row=>{
+      const cells=row.map(clean);
+      return cells.some(c=>/^(entity|district)\s*name$/i.test(c)) && cells.some(c=>/(administrator|superintendent|chief administrator)/i.test(c));
+    });
+    if(headerIndex<0) continue;
+    const headers=matrix[headerIndex].map(clean);
+    const districtI=col(headers,[/^entity\s*name$/i,/^district\s*name$/i,/^name$/i]);
+    const adminI=col(headers,[/administrator/i,/superintendent/i,/chief administrator/i]);
+    const phoneI=col(headers,[/^phone/i,/telephone/i]);
+    const emailI=col(headers,[/e-?mail/i]);
+    const typeI=col(headers,[/^entity\s*type$/i,/^type$/i,/entity type/i]);
+    if(districtI<0 || adminI<0 || (phoneI<0 && emailI<0)) continue;
+    for(const row of matrix.slice(headerIndex+1)){
+      const district=clean(row[districtI]);
+      const admin=clean(row[adminI]);
+      const phone=phoneI>=0?clean(row[phoneI]):"";
+      const rawEmail=emailI>=0?clean(row[emailI]):"";
+      const email=validEmail(rawEmail)?rawEmail:"";
+      const entityType=typeI>=0?clean(row[typeI]):"";
+      if(entityType && !/(district|charter district)/i.test(entityType)) continue;
       if(!district || !admin || (!phone && !email)) continue;
-      if(email && !validEmail(email) && !phone) continue;
-      contacts.push({district,fullName:person(admin),phone,email:validEmail(email)?email:""});
+      if(!person(admin) || /^(vacant|n\/a|none|unknown)$/i.test(person(admin))) continue;
+      contacts.push({district,fullName:person(admin),phone,email});
     }
   }
   const out=new Map<string,Contact>();
   for(const c of contacts){ const k=districtKey(c.district); if(k && !out.has(k)) out.set(k,c); }
+  if(out.size===0) throw new Error(`Illinois ISBE workbook parsed zero reachable district administrators; refusing to advance durable queue`);
   return [...out.values()];
 }
 
