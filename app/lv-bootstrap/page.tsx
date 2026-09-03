@@ -1,32 +1,31 @@
-import { discoverOpenGovLVBatch } from "@/lib/lv-opengov";
-import { persistLVPursuit, persistLVSignal } from "@/lib/lv-persistence";
+import { classifyLowVoltage } from "@/lib/lv-classifier";
+import { persistLVPursuit } from "@/lib/lv-persistence";
+import { discoverIonWaveK12 } from "@/lib/sled/ionwave";
 
 export const dynamic = "force-static";
 
 export default async function LVBootstrapPage() {
-  const result = await discoverOpenGovLVBatch(0, 20);
-  let storedSignals = 0;
+  const result = await discoverIonWaveK12();
+  const accepted = result.opportunities
+    .map(opportunity => ({
+      opportunity,
+      classification: classifyLowVoltage({ title: opportunity.title, description: opportunity.description }),
+    }))
+    .filter(item => item.classification.accepted);
+
   let storedPursuits = 0;
-
-  for (const item of result.signals) {
-    const stored = await persistLVSignal(item.opportunity, item.classification, "planning_mention");
-    if (stored.stored) storedSignals += 1;
-  }
-
-  for (const item of result.pursuits) {
+  for (const item of accepted) {
     const stored = await persistLVPursuit(item.opportunity, item.classification);
     if (stored.stored) storedPursuits += 1;
   }
 
   return (
     <main style={{ padding: 32, fontFamily: "monospace" }}>
-      <h1>LV Bootstrap Complete</h1>
-      <p>Portals processed: {result.processed}</p>
-      <p>Signals found: {result.signals.length}</p>
-      <p>Pursuits found: {result.pursuits.length}</p>
-      <p>Signals stored: {storedSignals}</p>
-      <p>Pursuits stored: {storedPursuits}</p>
-      <p>Failures: {result.failures.length}</p>
+      <h1>LV IonWave Bootstrap Complete</h1>
+      <p>Scanned: {result.opportunities.length}</p>
+      <p>Accepted: {accepted.length}</p>
+      <p>Stored pursuits: {storedPursuits}</p>
+      <p>Portal diagnostics: {result.diagnostics.length}</p>
     </main>
   );
 }
