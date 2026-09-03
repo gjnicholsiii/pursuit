@@ -18,7 +18,7 @@ type Row = Record<string, unknown>;
 
 function db() {
   const url = process.env.LOW_VOLTAGE_DATABASE_URL;
-  return url ? neon(url) : null;
+  return url && /^postgres(?:ql)?:\/\//i.test(url) ? neon(url) : null;
 }
 
 function asRows(value: unknown) {
@@ -65,7 +65,8 @@ function stringArray(value: unknown) {
 }
 
 export function liveDatabaseConfigured() {
-  return Boolean(process.env.LOW_VOLTAGE_DATABASE_URL);
+  const url = process.env.LOW_VOLTAGE_DATABASE_URL;
+  return Boolean(url && /^postgres(?:ql)?:\/\//i.test(url));
 }
 
 export async function getSignalsData(): Promise<Signal[]> {
@@ -97,7 +98,7 @@ export async function getSignalsData(): Promise<Signal[]> {
       order by s.score desc, s.detected_at desc
       limit 250
     `);
-    const mapped = result.map(row => {
+    return result.map(row => {
       const d = discipline(row.discipline);
       if (!d) return null;
       return {
@@ -113,9 +114,8 @@ export async function getSignalsData(): Promise<Signal[]> {
         score: num(row.score),
       } satisfies Signal;
     }).filter(Boolean) as Signal[];
-    return mapped.length ? mapped : seedSignals;
   } catch {
-    return seedSignals;
+    return [];
   }
 }
 
@@ -145,7 +145,7 @@ export async function getPursuitsData(): Promise<Pursuit[]> {
       order by pu.fit_score desc nulls last, pu.due_at asc nulls last
       limit 250
     `);
-    const mapped = result.map(row => {
+    return result.map(row => {
       const ds = disciplineArray(row.disciplines);
       if (!ds.length) return null;
       return {
@@ -164,9 +164,8 @@ export async function getPursuitsData(): Promise<Pursuit[]> {
         documents: num(row.document_count),
       } satisfies Pursuit;
     }).filter(Boolean) as Pursuit[];
-    return mapped.length ? mapped : seedPursuits;
   } catch {
-    return seedPursuits;
+    return [];
   }
 }
 
@@ -198,7 +197,7 @@ export async function getRebidsData(): Promise<Rebid[]> {
       order by rp.probability desc nulls last, c.current_end_date asc nulls last
       limit 250
     `);
-    const mapped = result.map(row => {
+    return result.map(row => {
       const ds = disciplineArray(row.disciplines);
       if (!ds.length) return null;
       return {
@@ -214,9 +213,8 @@ export async function getRebidsData(): Promise<Rebid[]> {
         disciplines: ds,
       } satisfies Rebid;
     }).filter(Boolean) as Rebid[];
-    return mapped.length ? mapped : seedRebids;
   } catch {
-    return seedRebids;
+    return [];
   }
 }
 
@@ -236,16 +234,15 @@ export async function getIncumbentsData(): Promise<Incumbent[]> {
       order by identified_value desc
       limit 200
     `);
-    const mapped = result.map(row => ({
+    return result.map(row => ({
       contractor: text(row.incumbent_name, "Unknown incumbent"),
       identifiedValue: num(row.identified_value),
       contracts: num(row.contracts),
       markets: stringArray(row.markets),
       technologies: [],
     } satisfies Incumbent));
-    return mapped.length ? mapped : seedIncumbents;
   } catch {
-    return seedIncumbents;
+    return [];
   }
 }
 
@@ -275,7 +272,7 @@ export async function getSpecsData(): Promise<SpecRecord[]> {
       order by active_projects desc, estimated_project_value desc
       limit 200
     `);
-    const mapped = result.map(row => ({
+    return result.map(row => ({
       manufacturer: text(row.manufacturer, "Unknown"),
       product: text(row.product) || undefined,
       activeProjects: num(row.active_projects),
@@ -284,9 +281,8 @@ export async function getSpecsData(): Promise<SpecRecord[]> {
       momentum: 0,
       pairedWith: [],
     } satisfies SpecRecord));
-    return mapped.length ? mapped : seedSpecs;
   } catch {
-    return seedSpecs;
+    return [];
   }
 }
 
