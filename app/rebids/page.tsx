@@ -3,7 +3,7 @@ import { money } from "@/lib/low-voltage";
 import { getRebidsData, liveDatabaseConfigured } from "@/lib/lv-live-data";
 
 export default async function RebidsPage() {
-  const rebids = await getRebidsData();
+  const rebids = (await getRebidsData()).filter(item => item.probability >= 55);
   const live = liveDatabaseConfigured();
   return (
     <main className="shell">
@@ -20,6 +20,7 @@ export default async function RebidsPage() {
               <div className="card-meta"><div className="meta-box"><span>INCUMBENT</span><strong>{item.incumbent}</strong></div><div className="meta-box"><span>CONTRACT VALUE</span><strong>{money(item.contractValue)}</strong></div><div className="meta-box"><span>CURRENT END</span><strong>{item.currentEnd}</strong></div><div className="meta-box"><span>PROCUREMENT WINDOW</span><strong>{item.procurementWindow}</strong></div></div>
               <div className="progress"><i style={{width:`${item.probability}%`}} /></div>
             </article>)}
+            {!rebids.length && <div className="footer-note">No contracts have crossed the 55% rebid threshold yet.</div>}
           </div>
           <div className="footer-note">A rebid score is a positioning signal, not a guarantee. The live model retains the contract evidence and prediction rationale behind each score.</div>
         </div>
