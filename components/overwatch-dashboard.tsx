@@ -1,24 +1,22 @@
 import Link from "next/link";
-import { Activity, Crosshair, FileSearch, Radar, RefreshCcw, ShieldCheck } from "lucide-react";
-import { incumbents, money, pursuits, rebids, signals, specs } from "@/lib/low-voltage";
+import { Activity, RefreshCcw } from "lucide-react";
+import { money } from "@/lib/low-voltage";
+import { getAllLVData } from "@/lib/lv-live-data";
 import { Sidebar } from "@/components/sidebar";
-
-const feed = [
-  ["08:31", "School board approves $4.2M security modernization", "Access Control · Illinois", "94"],
-  ["08:24", "Genetec appears in new courthouse security package", "SPEC · Missouri", "91"],
-  ["08:17", "Access control contract enters final renewal year", "REBID · Illinois", "88"],
-  ["08:03", "Hospital selects consultant for patient tower", "Nurse Call · Missouri", "91"],
-  ["07:51", "Municipal camera modernization planning funded", "Video Surveillance · Arizona", "86"],
-];
 
 const radarDots = [
   ["29%", "31%", true], ["62%", "26%", false], ["74%", "43%", true], ["42%", "64%", false], ["57%", "72%", false],
   ["25%", "58%", true], ["68%", "62%", false], ["48%", "38%", true], ["35%", "75%", false], ["79%", "69%", false],
 ];
 
-export function OverwatchDashboard() {
+export async function OverwatchDashboard() {
+  const { signals, pursuits, rebids, incumbents, specs, live } = await getAllLVData();
   const identifiedPipeline = signals.reduce((sum, item) => sum + item.estimatedValue, 0) + pursuits.reduce((sum, item) => sum + item.estimatedValue, 0);
   const rebidValue = rebids.reduce((sum, item) => sum + item.contractValue, 0);
+  const feed = [
+    ...signals.slice(0, 3).map(item => ({ kind: "SIGNAL", title: `${item.organization} · ${item.trigger}`, detail: `${item.discipline} · ${item.location}`, score: item.score })),
+    ...rebids.slice(0, 2).map(item => ({ kind: "REBID", title: `${item.organization} · ${item.title}`, detail: `${item.incumbent} · ${item.procurementWindow}`, score: item.probability })),
+  ].slice(0, 5);
 
   return (
     <main className="shell">
@@ -26,7 +24,7 @@ export function OverwatchDashboard() {
       <section className="workspace">
         <header className="topbar">
           <div className="topbar-left"><i className="live-dot" /><span>OVERWATCH ACTIVE · LOW VOLTAGE ONLY</span></div>
-          <div className="topbar-actions"><span className="chip">9 DISCIPLINES</span><span className="chip">NATIONAL</span></div>
+          <div className="topbar-actions"><span className="chip">{live ? "LIVE LV DATABASE" : "PROTOTYPE DATA"}</span><span className="chip">9 DISCIPLINES</span><span className="chip">NATIONAL</span></div>
         </header>
         <div className="content">
           <section className="hero">
@@ -57,8 +55,8 @@ export function OverwatchDashboard() {
             </article>
 
             <article className="panel">
-              <div className="panel-head"><div><span>OVERWATCH FEED</span><h2>What changed</h2></div><small>Latest detected intelligence</small></div>
-              <div className="feed">{feed.map(([time,title,detail,score]) => <div className="feed-row" key={`${time}-${title}`}><span className="feed-time">{time}</span><div className="feed-copy"><strong>{title}</strong><span>{detail}</span></div><span className="score">{score}</span></div>)}</div>
+              <div className="panel-head"><div><span>OVERWATCH FEED</span><h2>What deserves attention</h2></div><small>{live ? "Current database" : "Prototype dataset"}</small></div>
+              <div className="feed">{feed.map(item => <div className="feed-row" key={`${item.kind}-${item.title}`}><span className="feed-time">{item.kind}</span><div className="feed-copy"><strong>{item.title}</strong><span>{item.detail}</span></div><span className="score">{item.score}</span></div>)}</div>
             </article>
           </section>
 
@@ -81,7 +79,7 @@ export function OverwatchDashboard() {
             </article>
           </section>
 
-          <div className="footer-note">Prototype data is seeded to exercise the new LV product model. Production ingestion will populate these objects from verified public evidence and preserve the source behind every score.</div>
+          <div className="footer-note">{live ? "Showing records from the isolated Pursuit low-voltage database. Scores retain source evidence so each conclusion can be traced back to the public record." : "Prototype data is shown until LOW_VOLTAGE_DATABASE_URL is connected to this preview. The production data path is already wired and isolated from legacy Pursuit."}</div>
         </div>
       </section>
     </main>
