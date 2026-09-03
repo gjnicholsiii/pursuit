@@ -7,7 +7,6 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const BASE = "https://www.edna.pa.gov/Screens/wfSearchEntityResults.aspx?AUN=&CID=-1&CategoryIDs=1%2C&City=&CurrentName=&HistoricalName=&IU=-1&SchoolBranch=&StatusIDs=1%2C";
-const CHECKED = "Authoritative Pennsylvania EdNA school-district directory checked; no matching reachable superintendent for this district in this source.";
 
 type Contact = { district:string; fullName:string; title:string; email:string; phone:string; sourceUrl:string };
 
@@ -47,7 +46,17 @@ const EDNA_SEED:Contact[] = [
   {district:"East Penn SD",fullName:"Kristen M Campbell",title:"Superintendent",email:"",phone:"(610) 966-8334",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26529"},
   {district:"William Penn SD",fullName:"Eric Becoats",title:"Superintendent",email:"",phone:"(610) 284-8005",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26631"},
   {district:"Susquenita SD",fullName:"Jon D Fox",title:"Superintendent",email:"",phone:"(717) 957-6000 x50001",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26403"},
-  {district:"Commodore Perry SD",fullName:"Kenneth C Jewell",title:"Superintendent",email:"",phone:"(724) 253-3255 x1225",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26105"}
+  {district:"Commodore Perry SD",fullName:"Kenneth C Jewell",title:"Superintendent",email:"",phone:"(724) 253-3255 x1225",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26105"},
+  {district:"East Allegheny SD",fullName:"Joseph DiLucente",title:"Superintendent",email:"",phone:"(412) 824-8012 x4151",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26041"},
+  {district:"Knoch SD",fullName:"Melissa Grantz",title:"Superintendent",email:"",phone:"(724) 352-1700 x5605",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26093"},
+  {district:"Everett Area SD",fullName:"David A Burkett",title:"Superintendent",email:"",phone:"(814) 652-9114 x2101",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26194"},
+  {district:"Ridley SD",fullName:"Charles Maiers",title:"Superintendent",email:"",phone:"(610) 534-1900 x1101",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26625"},
+  {district:"Governor Mifflin SD",fullName:"Lisa T Hess",title:"Superintendent",email:"",phone:"(610) 775-1461",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26361"},
+  {district:"Camp Hill SD",fullName:"Daniel D Serfass",title:"Superintendent",email:"",phone:"(717) 901-2400 x5933",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26376"},
+  {district:"Dover Area SD",fullName:"Timothy Mitzel",title:"Acting Superintendent",email:"",phone:"(717) 292-3671",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26308"},
+  {district:"York City SD",fullName:"Andrea Berry-Brown",title:"Superintendent",email:"",phone:"(717) 881-4146",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26320"},
+  {district:"Shenango Area SD",fullName:"Joseph McCormick",title:"Superintendent",email:"",phone:"(724) 658-7287 x1",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26101"},
+  {district:"Chestnut Ridge SD",fullName:"Kyle Kane",title:"Superintendent",email:"",phone:"(814) 839-4195",sourceUrl:"https://www.edna.pa.gov/Screens/Details/wfAdminDetails.aspx?ID=26193"}
 ];
 
 async function fetchPage(page:number):Promise<Contact[]> {
@@ -67,10 +76,9 @@ export async function GET(req:NextRequest){
 
   let fetched:Contact[]=[]; try{fetched=await fetchRoster();}catch{}
   const fullRoster=fetched.length>=100; const roster=fullRoster?fetched:EDNA_SEED;
-  const keys=[...new Set(roster.map(r=>districtKey(r.district)).filter(Boolean))];
   const slots=await sql.query(`select c.id::text,c.county,a.canonical_name from raven_state_contacts c left join agencies a on a.id=c.agency_id where c.state_code='PA' and c.scope='district' and c.role_key='superintendent' and c.verification_status='missing' order by coalesce(c.updated_at,c.created_at) asc,c.id asc`,[]) as any[];
   const byKey=new Map(roster.map(r=>[districtKey(r.district),r])); let attempted=0,matched=0,filled=0,unmatched=0;
-  for(const s of slots){ const ak=districtKey(s.canonical_name||""); const ck=districtKey(s.county||""); let c=byKey.get(ak)||byKey.get(ck); if(!c)c=roster.find(r=>{const rk=districtKey(r.district);return !!rk&&((ak&&ak.includes(rk))||(rk&&ak&&rk.includes(ak)));}); if(!c){ if(fullRoster && keys.some(k=>k===ak||k===ck)){attempted++;unmatched++;} continue; } attempted++; matched++; const u=await sql.query(`update raven_state_contacts set full_name=$2,title=$3,email=nullif($4,''),phone=nullif($5,''),source_url=$6,verification_status='candidate',evidence_note='Reachable superintendent from official Pennsylvania Department of Education EdNA administrator record; explicit phone or public email published by EdNA; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,c.fullName,c.title,c.email,c.phone,c.sourceUrl]) as any[]; filled+=u.length; }
+  for(const s of slots){ const ak=districtKey(s.canonical_name||""); const ck=districtKey(s.county||""); let c=byKey.get(ak)||byKey.get(ck); if(!c)c=roster.find(r=>{const rk=districtKey(r.district);return !!rk&&((ak&&ak.includes(rk))||(rk&&ak&&rk.includes(ak)));}); if(!c)continue; attempted++; matched++; const u=await sql.query(`update raven_state_contacts set full_name=$2,title=$3,email=nullif($4,''),phone=nullif($5,''),source_url=$6,verification_status='candidate',evidence_note='Reachable superintendent from official Pennsylvania Department of Education EdNA administrator record; explicit phone or public email published by EdNA; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,c.fullName,c.title,c.email,c.phone,c.sourceUrl]) as any[]; filled+=u.length; }
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
   const result={ok:true,state:"PA",mode:fullRoster?"live-edna-statewide":"authoritative-edna-seed",liveRosterFetched:fetched.length,seedRecords:EDNA_SEED.length,districtsNewlyAttempted:attempted,matched,filled,unmatched,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}}; console.log("RAVEN_PA_AUTHORITATIVE",result); return NextResponse.json(result);
 }
