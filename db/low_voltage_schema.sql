@@ -119,6 +119,7 @@ create index if not exists idx_projects_stage on projects(project_stage);
 create index if not exists idx_signals_score on signals(score desc);
 create index if not exists idx_signals_detected on signals(detected_at desc);
 create index if not exists idx_pursuits_due on pursuits(due_at);
+create unique index if not exists idx_pursuits_source_unique on pursuits(solicitation_number, source_url);
 create index if not exists idx_contracts_incumbent on contracts(incumbent_name);
 create index if not exists idx_contracts_end on contracts(current_end_date);
 create index if not exists idx_rebids_probability on rebid_predictions(probability desc);
