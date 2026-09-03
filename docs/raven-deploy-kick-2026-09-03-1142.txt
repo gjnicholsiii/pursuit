@@ -1,0 +1,3 @@
+Deployment trigger for Raven production recovery.
+Reason: Vercel production remained on b2863d1e304d8144db784d5821d33302126ea69e while main contained 1bdd6883a5c8ff908b8df2e5534f28e1a425be8d, which replaces the dead New Mexico SharePoint source with the current NMPED district index plus official district superintendent pages.
+No application behavior is changed by this file.
