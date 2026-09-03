@@ -36,6 +36,11 @@ const STRONG_EXCLUSIONS = [
   "sprinkler inspection only",
   "electrical switchgear",
   "high voltage",
+  "fuel pump",
+  "underwater camera",
+  "access control point",
+  "master electrician",
+  "electrical distribution equipment",
 ];
 
 const MANUFACTURERS: Record<string, string[]> = {
@@ -58,6 +63,7 @@ const MANUFACTURERS: Record<string, string[]> = {
   Rauland: ["rauland", "responder 5"],
   Ascom: ["ascom"],
   AtlasIED: ["atlasied", "atlas ied"],
+  Valcom: ["valcom"],
 };
 
 export type LVClassification = {
