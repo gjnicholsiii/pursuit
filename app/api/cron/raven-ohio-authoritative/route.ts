@@ -29,7 +29,11 @@ const CONTACTS: Contact[] = [
   {district:"Jasper County",fullName:"Tracy Blackburn",title:"Superintendent",email:"tblackburn@jasper.k12.ga.us",phone:"706-468-6350",sourceUrl:"https://www.gssaweb.org/superintendents/"},
   {district:"Haralson County",fullName:"Jerry Bell",title:"Superintendent",email:"jerry.bell@haralson.k12.ga.us",phone:"770-574-2500",sourceUrl:"https://www.gssaweb.org/superintendents/"},
   {district:"Pierce County",fullName:"Dara Bennett",title:"Superintendent",email:"dbennett@pierce.k12.ga.us",phone:"912-449-2044",sourceUrl:"https://www.gssaweb.org/superintendents/"},
-  {district:"Towns County",fullName:"Darren Berrong",title:"Superintendent",email:"dberrong@towns.k12.ga.us",phone:"706-896-2279",sourceUrl:"https://www.gssaweb.org/superintendents/"}
+  {district:"Towns County",fullName:"Darren Berrong",title:"Superintendent",email:"dberrong@towns.k12.ga.us",phone:"706-896-2279",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Harris County",fullName:"Michael Barden",title:"Superintendent",email:"barden-m@harris.k12.ga.us",phone:"706-628-4206",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Bleckley County",fullName:"Trey Belflower",title:"Superintendent",email:"treyb@bleckleyschools.org",phone:"478-230-2871",sourceUrl:"https://bleckleyschools.org/apps/pages/index.jsp?type=d&uREC_ID=370818"},
+  {district:"Mitchell County",fullName:"Veronica Brown",title:"Superintendent",email:"veronica_brown@mitchell.k12.ga.us",phone:"229-321-7002",sourceUrl:"https://www.mitchell.k12.ga.us/apps/staff/"},
+  {district:"Baker County",fullName:"Roy Brooks",title:"Superintendent",email:"rbrooks@baker.k12.ga.us",phone:"229-734-5274",sourceUrl:"https://www.baker.k12.ga.us/apps/pages/index.jsp?pREC_ID=2388058&type=d&uREC_ID=3445655"}
 ];
 
 function key(v:string){
