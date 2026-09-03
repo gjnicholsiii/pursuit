@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { discoverFederalLVContracts } from "@/lib/lv-usaspending";
+import { persistLVContract } from "@/lib/lv-contract-persistence";
+import { lowVoltageDatabaseConfigured } from "@/lib/lv-persistence";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   const pages = Math.max(1, Math.min(8, Number(request.nextUrl.searchParams.get("pages") || 3)));
+  const persist = request.nextUrl.searchParams.get("persist") === "1";
   const result = await discoverFederalLVContracts(pages);
+
+  let persisted = 0;
+  if (persist && lowVoltageDatabaseConfigured()) {
+    for (const contract of result.contracts) {
+      const stored = await persistLVContract(contract);
+      if (stored.stored) persisted += 1;
+    }
+  }
 
   const incumbentTotals = new Map<string, { contracts: number; value: number }>();
   for (const contract of result.contracts) {
@@ -21,6 +32,8 @@ export async function GET(request: NextRequest) {
     naics: result.naics,
     scanned: result.scanned,
     accepted: result.accepted,
+    databaseConfigured: lowVoltageDatabaseConfigured(),
+    persisted,
     failures: result.failures,
     incumbents: [...incumbentTotals.entries()]
       .map(([incumbent, totals]) => ({ incumbent, ...totals }))
