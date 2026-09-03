@@ -6,18 +6,31 @@ export const dynamic = "force-static";
 
 export default async function LVBootstrapPage() {
   const result = await discoverIonWaveK12();
-  const accepted = result.opportunities
-    .map(opportunity => ({
-      opportunity,
-      classification: classifyLowVoltage({ title: opportunity.title, description: opportunity.description }),
-    }))
-    .filter(item => item.classification.accepted);
+  const classified = result.opportunities.map(opportunity => ({
+    opportunity,
+    classification: classifyLowVoltage({ title: opportunity.title, description: opportunity.description }),
+  }));
+  const accepted = classified.filter(item => item.classification.accepted);
+
+  console.log("LV_IONWAVE_BOOTSTRAP", JSON.stringify({
+    scanned: result.opportunities.length,
+    accepted: accepted.length,
+    diagnostics: result.diagnostics,
+    sampleTitles: result.opportunities.slice(0, 12).map(item => item.title),
+    rejectedSample: classified.filter(item => !item.classification.accepted).slice(0, 12).map(item => ({
+      title: item.opportunity.title,
+      score: item.classification.score,
+      disciplines: item.classification.disciplines,
+    })),
+  }));
 
   let storedPursuits = 0;
   for (const item of accepted) {
     const stored = await persistLVPursuit(item.opportunity, item.classification);
     if (stored.stored) storedPursuits += 1;
   }
+
+  console.log("LV_IONWAVE_STORED", JSON.stringify({ storedPursuits }));
 
   return (
     <main style={{ padding: 32, fontFamily: "monospace" }}>
