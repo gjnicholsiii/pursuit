@@ -91,7 +91,8 @@ export async function persistLVPursuit(opportunity: SledOpportunityRecord, class
 
   const existing = rows(await sql`
     select id, project_id from pursuits
-    where solicitation_number = ${opportunity.externalId} and source_url = ${opportunity.sourceUrl}
+    where source_url = ${opportunity.sourceUrl}
+       or (solicitation_number = ${opportunity.externalId} and source_url = ${opportunity.sourceUrl})
     limit 1
   `);
   if (existing.length) return { stored: false, reason: "already_exists", projectId: Number(existing[0].project_id) };
@@ -134,7 +135,6 @@ export async function persistLVSignal(
     from signals s
     join source_evidence e on e.id = s.evidence_id
     where e.source_url = ${opportunity.sourceUrl}
-      and e.content_hash = ${opportunity.externalId}
     limit 1
   `);
   if (existing.length) return { stored: false, reason: "already_exists", projectId: Number(existing[0].project_id) };
