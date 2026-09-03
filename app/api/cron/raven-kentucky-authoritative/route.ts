@@ -6,10 +6,8 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// KDE's legacy SDCI endpoint exposes the same authoritative statewide
-// superintendent/district roster and is reachable when the newer Open House
-// hostname intermittently returns 502 from Vercel.
-const KDE_DIRECTORY = "https://applications.education.ky.gov/SDCI/District.aspx/1000";
+const KDE_OPENHOUSE = "https://openhouse.education.ky.gov/Superintendents";
+const KDE_SDCI = "https://applications.education.ky.gov/SDCI/District.aspx/1000";
 const CHECKED = "Authoritative Kentucky KDE statewide superintendent roster checked for this missing superintendent slot; no matching published district superintendent found.";
 const BATCH_SIZE = 50;
 
@@ -19,33 +17,46 @@ type Slot = { id:string; agency_id:string; county:string|null; canonical_name:st
 function clean(v:any){ return String(v ?? "").replace(/\u00a0/g," ").replace(/\s+/g," ").trim(); }
 function key(v:any){ return clean(v).toLowerCase().replace(/&/g," and ").replace(/\b(public|community|consolidated|independent|school|schools|district|county|city)\b/g," ").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim(); }
 function person(v:string){ return clean(v).replace(/^(Dr\.|Mr\.|Mrs\.|Ms\.|Miss)\s+/i,""); }
+function phone(v:string){ const m=clean(v).match(/\(?\d{3}\)?[^\d]*\d{3}[^\d]*\d{4}/); return m?m[0]:""; }
 
 async function fetchHtml(url:string,timeoutMs=15000){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
-    const res=await fetch(url,{cache:"no-store",redirect:"follow",signal:controller.signal,headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/9.2; authoritative-public-directory)",accept:"text/html,application/xhtml+xml"}});
+    const res=await fetch(url,{cache:"no-store",redirect:"follow",signal:controller.signal,headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/9.3; authoritative-public-directory)",accept:"text/html,application/xhtml+xml"}});
     if(!res.ok) throw new Error(`${url} HTTP ${res.status}`);
     return {url:res.url||url,html:await res.text()};
   } finally { clearTimeout(timer); }
 }
 
-async function districts():Promise<District[]>{
-  const {html}=await fetchHtml(KDE_DIRECTORY);
+function parseDistricts(html:string):District[]{
   const $=cheerio.load(html);
   const out:District[]=[];
   $("tr").each((_,tr)=>{
-    const cells=$(tr).find("th,td").map((__,td)=>clean($(td).text())).get();
-    if(cells.length<5 || !/^\d{3,4}$/.test(cells[0]||"")) return;
-    const code=cells[0];
-    const district=cells[1];
-    const superintendent=person(cells[2]||"");
-    const phone=cells.find(x=>/\(?\d{3}\)?[^\d]*\d{3}[^\d]*\d{4}/.test(x))||"";
-    if(district && superintendent) out.push({code,district,superintendent,phone});
+    const cells=$(tr).find("th,td").map((__,td)=>clean($(td).text())).get().filter(Boolean);
+    if(cells.length<3) return;
+    const codeIndex=cells.findIndex(v=>/^\d{3,4}$/.test(v));
+    if(codeIndex<0) return;
+    const code=cells[codeIndex];
+    const district=cells[codeIndex+1]||"";
+    const superintendent=person(cells[codeIndex+2]||"");
+    const p=cells.map(phone).find(Boolean)||"";
+    if(district && superintendent && !/superintendent/i.test(superintendent)) out.push({code,district,superintendent,phone:p});
   });
-  const dedup=[...new Map(out.map(x=>[key(x.district),x])).values()];
-  if(dedup.length<150) throw new Error(`Kentucky KDE roster parsed only ${dedup.length} districts; refusing durable queue advancement`);
-  return dedup;
+  return [...new Map(out.map(x=>[key(x.district),x])).values()];
+}
+
+async function districts():Promise<{list:District[];source:string;errors:string[]}>{
+  const errors:string[]=[];
+  for(const source of [KDE_OPENHOUSE,KDE_SDCI]){
+    try{
+      const {html}=await fetchHtml(source);
+      const list=parseDistricts(html);
+      if(list.length>=150) return {list,source,errors};
+      errors.push(`${source} parsed only ${list.length} districts`);
+    }catch(err){ errors.push(err instanceof Error?err.message:String(err)); }
+  }
+  throw new Error(`Kentucky KDE roster unavailable or incomplete; ${errors.join(" | ")}`);
 }
 
 function matchDistrict(slot:Slot,list:District[]){
@@ -61,8 +72,8 @@ export async function GET(req:NextRequest){
   const sql=getSql();
   const before=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
 
-  let list:District[]=[];
-  try{ list=await districts(); }
+  let list:District[]=[]; let source=""; let sourceErrors:string[]=[];
+  try{ const roster=await districts(); list=roster.list; source=roster.source; sourceErrors=roster.errors; }
   catch(err){
     const blocker=err instanceof Error?err.message:String(err);
     console.error("RAVEN_KY_AUTHORITATIVE_FETCH",blocker);
@@ -78,7 +89,7 @@ export async function GET(req:NextRequest){
     if(d) districtsAttempted.add(d.code);
     if(d && d.superintendent && d.phone){
       matched++;
-      const u=await sql.query(`update raven_state_contacts set full_name=$2,title='School District Superintendent',email=null,phone=$3,source_url=$4,verification_status='candidate',evidence_note='Superintendent identity and district phone published by the Kentucky Department of Education statewide superintendent directory; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,d.superintendent,d.phone,KDE_DIRECTORY]) as any[];
+      const u=await sql.query(`update raven_state_contacts set full_name=$2,title='School District Superintendent',email=null,phone=$3,source_url=$4,verification_status='candidate',evidence_note='Superintendent identity and district phone published by the Kentucky Department of Education statewide superintendent directory; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,d.superintendent,d.phone,source]) as any[];
       filled+=u.length;
     } else {
       unmatched++;
@@ -88,7 +99,7 @@ export async function GET(req:NextRequest){
 
   const remaining=(await sql.query(`select count(*)::int n from raven_state_contacts where state_code='KY' and scope='district' and verification_status='missing' and role_key='superintendent' and coalesce(evidence_note,'') <> $1`,[CHECKED]) as any[])[0]?.n||0;
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const summary={ok:true,state:"KY",source:KDE_DIRECTORY,districtRoster:list.length,slotsNewlyAttempted:slots.length,districtsNewlyAttempted:districtsAttempted.size,matched,filled,unmatched,remainingUnattempted:remaining,exhaustedCurrentSource:remaining===0,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
+  const summary={ok:true,state:"KY",source,sourceFallbackErrors:sourceErrors,districtRoster:list.length,slotsNewlyAttempted:slots.length,districtsNewlyAttempted:districtsAttempted.size,matched,filled,unmatched,remainingUnattempted:remaining,exhaustedCurrentSource:remaining===0,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
   console.log("RAVEN_KY_AUTHORITATIVE",summary);
   return NextResponse.json(summary);
 }
