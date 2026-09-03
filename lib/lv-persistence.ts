@@ -47,6 +47,44 @@ async function addDisciplines(sql: SqlClient, projectId: number, classification:
   }
 }
 
+async function ensureEvidence(sql: SqlClient, opportunity: SledOpportunityRecord) {
+  const evidenceRows = rows(await sql`
+    insert into source_evidence (source_type, source_title, source_url, publisher, published_at, excerpt, content_hash)
+    values ('public_project_page', ${opportunity.title}, ${opportunity.sourceUrl}, ${opportunity.agency.name}, ${opportunity.issueDate || null}, ${opportunity.description || opportunity.title}, ${opportunity.externalId})
+    on conflict (source_url, content_hash) do update
+      set retrieved_at = now(),
+          source_title = excluded.source_title,
+          excerpt = excluded.excerpt
+    returning id
+  `);
+  return Number(evidenceRows[0].id);
+}
+
+async function addManufacturerMentions(
+  sql: SqlClient,
+  projectId: number,
+  evidenceId: number,
+  opportunity: SledOpportunityRecord,
+  classification: LVClassification,
+) {
+  if (!classification.manufacturers.length) return;
+  const discipline = classification.disciplines[0]?.discipline || null;
+  for (const manufacturer of classification.manufacturers) {
+    const existing = rows(await sql`
+      select id from spec_mentions
+      where project_id = ${projectId}
+        and evidence_id = ${evidenceId}
+        and manufacturer = ${manufacturer}
+      limit 1
+    `);
+    if (existing.length) continue;
+    await sql`
+      insert into spec_mentions (project_id, evidence_id, manufacturer, discipline, mention_text)
+      values (${projectId}, ${evidenceId}, ${manufacturer}, ${discipline}, ${opportunity.description || opportunity.title})
+    `;
+  }
+}
+
 export async function persistLVPursuit(opportunity: SledOpportunityRecord, classification: LVClassification) {
   const sql = db();
   if (!sql) return { stored: false, reason: "LOW_VOLTAGE_DATABASE_URL not configured" };
@@ -66,13 +104,15 @@ export async function persistLVPursuit(opportunity: SledOpportunityRecord, class
   `);
   const projectId = Number(projectRows[0].id);
   await addDisciplines(sql, projectId, classification);
+  const evidenceId = await ensureEvidence(sql, opportunity);
+  await addManufacturerMentions(sql, projectId, evidenceId, opportunity, classification);
 
   await sql`
     insert into pursuits (project_id, solicitation_number, due_at, fit_score, source_url, status)
     values (${projectId}, ${opportunity.externalId}, ${opportunity.dueAt || null}, ${classification.score}, ${opportunity.sourceUrl}, ${opportunity.status})
   `;
 
-  return { stored: true, projectId };
+  return { stored: true, projectId, evidenceId };
 }
 
 function ageDays(value?: string | null) {
@@ -108,13 +148,8 @@ export async function persistLVSignal(
   const projectId = Number(projectRows[0].id);
   await addDisciplines(sql, projectId, classification);
 
-  const evidenceRows = rows(await sql`
-    insert into source_evidence (source_type, source_title, source_url, publisher, published_at, excerpt, content_hash)
-    values ('public_project_page', ${opportunity.title}, ${opportunity.sourceUrl}, ${opportunity.agency.name}, ${opportunity.issueDate || null}, ${opportunity.description || opportunity.title}, ${opportunity.externalId})
-    on conflict (source_url, content_hash) do update set retrieved_at = now()
-    returning id
-  `);
-  const evidenceId = Number(evidenceRows[0].id);
+  const evidenceId = await ensureEvidence(sql, opportunity);
+  await addManufacturerMentions(sql, projectId, evidenceId, opportunity, classification);
 
   const scoring = scoreSignal({
     evidenceType,
