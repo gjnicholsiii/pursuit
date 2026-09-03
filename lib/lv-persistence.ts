@@ -15,12 +15,32 @@ export async function persistLVPursuit(opportunity: SledOpportunityRecord, class
   const sql = db();
   if (!sql) return { stored: false, reason: "LOW_VOLTAGE_DATABASE_URL not configured" };
 
-  const orgRows = await sql`
-    insert into organizations (organization_name, organization_type, city, state, website)
-    values (${opportunity.agency.name}, ${opportunity.agency.agencyType}, ${opportunity.city || null}, ${opportunity.stateCode || null}, ${opportunity.agency.website || null})
-    returning id
+  const existing = await sql`
+    select id, project_id from pursuits
+    where solicitation_number = ${opportunity.externalId} and source_url = ${opportunity.sourceUrl}
+    limit 1
   `;
-  const organizationId = Number(orgRows[0].id);
+  if (existing.length) return { stored: false, reason: "already_exists", projectId: Number(existing[0].project_id) };
+
+  const existingOrg = await sql`
+    select id from organizations
+    where organization_name = ${opportunity.agency.name}
+      and coalesce(state, '') = ${opportunity.stateCode || ""}
+    order by id asc
+    limit 1
+  `;
+
+  let organizationId: number;
+  if (existingOrg.length) {
+    organizationId = Number(existingOrg[0].id);
+  } else {
+    const orgRows = await sql`
+      insert into organizations (organization_name, organization_type, city, state, website)
+      values (${opportunity.agency.name}, ${opportunity.agency.agencyType}, ${opportunity.city || null}, ${opportunity.stateCode || null}, ${opportunity.agency.website || null})
+      returning id
+    `;
+    organizationId = Number(orgRows[0].id);
+  }
 
   const projectRows = await sql`
     insert into projects (organization_id, project_title, location_text, project_stage, estimated_value, expected_procurement_start, expected_procurement_end)
