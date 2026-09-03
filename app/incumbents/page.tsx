@@ -2,6 +2,8 @@ import { Sidebar } from "@/components/sidebar";
 import { money } from "@/lib/low-voltage";
 import { getIncumbentsData, liveDatabaseConfigured } from "@/lib/lv-live-data";
 
+export const dynamic = "force-dynamic";
+
 export default async function IncumbentsPage() {
   const incumbents = await getIncumbentsData();
   const live = liveDatabaseConfigured();
