@@ -42,7 +42,7 @@ async function addDisciplines(sql: SqlClient, projectId: number, classification:
     await sql`
       insert into project_disciplines (project_id, discipline, confidence)
       values (${projectId}, ${match.discipline}, ${match.score})
-      on conflict (project_id, discipline) do update set confidence = excluded.confidence
+      on conflict (project_id, discipline) do update set confidence = greatest(project_disciplines.confidence, excluded.confidence)
     `;
   }
 }
@@ -54,7 +54,8 @@ async function ensureEvidence(sql: SqlClient, opportunity: SledOpportunityRecord
     on conflict (source_url, content_hash) do update
       set retrieved_at = now(),
           source_title = excluded.source_title,
-          excerpt = excluded.excerpt
+          excerpt = excluded.excerpt,
+          published_at = coalesce(excluded.published_at, source_evidence.published_at)
     returning id
   `);
   return Number(evidenceRows[0].id);
@@ -73,7 +74,6 @@ async function addManufacturerMentions(
     const existing = rows(await sql`
       select id from spec_mentions
       where project_id = ${projectId}
-        and evidence_id = ${evidenceId}
         and manufacturer = ${manufacturer}
       limit 1
     `);
@@ -89,15 +89,44 @@ export async function persistLVPursuit(opportunity: SledOpportunityRecord, class
   const sql = db();
   if (!sql) return { stored: false, reason: "LOW_VOLTAGE_DATABASE_URL not configured" };
 
-  const existing = rows(await sql`
+  const exact = rows(await sql`
     select id, project_id from pursuits
     where solicitation_number = ${opportunity.externalId}
       and source_url = ${opportunity.sourceUrl}
     limit 1
   `);
-  if (existing.length) return { stored: false, reason: "already_exists", projectId: Number(existing[0].project_id) };
+  if (exact.length) return { stored: false, reason: "already_exists", projectId: Number(exact[0].project_id) };
 
   const organizationId = await ensureOrganization(sql, opportunity);
+  const sameWork = rows(await sql`
+    select pu.id, pu.project_id
+    from pursuits pu
+    join projects p on p.id = pu.project_id
+    where p.organization_id = ${organizationId}
+      and lower(regexp_replace(p.project_title, '\\s+', ' ', 'g')) = lower(regexp_replace(${opportunity.title}, '\\s+', ' ', 'g'))
+      and coalesce(pu.due_at::date, date '9999-12-31') = coalesce(cast(${opportunity.dueAt || null} as timestamptz)::date, date '9999-12-31')
+    order by pu.id asc
+    limit 1
+  `);
+
+  if (sameWork.length) {
+    const pursuitId = Number(sameWork[0].id);
+    const projectId = Number(sameWork[0].project_id);
+    await addDisciplines(sql, projectId, classification);
+    const evidenceId = await ensureEvidence(sql, opportunity);
+    await addManufacturerMentions(sql, projectId, evidenceId, opportunity, classification);
+    await sql`
+      update pursuits
+      set solicitation_number = ${opportunity.externalId},
+          due_at = ${opportunity.dueAt || null},
+          fit_score = greatest(fit_score, ${classification.score}),
+          source_url = ${opportunity.sourceUrl},
+          status = ${opportunity.status}
+      where id = ${pursuitId}
+    `;
+    return { stored: false, updated: true, reason: "updated_existing_work", projectId, evidenceId };
+  }
+
   const projectRows = rows(await sql`
     insert into projects (organization_id, project_title, location_text, project_stage, estimated_value, expected_procurement_start, expected_procurement_end)
     values (${organizationId}, ${opportunity.title}, ${[opportunity.city, opportunity.stateCode].filter(Boolean).join(", ") || null}, 'solicitation', ${opportunity.estimatedValue || null}, ${opportunity.issueDate ? opportunity.issueDate.slice(0, 10) : null}, ${opportunity.dueAt ? opportunity.dueAt.slice(0, 10) : null})
@@ -130,7 +159,7 @@ export async function persistLVSignal(
   const sql = db();
   if (!sql) return { stored: false, reason: "LOW_VOLTAGE_DATABASE_URL not configured" };
 
-  const existing = rows(await sql`
+  const exact = rows(await sql`
     select s.id, s.project_id
     from signals s
     join source_evidence e on e.id = s.evidence_id
@@ -138,9 +167,47 @@ export async function persistLVSignal(
       and e.content_hash = ${opportunity.externalId}
     limit 1
   `);
-  if (existing.length) return { stored: false, reason: "already_exists", projectId: Number(existing[0].project_id) };
+  if (exact.length) return { stored: false, reason: "already_exists", projectId: Number(exact[0].project_id) };
 
   const organizationId = await ensureOrganization(sql, opportunity);
+  const sameWork = rows(await sql`
+    select s.id, s.project_id
+    from signals s
+    join projects p on p.id = s.project_id
+    where p.organization_id = ${organizationId}
+      and lower(regexp_replace(p.project_title, '\\s+', ' ', 'g')) = lower(regexp_replace(${opportunity.title}, '\\s+', ' ', 'g'))
+    order by s.id asc
+    limit 1
+  `);
+
+  const scoring = scoreSignal({
+    evidenceType,
+    sourceQuality: "official_project_page",
+    ageDays: ageDays(opportunity.issueDate),
+    lowVoltageSpecificity: classification.score,
+    valueKnown: Boolean(opportunity.estimatedValue),
+    buyingWindowKnown: Boolean(opportunity.issueDate || opportunity.dueAt),
+  });
+
+  if (sameWork.length) {
+    const signalId = Number(sameWork[0].id);
+    const projectId = Number(sameWork[0].project_id);
+    await addDisciplines(sql, projectId, classification);
+    const evidenceId = await ensureEvidence(sql, opportunity);
+    await addManufacturerMentions(sql, projectId, evidenceId, opportunity, classification);
+    await sql`
+      update signals
+      set evidence_id = ${evidenceId},
+          trigger_summary = ${opportunity.title},
+          score = greatest(score, ${scoring.score}),
+          confidence = ${scoring.confidence},
+          buying_window = 'Pre-release',
+          detected_at = now()
+      where id = ${signalId}
+    `;
+    return { stored: false, updated: true, reason: "updated_existing_work", projectId, evidenceId, signalScore: scoring.score };
+  }
+
   const projectRows = rows(await sql`
     insert into projects (organization_id, project_title, location_text, project_stage, estimated_value, expected_procurement_start, expected_procurement_end)
     values (${organizationId}, ${opportunity.title}, ${[opportunity.city, opportunity.stateCode].filter(Boolean).join(", ") || null}, 'pre_rfp', ${opportunity.estimatedValue || null}, ${opportunity.issueDate ? opportunity.issueDate.slice(0, 10) : null}, ${opportunity.dueAt ? opportunity.dueAt.slice(0, 10) : null})
@@ -151,15 +218,6 @@ export async function persistLVSignal(
 
   const evidenceId = await ensureEvidence(sql, opportunity);
   await addManufacturerMentions(sql, projectId, evidenceId, opportunity, classification);
-
-  const scoring = scoreSignal({
-    evidenceType,
-    sourceQuality: "official_project_page",
-    ageDays: ageDays(opportunity.issueDate),
-    lowVoltageSpecificity: classification.score,
-    valueKnown: Boolean(opportunity.estimatedValue),
-    buyingWindowKnown: Boolean(opportunity.issueDate || opportunity.dueAt),
-  });
 
   await sql`
     insert into signals (project_id, evidence_id, trigger_type, trigger_summary, score, confidence, buying_window)
