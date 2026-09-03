@@ -4,7 +4,7 @@ import { persistLVContract } from "@/lib/lv-contract-persistence";
 export const dynamic = "force-static";
 
 export default async function LVContractRunPage() {
-  const result = await discoverFederalLVContracts(20, 9);
+  const result = await discoverFederalLVContracts(20, 29);
   let stored = 0;
   let high = 0;
   let medium = 0;
@@ -25,17 +25,8 @@ export default async function LVContractRunPage() {
     high,
     medium,
     failures: result.failures,
-    samples: result.contracts.slice(0, 20).map(c => ({
-      awardId: c.awardId,
-      incumbent: c.incumbent,
-      agency: c.subAgency || c.agency,
-      description: c.description,
-      amount: c.amount,
-      endDate: c.endDate,
-      rebid: c.rebid,
-      disciplines: c.classification.disciplines,
-    })),
+    samples: result.contracts.slice(0, 20).map(c => ({ awardId: c.awardId, incumbent: c.incumbent, agency: c.subAgency || c.agency, description: c.description, amount: c.amount, endDate: c.endDate, rebid: c.rebid, disciplines: c.classification.disciplines })),
   }));
 
-  return <main>LV contract load pages 9–28: {stored} stored from {result.accepted} accepted.</main>;
+  return <main>LV contract load pages 29–48: {stored} stored from {result.accepted} accepted.</main>;
 }
