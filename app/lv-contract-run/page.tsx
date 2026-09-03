@@ -4,7 +4,7 @@ import { persistLVContract } from "@/lib/lv-contract-persistence";
 export const dynamic = "force-static";
 
 export default async function LVContractRunPage() {
-  const result = await discoverFederalLVContracts(8);
+  const result = await discoverFederalLVContracts(20, 9);
   let stored = 0;
   let high = 0;
   let medium = 0;
@@ -17,6 +17,8 @@ export default async function LVContractRunPage() {
   }
 
   console.log("LV_CONTRACT_BUILD_RUN", JSON.stringify({
+    startPage: result.startPage,
+    pagesRequested: result.pagesRequested,
     scanned: result.scanned,
     accepted: result.accepted,
     stored,
@@ -35,5 +37,5 @@ export default async function LVContractRunPage() {
     })),
   }));
 
-  return <main>LV contract load: {stored} stored from {result.accepted} accepted.</main>;
+  return <main>LV contract load pages 9–28: {stored} stored from {result.accepted} accepted.</main>;
 }
