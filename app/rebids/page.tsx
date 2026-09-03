@@ -2,6 +2,8 @@ import { Sidebar } from "@/components/sidebar";
 import { money } from "@/lib/low-voltage";
 import { getRebidsData, liveDatabaseConfigured } from "@/lib/lv-live-data";
 
+export const dynamic = "force-dynamic";
+
 export default async function RebidsPage() {
   const rebids = (await getRebidsData()).filter(item => item.probability >= 55);
   const live = liveDatabaseConfigured();
