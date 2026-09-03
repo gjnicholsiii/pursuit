@@ -3,17 +3,10 @@ import { classifyLowVoltage } from "@/lib/lv-classifier";
 
 const SAM_SEARCH_URL = "https://api.sam.gov/opportunities/v2/search";
 export const LV_SAM_NAICS = ["238210", "561621", "237130"] as const;
-
-const DESCRIPTION_CONCURRENCY = 8;
+const DESCRIPTION_CONCURRENCY = 3;
 
 type PlacePart = { code?: string | null; name?: string | null };
-type SamPlace = {
-  city?: PlacePart | null;
-  state?: PlacePart | null;
-  country?: PlacePart | null;
-  zip?: string | null;
-};
-
+type SamPlace = { city?: PlacePart | null; state?: PlacePart | null; country?: PlacePart | null; zip?: string | null };
 type SamRaw = {
   noticeId?: string | null;
   title?: string | null;
@@ -34,15 +27,23 @@ type SamRaw = {
   description?: string | null;
   uiLink?: string | null;
 };
-
-type SamResponse = {
-  totalRecords?: number;
-  limit?: number;
-  offset?: number;
-  opportunitiesData?: SamRaw[];
-};
-
+type SamResponse = { totalRecords?: number; limit?: number; offset?: number; opportunitiesData?: SamRaw[] };
 type EnrichedRaw = SamRaw & { descriptionText?: string | null };
+
+function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+async function fetchWithBackoff(url: string, init: RequestInit, attempts = 4) {
+  let last: Response | null = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await fetch(url, init);
+    last = response;
+    if (response.status !== 429) return response;
+    const retryAfter = Number(response.headers.get("retry-after") || 0);
+    const delay = retryAfter > 0 ? retryAfter * 1000 : Math.min(1500 * 2 ** attempt, 12_000);
+    await sleep(delay);
+  }
+  return last!;
+}
 
 function dateMMDDYYYY(date: Date) {
   return `${String(date.getUTCMonth() + 1).padStart(2, "0")}/${String(date.getUTCDate()).padStart(2, "0")}/${date.getUTCFullYear()}`;
@@ -56,13 +57,8 @@ function agencyName(raw: SamRaw) {
   return raw.office || raw.subTier || raw.department || "Federal agency";
 }
 
-function stateCode(raw: SamRaw) {
-  return raw.placeOfPerformance?.state?.code || null;
-}
-
-function cityName(raw: SamRaw) {
-  return raw.placeOfPerformance?.city?.name || null;
-}
+function stateCode(raw: SamRaw) { return raw.placeOfPerformance?.state?.code || null; }
+function cityName(raw: SamRaw) { return raw.placeOfPerformance?.city?.name || null; }
 
 function isOpen(raw: SamRaw) {
   if (String(raw.active || "").toLowerCase() === "no") return false;
@@ -98,10 +94,9 @@ async function fetchDescription(raw: SamRaw, apiKey: string) {
   try {
     const url = new URL(link);
     url.searchParams.set("api_key", apiKey);
-    const response = await fetch(url.toString(), { cache: "no-store", headers: { accept: "text/plain,text/html,application/json" } });
+    const response = await fetchWithBackoff(url.toString(), { cache: "no-store", headers: { accept: "text/plain,text/html,application/json" } }, 3);
     if (!response.ok) return null;
-    const body = await response.text();
-    return normalizeDescription(body).slice(0, 120_000) || null;
+    return normalizeDescription(await response.text()).slice(0, 120_000) || null;
   } catch {
     return null;
   }
@@ -116,6 +111,7 @@ async function enrichDescriptions(raw: SamRaw[], apiKey: string) {
       if (index >= raw.length) return;
       const item = raw[index];
       output[index] = { ...item, descriptionText: await fetchDescription(item, apiKey) };
+      await sleep(150);
     }
   };
   await Promise.all(Array.from({ length: Math.min(DESCRIPTION_CONCURRENCY, raw.length || 1) }, () => worker()));
@@ -182,20 +178,14 @@ async function fetchSearchPage(apiKey: string, naics: string, pageSize: number, 
     ncode: naics,
   });
   for (const ptype of ["p", "r", "o", "k"]) params.append("ptype", ptype);
-
-  const response = await fetch(`${SAM_SEARCH_URL}?${params.toString()}`, {
-    cache: "no-store",
-    headers: { accept: "application/json" },
-  });
+  const response = await fetchWithBackoff(`${SAM_SEARCH_URL}?${params.toString()}`, { cache: "no-store", headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`SAM.gov NAICS ${naics} returned ${response.status}`);
   return await response.json() as SamResponse;
 }
 
 export async function discoverSamLV(limit = 300, offset = 0, daysBack = 30) {
   const apiKey = process.env.SAM_GOV_API_KEY;
-  if (!apiKey) {
-    return { configured: false, totalRecords: 0, scanned: 0, signals: [], pursuits: [], rejected: 0, failures: ["SAM_GOV_API_KEY not configured"] };
-  }
+  if (!apiKey) return { configured: false, totalRecords: 0, scanned: 0, signals: [], pursuits: [], rejected: 0, failures: ["SAM_GOV_API_KEY not configured"] };
 
   const today = new Date();
   const from = new Date(today);
@@ -204,14 +194,15 @@ export async function discoverSamLV(limit = 300, offset = 0, daysBack = 30) {
   const pageOffset = Math.max(0, Math.floor(offset));
   const perNaics = Math.max(1, Math.ceil(totalLimit / LV_SAM_NAICS.length));
 
-  const payloads = await Promise.all(LV_SAM_NAICS.map(async naics => {
+  const payloads: Array<{ naics: string; payload: SamResponse | null; error: string | null }> = [];
+  for (const naics of LV_SAM_NAICS) {
     try {
-      const payload = await fetchSearchPage(apiKey, naics, perNaics, pageOffset, from, today);
-      return { naics, payload, error: null as string | null };
+      payloads.push({ naics, payload: await fetchSearchPage(apiKey, naics, perNaics, pageOffset, from, today), error: null });
     } catch (error) {
-      return { naics, payload: null as SamResponse | null, error: error instanceof Error ? error.message : String(error) };
+      payloads.push({ naics, payload: null, error: error instanceof Error ? error.message : String(error) });
     }
-  }));
+    await sleep(500);
+  }
 
   const failures = payloads.flatMap(item => item.error ? [item.error] : []);
   const totalRecords = payloads.reduce((sum, item) => sum + (item.payload?.totalRecords || 0), 0);
@@ -226,22 +217,13 @@ export async function discoverSamLV(limit = 300, offset = 0, daysBack = 30) {
     const classification = classifyLowVoltage({
       title: opportunity.title,
       description: opportunity.description,
-      scope: [
-        opportunity.naicsCodes?.length ? `NAICS ${opportunity.naicsCodes.join(" ")}` : "",
-        String(opportunity.rawPayload.classificationCode || ""),
-      ].filter(Boolean).join(" "),
+      scope: [opportunity.naicsCodes?.length ? `NAICS ${opportunity.naicsCodes.join(" ")}` : "", String(opportunity.rawPayload.classificationCode || "")].filter(Boolean).join(" "),
     });
     return { raw: rawItem, opportunity, classification };
   }).filter(item => item.classification.accepted);
 
-  const signals = classified
-    .filter(item => isEarlyNotice(item.raw))
-    .map(({ opportunity, classification }) => ({ opportunity, classification }))
-    .sort((a, b) => b.classification.score - a.classification.score);
-  const pursuits = classified
-    .filter(item => !isEarlyNotice(item.raw))
-    .map(({ opportunity, classification }) => ({ opportunity, classification }))
-    .sort((a, b) => b.classification.score - a.classification.score);
+  const signals = classified.filter(item => isEarlyNotice(item.raw)).map(({ opportunity, classification }) => ({ opportunity, classification })).sort((a, b) => b.classification.score - a.classification.score);
+  const pursuits = classified.filter(item => !isEarlyNotice(item.raw)).map(({ opportunity, classification }) => ({ opportunity, classification })).sort((a, b) => b.classification.score - a.classification.score);
 
   return {
     configured: true,
