@@ -8,7 +8,7 @@ export const maxDuration = 300;
 
 const INDEX = "https://www.isbe.net/pages/data-analysis-directories.aspx";
 const SOURCE = "https://www.isbe.net/_layouts/Download.aspx?SourceUrl=%2FDocuments%2Fdir_ed_entities.xls";
-const CHECKED = "Authoritative Illinois ISBE Directory of Educational Entities checked; no matching published reachable district administrator for this district in this source.";
+const CHECKED = "Authoritative Illinois ISBE Directory of Educational Entities v2 checked; no matching published reachable district administrator for this district in this source.";
 const BATCH_SIZE = 250;
 
 type Contact = { district:string; fullName:string; phone:string; email:string };
