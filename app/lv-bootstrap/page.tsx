@@ -1,41 +1,42 @@
-import { discoverSamLV } from "@/lib/lv-sam";
-import { persistLVPursuit } from "@/lib/lv-persistence";
+import { discoverFederalLVContracts } from "@/lib/lv-usaspending";
+import { persistLVContract } from "@/lib/lv-contract-persistence";
 
 export const dynamic = "force-static";
 
 export default async function LVBootstrapPage() {
-  const result = await discoverSamLV(1000, 0, 30);
-  let storedPursuits = 0;
+  const result = await discoverFederalLVContracts(8);
+  let storedContracts = 0;
 
-  for (const item of result.pursuits) {
-    const stored = await persistLVPursuit(item.opportunity, item.classification);
-    if (stored.stored) storedPursuits += 1;
+  for (const contract of result.contracts) {
+    const stored = await persistLVContract(contract);
+    if (stored.stored) storedContracts += 1;
   }
 
-  console.log("LV_SAM_BOOTSTRAP", JSON.stringify({
-    configured: result.configured,
-    totalRecords: result.totalRecords,
+  console.log("LV_CONTRACT_BOOTSTRAP", JSON.stringify({
     scanned: result.scanned,
-    accepted: result.pursuits.length,
-    rejected: result.rejected,
-    storedPursuits,
-    error: "error" in result ? result.error : undefined,
-    sample: result.pursuits.slice(0, 25).map(item => ({
-      agency: item.opportunity.agency.name,
-      title: item.opportunity.title,
-      score: item.classification.score,
-      disciplines: item.classification.disciplines,
-      manufacturers: item.classification.manufacturers,
+    accepted: result.accepted,
+    storedContracts,
+    failures: result.failures,
+    sample: result.contracts.slice(0, 25).map(contract => ({
+      incumbent: contract.incumbent,
+      agency: contract.agency,
+      subAgency: contract.subAgency,
+      description: contract.description,
+      amount: contract.amount,
+      endDate: contract.endDate,
+      naics: contract.naics,
+      score: contract.classification.score,
+      disciplines: contract.classification.disciplines,
+      rebid: contract.rebid.score,
     })),
   }));
 
   return (
     <main style={{ padding: 32, fontFamily: "monospace" }}>
-      <h1>LV SAM Bootstrap Complete</h1>
-      <p>Configured: {String(result.configured)}</p>
+      <h1>LV Contract Bootstrap Complete</h1>
       <p>Scanned: {result.scanned}</p>
-      <p>Accepted: {result.pursuits.length}</p>
-      <p>Stored pursuits: {storedPursuits}</p>
+      <p>Accepted: {result.accepted}</p>
+      <p>Stored contracts: {storedContracts}</p>
     </main>
   );
 }
