@@ -1,46 +1,66 @@
-import { discoverPeriscopeLV, type LVPeriscopeState } from "@/lib/lv-periscope";
-import { persistLVPursuit } from "@/lib/lv-persistence";
+import { discoverOpenGovLVByCodes } from "@/lib/lv-opengov";
+import { persistLVPursuit, persistLVSignal } from "@/lib/lv-persistence";
 
 export const dynamic = "force-static";
 
-const STATES: LVPeriscopeState[] = ["MA", "IL", "OR"];
+const CODES = [
+  "prescott-az",
+  "greenvillecounty",
+  "pembrokepines",
+  "coralsprings",
+  "countyofdane",
+  "hernandocounty",
+  "dorchestercountysc",
+  "daniabeachfl",
+  "brevardschools",
+  "santa-monica-ca",
+  "akronmetro",
+  "orangecountyfl",
+  "ocsan",
+  "pinellasfl",
+  "sfoconstruction",
+];
 
 export default async function LVSourceRunPage() {
-  const results: Array<Record<string, unknown>> = [];
-  let stored = 0;
+  const result = await discoverOpenGovLVByCodes(CODES);
+  let storedSignals = 0;
+  let storedPursuits = 0;
 
-  for (const state of STATES) {
-    try {
-      const result = await discoverPeriscopeLV(state, 25);
-      let stateStored = 0;
-      for (const item of result.pursuits) {
-        const persisted = await persistLVPursuit(item.opportunity, item.classification);
-        if (persisted.stored) {
-          stored += 1;
-          stateStored += 1;
-        }
-      }
-      results.push({
-        state,
-        source: result.sourceName,
-        scanned: result.scanned,
-        resultCount: result.resultCount,
-        complete: result.complete,
-        accepted: result.pursuits.length,
-        stored: stateStored,
-        sample: result.pursuits.slice(0, 10).map(item => ({
-          agency: item.opportunity.agency.name,
-          title: item.opportunity.title,
-          dueAt: item.opportunity.dueAt,
-          score: item.classification.score,
-          disciplines: item.classification.disciplines,
-        })),
-      });
-    } catch (error) {
-      results.push({ state, error: error instanceof Error ? error.message : String(error) });
-    }
+  for (const item of result.signals) {
+    const stored = await persistLVSignal(item.opportunity, item.classification, "planning_mention");
+    if (stored.stored) storedSignals += 1;
   }
 
-  console.log("LV_PERISCOPE_BUILD_RUN", JSON.stringify({ stored, results }));
-  return <main>LV state source run complete: {stored} stored.</main>;
+  for (const item of result.pursuits) {
+    const stored = await persistLVPursuit(item.opportunity, item.classification);
+    if (stored.stored) storedPursuits += 1;
+  }
+
+  console.log("LV_OPENGOV_TARGETED_BUILD_RUN", JSON.stringify({
+    requestedCodes: result.requestedCodes,
+    matchedPortals: result.matchedPortals,
+    missingCodes: result.missingCodes,
+    projectsScanned: result.projectsScanned,
+    signals: result.signals.length,
+    pursuits: result.pursuits.length,
+    storedSignals,
+    storedPursuits,
+    failures: result.failures,
+    signalSample: result.signals.slice(0, 10).map(item => ({
+      agency: item.opportunity.agency.name,
+      title: item.opportunity.title,
+      score: item.classification.score,
+      disciplines: item.classification.disciplines,
+    })),
+    pursuitSample: result.pursuits.slice(0, 20).map(item => ({
+      agency: item.opportunity.agency.name,
+      title: item.opportunity.title,
+      dueAt: item.opportunity.dueAt,
+      score: item.classification.score,
+      disciplines: item.classification.disciplines,
+      manufacturers: item.classification.manufacturers,
+    })),
+  }));
+
+  return <main>Targeted OpenGov LV source run complete: {storedSignals} signals, {storedPursuits} pursuits stored.</main>;
 }
