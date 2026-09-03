@@ -1,12 +1,15 @@
 import { Sidebar } from "@/components/sidebar";
-import { money, pursuits } from "@/lib/low-voltage";
+import { money } from "@/lib/low-voltage";
+import { getPursuitsData, liveDatabaseConfigured } from "@/lib/lv-live-data";
 
-export default function PursuitsPage() {
+export default async function PursuitsPage() {
+  const pursuits = await getPursuitsData();
+  const live = liveDatabaseConfigured();
   return (
     <main className="shell">
       <Sidebar active="Pursuits" />
       <section className="workspace">
-        <header className="topbar"><div className="topbar-left"><i className="live-dot" /><span>PURSUITS · ACTIVE LOW-VOLTAGE OPPORTUNITIES</span></div><span className="chip">FIT + SCOPE + COMPETITIVE INTEL</span></header>
+        <header className="topbar"><div className="topbar-left"><i className="live-dot" /><span>PURSUITS · ACTIVE LOW-VOLTAGE OPPORTUNITIES</span></div><span className="chip">{live ? "LIVE LV FEED" : "PROTOTYPE DATA"}</span></header>
         <div className="content">
           <div className="page-head"><div><span className="eyebrow">PURSUITS</span><h1>CURRENT WORK WORTH CHASING.</h1><p>Only opportunities with credible low-voltage scope. Each pursuit exposes fit, due date, incumbent, specified technology, engineer and package depth.</p></div><input className="searchbar" placeholder="Search pursuit, owner, manufacturer…" /></div>
           <div className="stack">
