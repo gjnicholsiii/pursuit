@@ -43,6 +43,11 @@ interface ProjectRecord {
   procurementContact?: Record<string, unknown> | null;
 }
 
+type Classified = {
+  opportunity: SledOpportunityRecord;
+  classification: ReturnType<typeof classifyLowVoltage>;
+};
+
 function agencyType(name: string) {
   const text = name.toLowerCase();
   if (/school district|public schools|unified school|school system|schools\b|isd\b/.test(text)) return "k12";
@@ -139,16 +144,13 @@ function mapOpportunity(government: GovernmentEntry, project: ProjectRecord): Sl
   };
 }
 
-export async function discoverOpenGovLVBatch(offset = 0, portalLimit = 20) {
-  const directory = await fetchDirectory();
-  const start = Math.max(0, offset);
-  const batch = directory.slice(start, start + Math.max(1, Math.min(50, portalLimit)));
-  const pursuits: Array<{ opportunity: SledOpportunityRecord; classification: ReturnType<typeof classifyLowVoltage> }> = [];
-  const signals: Array<{ opportunity: SledOpportunityRecord; classification: ReturnType<typeof classifyLowVoltage> }> = [];
+async function discoverGovernments(governments: GovernmentEntry[]) {
+  const pursuits: Classified[] = [];
+  const signals: Classified[] = [];
   const failures: Array<{ agency: string; error: string }> = [];
   let projectsScanned = 0;
 
-  for (const government of batch) {
+  for (const government of governments) {
     const code = government.government?.code || String(government.id);
     try {
       const projects = await fetchProjects(code);
@@ -166,14 +168,36 @@ export async function discoverOpenGovLVBatch(offset = 0, portalLimit = 20) {
     }
   }
 
+  return { pursuits, signals, failures, projectsScanned };
+}
+
+export async function discoverOpenGovLVByCodes(codes: string[]) {
+  const wanted = new Set(codes.map(code => code.trim().toLowerCase()).filter(Boolean));
+  const directory = await fetchDirectory();
+  const governments = directory.filter(item => wanted.has(String(item.government?.code || "").toLowerCase()));
+  const discovered = await discoverGovernments(governments);
+  const foundCodes = new Set(governments.map(item => String(item.government?.code || "").toLowerCase()));
+
+  return {
+    directorySize: directory.length,
+    requestedCodes: [...wanted],
+    matchedPortals: governments.length,
+    missingCodes: [...wanted].filter(code => !foundCodes.has(code)),
+    ...discovered,
+  };
+}
+
+export async function discoverOpenGovLVBatch(offset = 0, portalLimit = 20) {
+  const directory = await fetchDirectory();
+  const start = Math.max(0, offset);
+  const batch = directory.slice(start, start + Math.max(1, Math.min(50, portalLimit)));
+  const discovered = await discoverGovernments(batch);
+
   return {
     directorySize: directory.length,
     offset: start,
     processed: batch.length,
-    projectsScanned,
     nextOffset: start + batch.length < directory.length ? start + batch.length : null,
-    pursuits,
-    signals,
-    failures,
+    ...discovered,
   };
 }
