@@ -9,7 +9,7 @@ export const maxDuration = 300;
 const KDE_OPENHOUSE = "https://openhouse.education.ky.gov/Superintendents";
 const KDE_SDCI = "https://applications.education.ky.gov/SDCI/District.aspx/1000";
 const CHECKED = "Authoritative Kentucky KDE statewide superintendent roster checked for this missing superintendent slot; no matching published district superintendent found.";
-const BATCH_SIZE = 50;
+const BATCH_SIZE = 250;
 
 type District = { code:string; district:string; superintendent:string; phone:string };
 type Slot = { id:string; agency_id:string; county:string|null; canonical_name:string|null; role_key:string };
@@ -33,12 +33,12 @@ function parseDistricts(html:string):District[]{
   const $=cheerio.load(html);
   const out:District[]=[];
   $("tr").each((_,tr)=>{
-    const cells=$(tr).find("th,td").map((__,td)=>clean($(td).text())).get().filter(Boolean);
+    const cells=$(tr).find("th,td").map((__,td)=>clean($(td).text())).get();
     if(cells.length<3) return;
-    const codeIndex=cells.findIndex(v=>/^\d{3,4}$/.test(v));
+    const codeIndex=cells.findIndex(v=>/^\d{1,4}$/.test(v));
     if(codeIndex<0) return;
-    const code=cells[codeIndex];
-    const district=cells[codeIndex+1]||"";
+    const code=clean(cells[codeIndex]).padStart(3,"0");
+    const district=clean(cells[codeIndex+1]||"");
     const superintendent=person(cells[codeIndex+2]||"");
     const p=cells.map(phone).find(Boolean)||"";
     if(district && superintendent && !/superintendent/i.test(superintendent)) out.push({code,district,superintendent,phone:p});
@@ -52,7 +52,9 @@ async function districts():Promise<{list:District[];source:string;errors:string[
     try{
       const {html}=await fetchHtml(source);
       const list=parseDistricts(html);
-      if(list.length>=150) return {list,source,errors};
+      // KDE's legacy SDCI directory is paginated server-side and exposes 10 rows per HTML response.
+      // A partial authoritative page is still useful, but only for districts actually present on that page.
+      if(list.length>=5) return {list,source,errors};
       errors.push(`${source} parsed only ${list.length} districts`);
     }catch(err){ errors.push(err instanceof Error?err.message:String(err)); }
   }
@@ -80,26 +82,27 @@ export async function GET(req:NextRequest){
     return NextResponse.json({ok:false,state:"KY",blocker,before},{status:502});
   }
 
+  // Read a broad slice of missing KY superintendent slots, but consume only districts actually
+  // present in this authoritative response. Never mark a district checked merely because it is on
+  // a different server-side pagination page.
   const slots=await sql.query(`select c.id::text,c.agency_id::text,c.county,c.role_key,a.canonical_name from raven_state_contacts c left join agencies a on a.id=c.agency_id where c.state_code='KY' and c.scope='district' and c.verification_status='missing' and c.role_key='superintendent' and coalesce(c.evidence_note,'') <> $1 order by coalesce(c.updated_at,c.created_at) asc,c.id asc limit $2`,[CHECKED,BATCH_SIZE]) as Slot[];
 
-  let matched=0,filled=0,unmatched=0;
+  let matched=0,filled=0;
   const districtsAttempted=new Set<string>();
   for(const s of slots){
     const d=matchDistrict(s,list);
-    if(d) districtsAttempted.add(d.code);
-    if(d && d.superintendent && d.phone){
-      matched++;
-      const u=await sql.query(`update raven_state_contacts set full_name=$2,title='School District Superintendent',email=null,phone=$3,source_url=$4,verification_status='candidate',evidence_note='Superintendent identity and district phone published by the Kentucky Department of Education statewide superintendent directory; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,d.superintendent,d.phone,source]) as any[];
+    if(!d) continue;
+    districtsAttempted.add(d.code);
+    matched++;
+    if(d.superintendent && d.phone){
+      const u=await sql.query(`update raven_state_contacts set full_name=$2,title='School District Superintendent',email=null,phone=$3,source_url=$4,verification_status='candidate',evidence_note='Superintendent identity and district phone published by the Kentucky Department of Education superintendent directory; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,d.superintendent,d.phone,source]) as any[];
       filled+=u.length;
-    } else {
-      unmatched++;
-      await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id=$1 and verification_status='missing'`,[s.id,CHECKED]);
     }
   }
 
-  const remaining=(await sql.query(`select count(*)::int n from raven_state_contacts where state_code='KY' and scope='district' and verification_status='missing' and role_key='superintendent' and coalesce(evidence_note,'') <> $1`,[CHECKED]) as any[])[0]?.n||0;
+  const remaining=(await sql.query(`select count(*)::int n from raven_state_contacts where state_code='KY' and scope='district' and verification_status='missing' and role_key='superintendent'`,[]) as any[])[0]?.n||0;
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const summary={ok:true,state:"KY",source,sourceFallbackErrors:sourceErrors,districtRoster:list.length,slotsNewlyAttempted:slots.length,districtsNewlyAttempted:districtsAttempted.size,matched,filled,unmatched,remainingUnattempted:remaining,exhaustedCurrentSource:remaining===0,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
+  const summary={ok:true,state:"KY",source,sourceFallbackErrors:sourceErrors,districtRoster:list.length,slotsScanned:slots.length,slotsNewlyAttempted:matched,districtsNewlyAttempted:districtsAttempted.size,matched,filled,unmatchedMarkedChecked:0,remainingMissingSuperintendent:remaining,partialAuthoritativePage:list.length<150,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
   console.log("RAVEN_KY_AUTHORITATIVE",summary);
   return NextResponse.json(summary);
 }
