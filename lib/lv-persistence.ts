@@ -4,7 +4,7 @@ import type { LVClassification } from "@/lib/lv-classifier";
 import { scoreSignal, type SignalEvidenceType } from "@/lib/lv-signal-score";
 
 type Row = Record<string, unknown>;
-type Sql = ReturnType<typeof neon>;
+type SqlClient = any;
 
 function rows(value: unknown) {
   return value as Row[];
@@ -19,7 +19,7 @@ export function lowVoltageDatabaseConfigured() {
   return Boolean(process.env.LOW_VOLTAGE_DATABASE_URL);
 }
 
-async function ensureOrganization(sql: Sql, opportunity: SledOpportunityRecord) {
+async function ensureOrganization(sql: SqlClient, opportunity: SledOpportunityRecord) {
   const existing = rows(await sql`
     select id from organizations
     where organization_name = ${opportunity.agency.name}
@@ -37,7 +37,7 @@ async function ensureOrganization(sql: Sql, opportunity: SledOpportunityRecord) 
   return Number(inserted[0].id);
 }
 
-async function addDisciplines(sql: Sql, projectId: number, classification: LVClassification) {
+async function addDisciplines(sql: SqlClient, projectId: number, classification: LVClassification) {
   for (const match of classification.disciplines) {
     await sql`
       insert into project_disciplines (project_id, discipline, confidence)
