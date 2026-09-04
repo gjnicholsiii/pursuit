@@ -21,23 +21,23 @@ async function roster():Promise<Contact[]> {
   if(!res.ok) throw new Error(`NYSED SECTIONII HTTP ${res.status}`);
   const pdf = await getDocumentProxy(new Uint8Array(await res.arrayBuffer()));
   const out:any = await extractText(pdf,{mergePages:true});
-  const text = typeof out?.text === "string" ? out.text : Array.isArray(out?.text) ? out.text.join("\n") : String(out||"");
-  const lines = text.split(/\r?\n/).map(clean).filter(Boolean);
+  const text:string = typeof out?.text === "string" ? out.text : Array.isArray(out?.text) ? out.text.join("\n") : String(out||"");
+  const lines:string[] = text.split(/\r?\n/).map((x:string)=>clean(x)).filter((x:string)=>Boolean(x));
   const contacts:Contact[]=[];
-  const districtRx=/\b(CSD|UFSD|UFSD|CENTRAL SCHOOL DISTRICT|CITY SCHOOL DISTRICT|SCHOOL DISTRICT)\b/i;
+  const districtRx=/\b(CSD|UFSD|CENTRAL SCHOOL DISTRICT|CITY SCHOOL DISTRICT|SCHOOL DISTRICT)\b/i;
   const phoneRx=/(\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4})/;
   for(let i=0;i<lines.length;i++){
     const district=lines[i];
     if(!districtRx.test(district) || district.length>120) continue;
-    const window=lines.slice(i+1,i+8);
-    const nameLine=window.find(x=>/^(Dr\.|Mr\.|Mrs\.|Ms\.|Miss)\s+[A-Z][A-Za-z'\-.]+(?:\s+[A-Z][A-Za-z'\-.]+){1,4}$/.test(x));
-    const phoneLine=window.find(x=>phoneRx.test(x));
+    const window:string[]=lines.slice(i+1,i+8);
+    const nameLine=window.find((x:string)=>/^(Dr\.|Mr\.|Mrs\.|Ms\.|Miss)\s+[A-Z][A-Za-z'\-.]+(?:\s+[A-Z][A-Za-z'\-.]+){1,4}$/.test(x));
+    const phoneLine=window.find((x:string)=>phoneRx.test(x));
     if(nameLine && phoneLine){
       const phone=phoneLine.match(phoneRx)?.[1]||"";
       contacts.push({district,fullName:person(nameLine),phone});
     }
   }
-  const unique=[...new Map(contacts.map(x=>[districtKey(x.district),x])).values()];
+  const unique:Contact[]=[...new Map<string,Contact>(contacts.map((x:Contact)=>[districtKey(x.district),x])).values()];
   if(unique.length<100) throw new Error(`NYSED parser confidence guard: only ${unique.length} district administrator records parsed; no database writes performed`);
   return unique;
 }
@@ -63,7 +63,7 @@ export async function GET(req:NextRequest){
   const slots=await sql.query(`select c.id::text,c.county,a.canonical_name from raven_state_contacts c left join agencies a on a.id=c.agency_id where c.state_code='NY' and c.scope='district' and c.role_key='superintendent' and c.verification_status='missing' and coalesce(c.evidence_note,'') <> $1 order by coalesce(c.updated_at,c.created_at) asc,c.id asc limit $2`,[CHECKED,BATCH_SIZE]) as any[];
   let matched=0,filled=0,unmatched=0;
   for(const s of slots){
-    const c=r.find(x=>sameDistrict(s,x));
+    const c=r.find((x:Contact)=>sameDistrict(s,x));
     if(c){ matched++; const u=await sql.query(`update raven_state_contacts set full_name=$2,title='Superintendent',email=null,phone=$3,source_url=$4,verification_status='candidate',evidence_note='District administrator and district phone published in the current official NYSED Directory of Public and Nonpublic Schools and Administrators; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,c.fullName,c.phone,SOURCE]) as any[]; filled+=u.length; }
     else { unmatched++; await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id=$1 and verification_status='missing'`,[s.id,CHECKED]); }
   }
