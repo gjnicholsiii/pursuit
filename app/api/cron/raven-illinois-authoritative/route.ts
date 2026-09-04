@@ -24,7 +24,7 @@ function districtKey(v:string){
 function col(headers:string[], patterns:RegExp[]){ return headers.findIndex(h=>patterns.some(rx=>rx.test(clean(h)))); }
 
 async function illinois():Promise<{contacts:Contact[];diagnostics:any}> {
-  const res=await fetch(SOURCE,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/7.2; authoritative-state-roster)",accept:"application/vnd.ms-excel,application/octet-stream,*/*"}});
+  const res=await fetch(SOURCE,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/7.3; authoritative-state-roster)",accept:"application/vnd.ms-excel,application/octet-stream,*/*"}});
   if(!res.ok) throw new Error(`Illinois ISBE directory HTTP ${res.status}`);
   const buf=Buffer.from(await res.arrayBuffer());
   const wb=XLSX.read(buf,{type:"buffer"});
@@ -32,38 +32,33 @@ async function illinois():Promise<{contacts:Contact[];diagnostics:any}> {
   const diagnostics:any={sheets:wb.SheetNames,examined:[]};
 
   for(const sheetName of wb.SheetNames){
-    if(!/(public.*(sch|dist)|district)/i.test(sheetName)) continue;
+    if(!/(public.*(sch|dist)|dist.*sch)/i.test(sheetName)) continue;
     const matrix=XLSX.utils.sheet_to_json<any[]>(wb.Sheets[sheetName],{header:1,defval:"",raw:false}) as any[][];
     const headerIndex=matrix.findIndex(row=>{
       const cells=row.map(clean);
-      const hasEntity=cells.some(c=>/(^|\b)(entity|district)(\b|\s).*name|^name$/i.test(c));
-      const hasAdmin=cells.some(c=>/(admin|administrator|superintendent|chief)/i.test(c));
-      return hasEntity && hasAdmin;
+      return cells.some(c=>/^FacilityName$/i.test(c)) && cells.some(c=>/^Administrator$/i.test(c)) && cells.some(c=>/^RecType$/i.test(c));
     });
-    if(headerIndex<0){ diagnostics.examined.push({sheetName,headerIndex,preview:matrix.slice(0,12).map(r=>r.map(clean).filter(Boolean).slice(0,12))}); continue; }
+    if(headerIndex<0){ diagnostics.examined.push({sheetName,headerIndex,preview:matrix.slice(0,5).map(r=>r.map(clean).filter(Boolean).slice(0,15))}); continue; }
 
     const headers=matrix[headerIndex].map(clean);
-    const districtI=col(headers,[/^entity\s*name$/i,/^district\s*name$/i,/entity.*name/i,/district.*name/i,/^name$/i]);
-    const adminFullI=col(headers,[/^administrator$/i,/^superintendent$/i,/chief\s*administrator/i,/administrator\s*name/i,/admin(istrator)?\s*name/i]);
-    const adminFirstI=col(headers,[/(admin|administrator).*first/i,/first.*(admin|administrator)/i]);
-    const adminLastI=col(headers,[/(admin|administrator).*last/i,/last.*(admin|administrator)/i]);
-    const phoneI=col(headers,[/^phone/i,/telephone/i,/phone.*number/i]);
+    const districtI=col(headers,[/^FacilityName$/i,/^entity\s*name$/i,/^district\s*name$/i]);
+    const adminI=col(headers,[/^Administrator$/i,/^superintendent$/i,/chief\s*administrator/i]);
+    const phoneI=col(headers,[/^Telephone$/i,/^phone/i]);
     const emailI=col(headers,[/e-?mail/i]);
-    const typeI=col(headers,[/^entity\s*type$/i,/^type$/i,/entity.*type/i,/entity.*category/i]);
-    diagnostics.examined.push({sheetName,headerIndex,headers,districtI,adminFullI,adminFirstI,adminLastI,phoneI,emailI,typeI});
+    const recTypeI=col(headers,[/^RecType$/i]);
+    diagnostics.examined.push({sheetName,headerIndex,headers,districtI,adminI,phoneI,emailI,recTypeI});
 
-    if(districtI<0 || (adminFullI<0 && adminFirstI<0 && adminLastI<0) || (phoneI<0 && emailI<0)) continue;
+    if(districtI<0 || adminI<0 || recTypeI<0 || phoneI<0) continue;
     for(const row of matrix.slice(headerIndex+1)){
+      if(!/^Dist$/i.test(clean(row[recTypeI]))) continue;
       const district=clean(row[districtI]);
-      const admin=adminFullI>=0 ? clean(row[adminFullI]) : clean(`${adminFirstI>=0?row[adminFirstI]:""} ${adminLastI>=0?row[adminLastI]:""}`);
-      const p=phoneI>=0?clean(row[phoneI]):"";
+      const admin=person(clean(row[adminI]));
+      const p=clean(row[phoneI]);
       const rawEmail=emailI>=0?clean(row[emailI]):"";
       const email=validEmail(rawEmail)?rawEmail:"";
-      const entityType=typeI>=0?clean(row[typeI]):"";
-      if(entityType && /(school|academy|program)/i.test(entityType) && !/district/i.test(entityType)) continue;
       if(!district || !admin || (!p && !email)) continue;
-      if(!person(admin) || /^(vacant|n\/a|none|unknown)$/i.test(person(admin))) continue;
-      contacts.push({district,fullName:person(admin),phone:p,email});
+      if(/^(vacant|n\/a|none|unknown)$/i.test(admin)) continue;
+      contacts.push({district,fullName:admin,phone:p,email});
     }
   }
   const out=new Map<string,Contact>();
