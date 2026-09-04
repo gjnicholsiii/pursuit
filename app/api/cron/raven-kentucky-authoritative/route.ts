@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const KDE_OPENHOUSE = "https://openhouse.education.ky.gov/Superintendents";
+const KDE_EXPORT = "https://applications.education.ky.gov/SDCI/Download.aspx?DCD=2703&d=true&qt=D";
 const KDE_SDCI = "https://applications.education.ky.gov/SDCI/District.aspx/1000";
 const CHECKED = "Authoritative Kentucky KDE statewide superintendent roster checked for this missing superintendent slot; no matching published district superintendent found.";
 const BATCH_SIZE = 250;
@@ -19,13 +20,13 @@ function key(v:any){ return clean(v).toLowerCase().replace(/&/g," and ").replace
 function person(v:string){ return clean(v).replace(/^(Dr\.|Mr\.|Mrs\.|Ms\.|Miss)\s+/i,""); }
 function phone(v:string){ const m=clean(v).match(/\(?\d{3}\)?[^\d]*\d{3}[^\d]*\d{4}/); return m?m[0]:""; }
 
-async function fetchHtml(url:string,timeoutMs=15000){
+async function fetchText(url:string,timeoutMs=15000){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
-    const res=await fetch(url,{cache:"no-store",redirect:"follow",signal:controller.signal,headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/9.3; authoritative-public-directory)",accept:"text/html,application/xhtml+xml"}});
+    const res=await fetch(url,{cache:"no-store",redirect:"follow",signal:controller.signal,headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/9.4; authoritative-public-directory)",accept:"text/html,text/csv,application/csv,application/octet-stream,*/*"}});
     if(!res.ok) throw new Error(`${url} HTTP ${res.status}`);
-    return {url:res.url||url,html:await res.text()};
+    return {url:res.url||url,text:await res.text(),contentType:res.headers.get("content-type")||""};
   } finally { clearTimeout(timer); }
 }
 
@@ -46,14 +47,52 @@ function parseDistricts(html:string):District[]{
   return [...new Map(out.map(x=>[key(x.district),x])).values()];
 }
 
+function csvRows(text:string):string[][]{
+  const rows:string[][]=[]; let row:string[]=[]; let field=""; let quoted=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(quoted){
+      if(ch==='"' && text[i+1]==='"'){ field+='"'; i++; }
+      else if(ch==='"') quoted=false;
+      else field+=ch;
+    }else{
+      if(ch==='"') quoted=true;
+      else if(ch===','){ row.push(field); field=""; }
+      else if(ch==='\n'){ row.push(field); rows.push(row); row=[]; field=""; }
+      else if(ch!=='\r') field+=ch;
+    }
+  }
+  if(field.length||row.length){ row.push(field); rows.push(row); }
+  return rows;
+}
+
+function parseDistrictCsv(text:string):District[]{
+  const rows=csvRows(text).filter(r=>r.some(Boolean));
+  if(!rows.length) return [];
+  const header=rows[0].map(v=>clean(v).toLowerCase());
+  const idx=(patterns:RegExp[])=>header.findIndex(h=>patterns.some(p=>p.test(h)));
+  const codeI=idx([/district.*code/,/^code$/]);
+  const districtI=idx([/^district$/,/district.*name/]);
+  const superI=idx([/superintendent/]);
+  const phoneI=idx([/^phone$/,/telephone/]);
+  const out:District[]=[];
+  for(const r of rows.slice(1)){
+    const code=clean(r[codeI]||"").replace(/\D/g,"").padStart(3,"0");
+    const district=clean(r[districtI]||"");
+    const superintendent=person(r[superI]||"");
+    const p=phone(r[phoneI]||"") || r.map(phone).find(Boolean) || "";
+    if(code && district && superintendent && p && !/superintendent/i.test(superintendent)) out.push({code,district,superintendent,phone:p});
+  }
+  return [...new Map(out.map(x=>[key(x.district),x])).values()];
+}
+
 async function districts():Promise<{list:District[];source:string;errors:string[]}>{
   const errors:string[]=[];
-  for(const source of [KDE_OPENHOUSE,KDE_SDCI]){
+  for(const source of [KDE_OPENHOUSE,KDE_EXPORT,KDE_SDCI]){
     try{
-      const {html}=await fetchHtml(source);
-      const list=parseDistricts(html);
-      // KDE's legacy SDCI directory is paginated server-side and exposes 10 rows per HTML response.
-      // A partial authoritative page is still useful, but only for districts actually present on that page.
+      const fetched=await fetchText(source);
+      const csvLike=/csv|octet-stream/i.test(fetched.contentType) || (!/<html|<table|<!doctype/i.test(fetched.text.slice(0,500)) && fetched.text.includes(','));
+      const list=csvLike?parseDistrictCsv(fetched.text):parseDistricts(fetched.text);
       if(list.length>=5) return {list,source,errors};
       errors.push(`${source} parsed only ${list.length} districts`);
     }catch(err){ errors.push(err instanceof Error?err.message:String(err)); }
@@ -82,9 +121,6 @@ export async function GET(req:NextRequest){
     return NextResponse.json({ok:false,state:"KY",blocker,before},{status:502});
   }
 
-  // Read a broad slice of missing KY superintendent slots, but consume only districts actually
-  // present in this authoritative response. Never mark a district checked merely because it is on
-  // a different server-side pagination page.
   const slots=await sql.query(`select c.id::text,c.agency_id::text,c.county,c.role_key,a.canonical_name from raven_state_contacts c left join agencies a on a.id=c.agency_id where c.state_code='KY' and c.scope='district' and c.verification_status='missing' and c.role_key='superintendent' and coalesce(c.evidence_note,'') <> $1 order by coalesce(c.updated_at,c.created_at) asc,c.id asc limit $2`,[CHECKED,BATCH_SIZE]) as Slot[];
 
   let matched=0,filled=0;
