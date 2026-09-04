@@ -53,7 +53,15 @@ const CONTACTS: Contact[] = [
   {district:"Long County",fullName:"Heath Crane",title:"Superintendent",email:"hcrane@longcountyschools.org",sourceUrl:"https://www.gssaweb.org/superintendents/"},
   {district:"Lanier County",fullName:"Brooks Culpepper",title:"Superintendent",email:"gene.culpepper@lanier.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
   {district:"Worth County",fullName:"Nehemiah Cummings",title:"Superintendent",email:"ncummings@worthschools.net",sourceUrl:"https://www.gssaweb.org/superintendents/"},
-  {district:"Jefferson County",fullName:"Samuel Dasher",title:"Superintendent",email:"dashers@jefferson.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"}
+  {district:"Jefferson County",fullName:"Samuel Dasher",title:"Superintendent",email:"dashers@jefferson.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Peach County",fullName:"Jesse Davis",title:"Superintendent",email:"jesse.davis@peachschools.org",sourceUrl:"https://www.peachschools.org/article/3068194"},
+  {district:"Cherokee County",fullName:"Mary Elizabeth Davis",title:"Superintendent",email:"maryelizabeth.davis@cherokeek12.net",phone:"770-479-1871",sourceUrl:"https://www.cherokeek12.net/superintendents-cabinet"},
+  {district:"Fannin County",fullName:"Shannon Dillard",title:"Superintendent",email:"sdillard@fannin.k12.ga.us",sourceUrl:"https://www.fannin.k12.ga.us/our-district/our-district-leadership"},
+  {district:"Dougherty County",fullName:"Kenneth Dyer",title:"Superintendent",email:"kenneth.dyer@docoschools.org",phone:"229-431-1285",sourceUrl:"https://www.docoschools.org/o/dcss/page/superintendents-office"},
+  {district:"Seminole County",fullName:"Mark Earnest",title:"Superintendent",email:"mark.earnest@seminole.k12.ga.us",sourceUrl:"https://www.gssaweb.org/superintendents/"},
+  {district:"Decatur County",fullName:"Boyd English",title:"Superintendent",email:"benglish@dcboe.com",phone:"229-248-2200",sourceUrl:"https://www.dcboe.com/page/superintendent/"},
+  {district:"Cartersville City",fullName:"Marc Feuerbach",title:"Superintendent",email:"mfeuerbach@cartersvilleschools.org",sourceUrl:"https://www.cartersvilleschools.org/about-ccs/superintendents-welcome"},
+  {district:"Early County",fullName:"Mary Felton",title:"Superintendent",email:"mfelton@early.k12.ga.us",phone:"229-723-4337",sourceUrl:"https://www.early.k12.ga.us/56226_1"}
 ];
 
 function key(v:string){
