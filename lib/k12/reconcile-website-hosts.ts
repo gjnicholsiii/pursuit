@@ -6,6 +6,13 @@ import { getSql } from "@/lib/db";
  * This is intentionally stronger evidence than name similarity and remains
  * conservative: no fuzzy matching, no invented NCES IDs, and no cross-state
  * host matching. Raven people are preserved with conflict-safe upserts.
+ *
+ * An unresolved alias that already owns Raven state-contact slots is deliberately
+ * left alone here. Those rows are governed by raven_state_contacts_unique_slot;
+ * trying to collapse the agency before its slots are reconciled can abort the
+ * entire national NCES cleanup. Skipping only those aliases lets every other safe
+ * host match advance while preserving all contact evidence for a dedicated slot
+ * reconciliation path.
  */
 export async function reconcileNcesAliasesByWebsiteHost() {
   const sql = getSql();
@@ -42,6 +49,11 @@ export async function reconcileNcesAliasesByWebsiteHost() {
        and a.host=u.host
        and a.authoritative_count=1
       where length(u.host) > 5
+        and not exists (
+          select 1
+          from raven_state_contacts rsc
+          where rsc.agency_id=u.id
+        )
     ),
     ranked_people as (
       select
