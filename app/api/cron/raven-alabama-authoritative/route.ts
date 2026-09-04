@@ -51,7 +51,7 @@ export async function GET(req:NextRequest){
   const auth=requireInternalAuth(req); if(auth)return auth;
   const sql=getSql();
   const before=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const slots=await sql.query(`select c.id::text,a.canonical_name,c.verification_status,c.evidence_note from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code='AL' and c.scope='district' and c.role_key='superintendent' and (c.verification_status in ('missing','rejected') or c.evidence_note=$1) order by a.canonical_name`,[EVIDENCE]) as Slot[];
+  const slots=await sql.query(`select c.id::text,a.canonical_name,c.verification_status,c.evidence_note from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code='AL' and c.scope='district' and c.role_key='superintendent' and c.verification_status in ('missing','rejected') and coalesce(c.evidence_note,'') <> $1 order by a.canonical_name`,[CHECKED]) as Slot[];
   if(slots.length===0){ const summary={ok:true,state:'AL',source:SOURCE,districtsProcessed:0,matched:0,filledOrRepaired:0,unmatched:0,before,after:before}; console.log('RAVEN_AL_AUTHORITATIVE',summary); return NextResponse.json(summary); }
   let pages:string[]=[];
   try{
@@ -68,9 +68,9 @@ export async function GET(req:NextRequest){
       matched++; touched.push(slot.canonical_name);
       const rows=await sql.query(`update raven_state_contacts set full_name=$2,title='Superintendent',email=null,phone=$3,source_url=$4,verification_status='candidate',evidence_note=$5,updated_at=now() where id=$1 returning id`,[slot.id,contact.fullName,contact.phone,SOURCE,EVIDENCE]) as any[];
       filledOrRepaired+=rows.length;
-    }else if(slot.verification_status==='missing'){
+    }else{
       unmatched++;
-      await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id=$1 and verification_status='missing'`,[slot.id,CHECKED]);
+      await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id=$1 and verification_status in ('missing','rejected')`,[slot.id,CHECKED]);
     }
   }
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
