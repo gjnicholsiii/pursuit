@@ -23,44 +23,56 @@ function districtKey(v:string){
 }
 function col(headers:string[], patterns:RegExp[]){ return headers.findIndex(h=>patterns.some(rx=>rx.test(clean(h)))); }
 
-async function illinois():Promise<Contact[]> {
-  const res=await fetch(SOURCE,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/7.1; authoritative-state-roster)",accept:"application/vnd.ms-excel,application/octet-stream,*/*"}});
+async function illinois():Promise<{contacts:Contact[];diagnostics:any}> {
+  const res=await fetch(SOURCE,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/7.2; authoritative-state-roster)",accept:"application/vnd.ms-excel,application/octet-stream,*/*"}});
   if(!res.ok) throw new Error(`Illinois ISBE directory HTTP ${res.status}`);
   const buf=Buffer.from(await res.arrayBuffer());
   const wb=XLSX.read(buf,{type:"buffer"});
   const contacts:Contact[]=[];
+  const diagnostics:any={sheets:wb.SheetNames,examined:[]};
+
   for(const sheetName of wb.SheetNames){
     if(!/(public.*(sch|dist)|district)/i.test(sheetName)) continue;
     const matrix=XLSX.utils.sheet_to_json<any[]>(wb.Sheets[sheetName],{header:1,defval:"",raw:false}) as any[][];
     const headerIndex=matrix.findIndex(row=>{
       const cells=row.map(clean);
-      return cells.some(c=>/^(entity|district)\s*name$/i.test(c)) && cells.some(c=>/(administrator|superintendent|chief administrator)/i.test(c));
+      const hasEntity=cells.some(c=>/(^|\b)(entity|district)(\b|\s).*name|^name$/i.test(c));
+      const hasAdmin=cells.some(c=>/(admin|administrator|superintendent|chief)/i.test(c));
+      return hasEntity && hasAdmin;
     });
-    if(headerIndex<0) continue;
+    if(headerIndex<0){ diagnostics.examined.push({sheetName,headerIndex,preview:matrix.slice(0,12).map(r=>r.map(clean).filter(Boolean).slice(0,12))}); continue; }
+
     const headers=matrix[headerIndex].map(clean);
-    const districtI=col(headers,[/^entity\s*name$/i,/^district\s*name$/i,/^name$/i]);
-    const adminI=col(headers,[/administrator/i,/superintendent/i,/chief administrator/i]);
-    const phoneI=col(headers,[/^phone/i,/telephone/i]);
+    const districtI=col(headers,[/^entity\s*name$/i,/^district\s*name$/i,/entity.*name/i,/district.*name/i,/^name$/i]);
+    const adminFullI=col(headers,[/^administrator$/i,/^superintendent$/i,/chief\s*administrator/i,/administrator\s*name/i,/admin(istrator)?\s*name/i]);
+    const adminFirstI=col(headers,[/(admin|administrator).*first/i,/first.*(admin|administrator)/i]);
+    const adminLastI=col(headers,[/(admin|administrator).*last/i,/last.*(admin|administrator)/i]);
+    const phoneI=col(headers,[/^phone/i,/telephone/i,/phone.*number/i]);
     const emailI=col(headers,[/e-?mail/i]);
-    const typeI=col(headers,[/^entity\s*type$/i,/^type$/i,/entity type/i]);
-    if(districtI<0 || adminI<0 || (phoneI<0 && emailI<0)) continue;
+    const typeI=col(headers,[/^entity\s*type$/i,/^type$/i,/entity.*type/i,/entity.*category/i]);
+    diagnostics.examined.push({sheetName,headerIndex,headers,districtI,adminFullI,adminFirstI,adminLastI,phoneI,emailI,typeI});
+
+    if(districtI<0 || (adminFullI<0 && adminFirstI<0 && adminLastI<0) || (phoneI<0 && emailI<0)) continue;
     for(const row of matrix.slice(headerIndex+1)){
       const district=clean(row[districtI]);
-      const admin=clean(row[adminI]);
-      const phone=phoneI>=0?clean(row[phoneI]):"";
+      const admin=adminFullI>=0 ? clean(row[adminFullI]) : clean(`${adminFirstI>=0?row[adminFirstI]:""} ${adminLastI>=0?row[adminLastI]:""}`);
+      const p=phoneI>=0?clean(row[phoneI]):"";
       const rawEmail=emailI>=0?clean(row[emailI]):"";
       const email=validEmail(rawEmail)?rawEmail:"";
       const entityType=typeI>=0?clean(row[typeI]):"";
-      if(entityType && !/(district|charter district)/i.test(entityType)) continue;
-      if(!district || !admin || (!phone && !email)) continue;
+      if(entityType && /(school|academy|program)/i.test(entityType) && !/district/i.test(entityType)) continue;
+      if(!district || !admin || (!p && !email)) continue;
       if(!person(admin) || /^(vacant|n\/a|none|unknown)$/i.test(person(admin))) continue;
-      contacts.push({district,fullName:person(admin),phone,email});
+      contacts.push({district,fullName:person(admin),phone:p,email});
     }
   }
   const out=new Map<string,Contact>();
   for(const c of contacts){ const k=districtKey(c.district); if(k && !out.has(k)) out.set(k,c); }
-  if(out.size===0) throw new Error(`Illinois ISBE workbook parsed zero reachable district administrators; refusing to advance durable queue`);
-  return [...out.values()];
+  if(out.size===0){
+    console.error("RAVEN_IL_WORKBOOK_DIAGNOSTICS",JSON.stringify(diagnostics));
+    throw new Error(`Illinois ISBE workbook parsed zero reachable district administrators; diagnostics emitted`);
+  }
+  return {contacts:[...out.values()],diagnostics};
 }
 
 function sameDistrict(slot:any, contact:Contact){
@@ -77,8 +89,8 @@ export async function GET(req:NextRequest){
     const summary={ok:true,state:"IL",source:INDEX,skippedFetch:true,districtsNewlyAttempted:0,matched:0,filled:0,unmatched:0,remainingUnattempted:0,exhaustedCurrentSource:true,before,after:before,net:{total:0,verified:0,candidate:0,missing:0,rejected:0}};
     console.log("RAVEN_IL_AUTHORITATIVE",summary); return NextResponse.json(summary);
   }
-  let roster:Contact[]=[];
-  try{ roster=await illinois(); }
+  let roster:Contact[]=[]; let parserDiagnostics:any=null;
+  try{ const parsed=await illinois(); roster=parsed.contacts; parserDiagnostics=parsed.diagnostics; }
   catch(err){ const blocker=err instanceof Error?err.message:String(err); console.error("RAVEN_IL_AUTHORITATIVE_FETCH",blocker); return NextResponse.json({ok:false,state:"IL",blocker,before},{status:502}); }
   const slots=await sql.query(`select c.id::text,c.county,a.canonical_name from raven_state_contacts c left join agencies a on a.id=c.agency_id where c.state_code='IL' and c.scope='district' and c.role_key='superintendent' and c.verification_status='missing' and coalesce(c.evidence_note,'') <> $1 order by coalesce(c.updated_at,c.created_at) asc,c.id asc limit $2`,[CHECKED,BATCH_SIZE]) as any[];
   let matched=0,filled=0,unmatched=0;
@@ -95,6 +107,6 @@ export async function GET(req:NextRequest){
   }
   const remaining=(await sql.query(`select count(*)::int n from raven_state_contacts where state_code='IL' and scope='district' and role_key='superintendent' and verification_status='missing' and coalesce(evidence_note,'') <> $1`,[CHECKED]) as any[])[0]?.n||0;
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const summary={ok:true,state:"IL",source:SOURCE,fetched:roster.length,districtsNewlyAttempted:slots.length,matched,filled,unmatched,remainingUnattempted:remaining,exhaustedCurrentSource:remaining===0,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
+  const summary={ok:true,state:"IL",source:SOURCE,fetched:roster.length,districtsNewlyAttempted:slots.length,matched,filled,unmatched,remainingUnattempted:remaining,exhaustedCurrentSource:remaining===0,parserSheets:parserDiagnostics?.sheets||[],before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
   console.log("RAVEN_IL_AUTHORITATIVE",summary); return NextResponse.json(summary);
 }
