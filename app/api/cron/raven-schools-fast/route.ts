@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enrichSchoolContactsFast } from "@/lib/raven/school-contact-fast";
-import { resolveK12OfficialSites } from "@/lib/raven/k12-official-site";
 import { requireInternalAuth } from "@/lib/internal-auth";
 
 export const dynamic="force-dynamic";
@@ -9,9 +8,13 @@ export const maxDuration=300;
 export async function GET(request:NextRequest){
   const auth=requireInternalAuth(request); if(auth)return auth;
   try{
-    const limit=Math.max(6,Math.min(Number(request.nextUrl.searchParams.get("limit")||24),40));
-    const identity=await resolveK12OfficialSites(120);
+    const limit=Math.max(12,Math.min(Number(request.nextUrl.searchParams.get("limit")||72),96));
     const result=await enrichSchoolContactsFast("k12",limit);
-    return NextResponse.json({ok:true,identity,...result});
-  }catch(error){return NextResponse.json({ok:false,error:error instanceof Error?error.message:String(error)},{status:500});}
+    console.log("RAVEN_SCHOOLS_FAST",result);
+    return NextResponse.json({ok:true,...result});
+  }catch(error){
+    const message=error instanceof Error?error.message:String(error);
+    console.error("RAVEN_SCHOOLS_FAST_ERROR",message);
+    return NextResponse.json({ok:false,error:message},{status:500});
+  }
 }
