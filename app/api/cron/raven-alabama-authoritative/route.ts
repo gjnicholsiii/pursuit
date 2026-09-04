@@ -9,6 +9,8 @@ export const maxDuration = 300;
 const SOURCE = "https://www.alabamaachieves.org/wp-content/uploads/2025/01/COMM_20250106_DAPS-2025_V1.0.pdf";
 const EVIDENCE = "Superintendent and direct office phone published in the Alabama State Department of Education statewide public-school directory; awaiting live revalidation.";
 const CHECKED = "ALSDE 2025 statewide directory checked with page-local district matching; no matching superintendent found for this Raven district.";
+const ASHS_SOURCE = "https://www.alhealthcarehs.org/about-us/administration-staff";
+const ASHS_EVIDENCE = "Official Alabama School of Healthcare Sciences administration page lists Dr. James (Jimmy) Martin as President, the school's chief executive. No individual email published; none inferred.";
 
 type Slot = { id:string; canonical_name:string; verification_status:string; evidence_note:string|null };
 type Contact = { fullName:string; phone:string };
@@ -51,18 +53,29 @@ export async function GET(req:NextRequest){
   const auth=requireInternalAuth(req); if(auth)return auth;
   const sql=getSql();
   const before=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const slots=await sql.query(`select c.id::text,a.canonical_name,c.verification_status,c.evidence_note from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code='AL' and c.scope='district' and c.role_key='superintendent' and c.verification_status in ('missing','rejected') and coalesce(c.evidence_note,'') <> $1 order by a.canonical_name`,[CHECKED]) as Slot[];
+  const slots=await sql.query(`select c.id::text,a.canonical_name,c.verification_status,c.evidence_note from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code='AL' and c.scope='district' and c.role_key='superintendent' and c.verification_status in ('missing','rejected') and (coalesce(c.evidence_note,'') <> $1 or a.canonical_name='Alabama School of Healthcare Sciences') order by a.canonical_name`,[CHECKED]) as Slot[];
   if(slots.length===0){ const summary={ok:true,state:'AL',source:SOURCE,districtsProcessed:0,matched:0,filledOrRepaired:0,unmatched:0,before,after:before}; console.log('RAVEN_AL_AUTHORITATIVE',summary); return NextResponse.json(summary); }
-  let pages:string[]=[];
-  try{
-    const res=await fetch(SOURCE,{cache:'no-store',redirect:'follow',headers:{'user-agent':'Mozilla/5.0 (compatible; Pursuit-Raven/8.0; authoritative-state-roster)'}});
-    if(!res.ok) throw new Error(`ALSDE PDF HTTP ${res.status}`);
-    const pdf=await getDocumentProxy(new Uint8Array(await res.arrayBuffer()));
-    const result=await extractText(pdf,{mergePages:false}); pages=result.text as string[];
-    if(pages.length<200) throw new Error(`ALSDE PDF extracted only ${pages.length} pages`);
-  }catch(err){ const blocker=err instanceof Error?err.message:String(err); console.error('RAVEN_AL_AUTHORITATIVE_FETCH',blocker); return NextResponse.json({ok:false,state:'AL',blocker,before},{status:502}); }
-  let matched=0,filledOrRepaired=0,unmatched=0; const touched:string[]=[];
+
+  let matched=0,filledOrRepaired=0,unmatched=0; const touched:string[]=[]; const pending:Slot[]=[];
   for(const slot of slots){
+    if(slot.canonical_name==='Alabama School of Healthcare Sciences'){
+      const rows=await sql.query(`update raven_state_contacts set full_name=$2,title='President',email=null,phone=null,source_url=$3,verification_status='candidate',evidence_note=$4,updated_at=now() where id=$1 and verification_status in ('missing','rejected') returning id`,[slot.id,'Dr. James (Jimmy) Martin',ASHS_SOURCE,ASHS_EVIDENCE]) as any[];
+      if(rows.length){ matched++; filledOrRepaired+=rows.length; touched.push(slot.canonical_name); }
+    }else pending.push(slot);
+  }
+
+  let pages:string[]=[];
+  if(pending.length){
+    try{
+      const res=await fetch(SOURCE,{cache:'no-store',redirect:'follow',headers:{'user-agent':'Mozilla/5.0 (compatible; Pursuit-Raven/8.0; authoritative-state-roster)'}});
+      if(!res.ok) throw new Error(`ALSDE PDF HTTP ${res.status}`);
+      const pdf=await getDocumentProxy(new Uint8Array(await res.arrayBuffer()));
+      const result=await extractText(pdf,{mergePages:false}); pages=result.text as string[];
+      if(pages.length<200) throw new Error(`ALSDE PDF extracted only ${pages.length} pages`);
+    }catch(err){ const blocker=err instanceof Error?err.message:String(err); console.error('RAVEN_AL_AUTHORITATIVE_FETCH',blocker); return NextResponse.json({ok:false,state:'AL',blocker,before},{status:502}); }
+  }
+
+  for(const slot of pending){
     const contact=findContact(pages,slot.canonical_name);
     if(contact){
       matched++; touched.push(slot.canonical_name);
