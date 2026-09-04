@@ -28,10 +28,7 @@ function contactFromBlock(lines:string[], start:number, end:number):Contact|null
     const line=lines[i];
     if(/Secretary to the Superintendent|Asst Superintendent|Assistant Superintendent/i.test(line)) continue;
     const m=line.match(/^(.+?)\s+Superintendent\s+(\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4})\b/i);
-    if(m){
-      const fullName=person(m[1]);
-      if(fullName) return {fullName,phone:m[2]};
-    }
+    if(m){ const fullName=person(m[1]); if(fullName) return {fullName,phone:m[2]}; }
   }
   return null;
 }
@@ -44,8 +41,7 @@ function findContact(pages:string[], district:string):Contact|null{
       if(!heading || key(heading)!==dk) continue;
       let end=lines.length;
       for(let j=i+1;j<lines.length;j++) if(systemHeading(lines[j])){ end=j; break; }
-      const c=contactFromBlock(lines,i,end);
-      if(c) return c;
+      const c=contactFromBlock(lines,i,end); if(c) return c;
     }
   }
   return null;
@@ -78,7 +74,7 @@ export async function GET(req:NextRequest){
     }
   }
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const state=(await sql.query(`select count(*)::int slots,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts where state_code='AL' and role_key='superintendent'`) as any[])[0];
-  const summary={ok:true,state:'AL',source:SOURCE,districtsProcessed:slots.length,matched,filledOrRepaired,unmatched,state,touched,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
+  const coverage=(await sql.query(`select count(*)::int slots,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts where state_code='AL' and role_key='superintendent'`) as any[])[0];
+  const summary={ok:true,state:'AL',source:SOURCE,districtsProcessed:slots.length,matched,filledOrRepaired,unmatched,coverage,touched,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
   console.log('RAVEN_AL_AUTHORITATIVE',summary); return NextResponse.json(summary);
 }
