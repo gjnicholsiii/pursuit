@@ -19,7 +19,7 @@ export async function GET(req:NextRequest){
 
   const filled=await sql.query(`
     with ranked as (
-      select c.id contact_id,p.full_name,p.title,p.email,p.phone,p.source_url,p.confidence,
+      select c.id contact_id,p.full_name,p.title,p.email,p.phone,p.source_url,p.confidence,p.role_family,
         row_number() over(
           partition by c.id
           order by (p.email is not null and btrim(p.email)<>'') desc,
@@ -37,10 +37,10 @@ export async function GET(req:NextRequest){
         and p.title !~* '(facilit(y|ies)|plant|maintenance|buildings?[[:space:]]*(and|&)[[:space:]]*grounds|procurement|purchasing|finance|financial|principal|teacher|operations?|transportation|food service|human resources|(^|[^a-z])hr([^a-z]|$))'
         and (
           (c.role_key='superintendent' and p.title ~* 'superintendent' and p.title !~* '(assistant|deputy|associate)[[:space:]]+superintendent')
-          or (c.role_key='assistant_superintendent' and p.title ~* '(assistant|asst\\.?)[[:space:]]+superintendent')
+          or (c.role_key='assistant_superintendent' and p.title ~* '(assistant|asst\\.?|associate)[[:space:]]+superintendent')
           or (c.role_key='security_director' and p.title ~* '(director|chief|executive director|senior director|associate superintendent).{0,80}(security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)|(security|school safety|public safety|safety and security|security and safety|emergency management|safe schools).{0,80}(director|chief|executive director|senior director|associate superintendent)')
           or (c.role_key='it_director' and p.title ~* '(director|executive director|chief information officer|chief technology officer|(^|[^a-z])cio([^a-z]|$)|(^|[^a-z])cto([^a-z]|$)).{0,60}(information technology|technology|information systems|it services|network services|tech infrastructure|cybersecurity)|(information technology|technology|information systems|it services|network services|tech infrastructure|cybersecurity).{0,60}(director|chief information officer|chief technology officer|(^|[^a-z])cio([^a-z]|$)|(^|[^a-z])cto([^a-z]|$))')
-          or (c.role_key='school_board' and p.title ~* '(school|governing)?[[:space:]]*board[[:space:]]+(member|chair|chairman|chairwoman|president|vice president|trustee|clerk)|board trustee')
+          or (c.role_key='school_board' and ((p.role_family='Board' and p.title ~* '(member|chair|chairman|chairwoman|president|vice president|trustee|clerk)') or p.title ~* '(school|governing)?[[:space:]]*board[[:space:]]+(member|chair|chairman|chairwoman|president|vice president|trustee|clerk)|board trustee'))
         )
     )
     update raven_state_contacts c
