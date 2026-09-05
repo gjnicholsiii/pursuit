@@ -1,9 +1,23 @@
-// Ohio OEDS export integration is not yet implemented. Do not burn the scheduled
-// statewide slot returning a 503 every ten minutes. Route this cron tick into the
-// next untouched authoritative statewide superintendent queue instead.
-//
-// The Idaho worker starts from the Idaho Department of Education complete district
-// roster, then follows only the official district sites linked by that statewide
-// roster. When Ohio OEDS POST/export parsing is implemented, restore this route to
-// the Ohio worker.
-export { GET, dynamic, maxDuration } from "../raven-idaho-authoritative/route";
+import { NextRequest, NextResponse } from "next/server";
+import { requireInternalAuth } from "@/lib/internal-auth";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 30;
+
+// Ohio OEDS export integration is not yet implemented. This endpoint must NOT
+// redirect into another state's worker: doing so caused Idaho's same residual
+// districts to be retried twice per cron cycle and defeated the durable queue.
+// Fail closed until the OEDS statewide export parser is implemented.
+export async function GET(req: NextRequest) {
+  const auth = requireInternalAuth(req);
+  if (auth) return auth;
+  return NextResponse.json(
+    {
+      ok: false,
+      state: "OH",
+      blocker: "Ohio OEDS statewide POST/export parser is not implemented; worker intentionally does not retry another state's queue.",
+      districtsNewlyAttempted: 0,
+    },
+    { status: 503 },
+  );
+}
