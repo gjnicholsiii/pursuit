@@ -11,6 +11,7 @@ const KDE_EXPORT = "https://applications.education.ky.gov/SDCI/Download.aspx?DCD
 const KDE_SDCI = "https://applications.education.ky.gov/SDCI/District.aspx/1000";
 const CHECKED = "Authoritative Kentucky KDE statewide superintendent roster checked for this missing superintendent slot; no matching published district superintendent found.";
 const BATCH_SIZE = 250;
+const MIN_STATEWIDE_ROSTER = 150;
 
 type District = { code:string; district:string; superintendent:string; phone:string };
 type Slot = { id:string; agency_id:string; county:string|null; canonical_name:string|null; role_key:string };
@@ -93,11 +94,11 @@ async function districts():Promise<{list:District[];source:string;errors:string[
       const fetched=await fetchText(source);
       const csvLike=/csv|octet-stream/i.test(fetched.contentType) || (!/<html|<table|<!doctype/i.test(fetched.text.slice(0,500)) && fetched.text.includes(','));
       const list=csvLike?parseDistrictCsv(fetched.text):parseDistricts(fetched.text);
-      if(list.length>=5) return {list,source,errors};
-      errors.push(`${source} parsed only ${list.length} districts`);
+      if(list.length>=MIN_STATEWIDE_ROSTER) return {list,source,errors};
+      errors.push(`${source} parsed only ${list.length} districts; refusing partial roster (minimum ${MIN_STATEWIDE_ROSTER}, KDE publishes 171 districts)`);
     }catch(err){ errors.push(err instanceof Error?err.message:String(err)); }
   }
-  throw new Error(`Kentucky KDE roster unavailable or incomplete; ${errors.join(" | ")}`);
+  throw new Error(`Kentucky KDE statewide roster unavailable or incomplete; ${errors.join(" | ")}`);
 }
 
 function matchDistrict(slot:Slot,list:District[]){
@@ -138,7 +139,7 @@ export async function GET(req:NextRequest){
 
   const remaining=(await sql.query(`select count(*)::int n from raven_state_contacts where state_code='KY' and scope='district' and verification_status='missing' and role_key='superintendent'`,[]) as any[])[0]?.n||0;
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const summary={ok:true,state:"KY",source,sourceFallbackErrors:sourceErrors,districtRoster:list.length,slotsScanned:slots.length,slotsNewlyAttempted:matched,districtsNewlyAttempted:districtsAttempted.size,matched,filled,unmatchedMarkedChecked:0,remainingMissingSuperintendent:remaining,partialAuthoritativePage:list.length<150,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
+  const summary={ok:true,state:"KY",source,sourceFallbackErrors:sourceErrors,districtRoster:list.length,slotsScanned:slots.length,slotsNewlyAttempted:matched,districtsNewlyAttempted:districtsAttempted.size,matched,filled,unmatchedMarkedChecked:0,remainingMissingSuperintendent:remaining,partialAuthoritativePage:list.length<MIN_STATEWIDE_ROSTER,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
   console.log("RAVEN_KY_AUTHORITATIVE",summary);
   return NextResponse.json(summary);
 }
