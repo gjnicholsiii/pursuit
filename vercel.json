@@ -67,7 +67,6 @@
     { "path": "/api/cron/raven-georgia-authoritative", "schedule": "2,12,22,32,42,52 * * * *" },
     { "path": "/api/cron/raven-florida-authoritative", "schedule": "7,17,27,37,47,57 * * * *" },
     { "path": "/api/cron/raven-rhode-island-authoritative", "schedule": "4,14,24,34,44,54 * * * *" },
-    { "path": "/api/cron/raven-idaho-authoritative", "schedule": "5,15,25,35,45,55 * * * *" },
     { "path": "/api/cron/raven-contact-verify", "schedule": "3,8,13,18,23,28,33,38,43,48,53,58 * * * *" },
     { "path": "/api/cron/raven-higher-ed", "schedule": "15 8 * * *" },
     { "path": "/api/cron/raven-higher-ed-fast", "schedule": "7,27,47 * * * *" },
