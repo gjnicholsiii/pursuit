@@ -5,12 +5,11 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// Ohio's authoritative district/staff directory is OEDS. The previous implementation
-// of this route was an accidental copy of the Georgia GSSA worker and therefore
-// queried and wrote GA superintendent records every time the OH cron fired.
-// Fail closed until an OEDS-specific importer is wired here; never mutate another
-// state's queue from this endpoint.
-const SOURCE = "https://education.ohio.gov/Topics/Data/Ohio-Educational-Directory-System-OEDS";
+// Ohio's authoritative public district/staff source is the OEDS Public Extract.
+// It exposes Public District selection, NCES District ID, role selection, person name,
+// public email and public phone. Do not fall back to another state's importer and do
+// not crawl individual districts until this statewide extract path is implemented.
+const SOURCE = "https://oeds.education.ohio.gov/DataExtract";
 
 export async function GET(req: NextRequest) {
   const auth = requireInternalAuth(req);
@@ -39,7 +38,13 @@ export async function GET(req: NextRequest) {
     ok: false,
     state: "OH",
     source: SOURCE,
-    blocker: "OEDS-specific importer required; unsafe Georgia worker removed from Ohio route",
+    sourceMode: "oeds-public-extract",
+    requiredExtract: {
+      organizationType: "Public District",
+      districtFields: ["IRN", "NCES District ID", "Web URL"],
+      personFields: ["First Name", "Last Name", "Title", "Role Status", "Email (Primary/Public)", "Phone (Primary/Public)"],
+    },
+    blocker: "OEDS public extract POST/export integration still required; fail closed until statewide extract is parsed and reconciled by IRN/NCES ID",
     districtsNewlyAttempted: 0,
     ohioMissingDistrictSlots: ohioMissing,
     counts,
