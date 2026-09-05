@@ -33,7 +33,11 @@ export async function GET(req:NextRequest){
         and p.full_name is not null and btrim(p.full_name)<>''
         and p.title is not null and btrim(p.title)<>''
         and p.source_url is not null and btrim(p.source_url)<>''
-        and ((p.email is not null and btrim(p.email)<>'') or (p.phone is not null and btrim(p.phone)<>''))
+        and (
+          c.role_key='superintendent'
+          or (p.email is not null and btrim(p.email)<>'')
+          or (p.phone is not null and btrim(p.phone)<>'')
+        )
         and p.title !~* '(facilit(y|ies)|plant|maintenance|buildings?[[:space:]]*(and|&)[[:space:]]*grounds|procurement|purchasing|finance|financial|principal|teacher|operations?|transportation|food service|human resources|(^|[^a-z])hr([^a-z]|$))'
         and (
           (c.role_key='superintendent' and p.title ~* 'superintendent' and p.title !~* '(assistant|deputy|associate)[[:space:]]+superintendent')
@@ -50,7 +54,11 @@ export async function GET(req:NextRequest){
         phone=r.phone,
         source_url=r.source_url,
         verification_status='candidate',
-        evidence_note='Reachable candidate from an official K-12 public source; published email or phone present; awaiting strict live revalidation.',
+        evidence_note=case
+          when c.role_key='superintendent' and (r.email is null or btrim(r.email)='') and (r.phone is null or btrim(r.phone)='')
+            then 'Current superintendent identity from a sourced K-12 public record; no contact detail inferred; awaiting strict live revalidation.'
+          else 'Reachable candidate from an official K-12 public source; published email or phone present; awaiting strict live revalidation.'
+        end,
         updated_at=now()
     from ranked r
     where c.id=r.contact_id and r.rn=1
