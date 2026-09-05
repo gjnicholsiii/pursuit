@@ -62,7 +62,7 @@
     { "path": "/api/cron/raven-kentucky-authoritative", "schedule": "6,16,26,36,46,56 * * * *" },
     { "path": "/api/cron/raven-new-mexico-authoritative", "schedule": "7,17,27,37,47,57 * * * *" },
     { "path": "/api/cron/raven-new-york-authoritative", "schedule": "6,16,26,36,46,56 * * * *" },
-    { "path": "/api/cron/raven-ohio-authoritative", "schedule": "8,18,28,38,48,58 * * * *" },
+    { "path": "/api/cron/raven-ohio-authoritative", "schedule": "* * * * *" },
     { "path": "/api/cron/raven-pennsylvania-authoritative", "schedule": "9,19,29,39,49,59 * * * *" },
     { "path": "/api/cron/raven-georgia-authoritative", "schedule": "2,12,22,32,42,52 * * * *" },
     { "path": "/api/cron/raven-florida-authoritative", "schedule": "7,17,27,37,47,57 * * * *" },
