@@ -10,6 +10,7 @@ const INDEX="https://educate.iowa.gov/iowa-public-school-district-directories";
 const SOURCE="https://educate.iowa.gov/media/13351/download?inline=";
 const CHECKED="Authoritative Iowa Department of Education 2026-27 preliminary public school district directory checked; no matching published reachable superintendent in this source.";
 const BATCH_SIZE=250;
+const MESKWAKI_SOURCE="https://msswarriors.org/meet-and-greet-w-ms-johanna-cooper-mss-new-superintendent/";
 
 type Contact={district:string;fullName:string;email:string;phone:string};
 
@@ -62,8 +63,18 @@ export async function GET(req:NextRequest){
   const auth=requireInternalAuth(req);if(auth)return auth;
   const sql=getSql();
   const before=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
+
+  // Durable residual: the statewide directory does not cover this BIE tribal school, but the
+  // school's own official site identifies its superintendent. Keep this as a candidate because
+  // the source is older than the current school year, and never infer an email.
+  const residual=await sql.query(`update raven_state_contacts c set full_name='Johanna Cooper',title='Superintendent',email=null,source_url=$1,verification_status='candidate',verified_at=null,evidence_note='Official Meskwaki Settlement School source identifies Johanna Cooper as superintendent; no email inferred. Source rechecked by Raven residual queue.',updated_at=now() where c.state_code='IA' and c.scope='district' and c.role_key='superintendent' and c.verification_status='missing' and c.agency_id in (select id from agencies where nces_id='5900196') returning c.id`,[MESKWAKI_SOURCE]) as any[];
+
   const available=Number((await sql.query(`select count(*)::int n from raven_state_contacts where state_code='IA' and scope='district' and role_key='superintendent' and verification_status='missing' and coalesce(evidence_note,'')<>$1`,[CHECKED]) as any[])[0]?.n||0);
-  if(available===0){const summary={ok:true,state:"IA",source:INDEX,skippedFetch:true,districtsNewlyAttempted:0,matched:0,filled:0,unmatched:0,remainingUnattempted:0,exhaustedCurrentSource:true,before,after:before,net:{total:0,verified:0,candidate:0,missing:0,rejected:0}};console.log("RAVEN_IA_AUTHORITATIVE",summary);return NextResponse.json(summary);}
+  if(available===0){
+    const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
+    const summary={ok:true,state:"IA",source:INDEX,skippedFetch:true,districtsNewlyAttempted:residual.length,matched:residual.length,filled:residual.length,unmatched:0,remainingUnattempted:0,exhaustedCurrentSource:true,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
+    console.log("RAVEN_IA_AUTHORITATIVE",summary);return NextResponse.json(summary);
+  }
   let roster:Contact[]=[];let diagnostics:any=null;
   try{const parsed=await iowa();roster=parsed.contacts;diagnostics=parsed.diagnostics;}catch(error){const blocker=error instanceof Error?error.message:String(error);console.error("RAVEN_IA_AUTHORITATIVE_FETCH",blocker);return NextResponse.json({ok:false,state:"IA",blocker,before},{status:502});}
   const slots=await sql.query(`select c.id::text,c.county,a.canonical_name from raven_state_contacts c left join agencies a on a.id=c.agency_id where c.state_code='IA' and c.scope='district' and c.role_key='superintendent' and c.verification_status='missing' and coalesce(c.evidence_note,'')<>$1 order by coalesce(c.updated_at,c.created_at) asc,c.id asc limit $2`,[CHECKED,BATCH_SIZE]) as any[];
@@ -71,6 +82,6 @@ export async function GET(req:NextRequest){
   for(const s of slots){const contact=roster.find(r=>sameDistrict(s,r));if(contact){matched++;const u=await sql.query(`update raven_state_contacts set full_name=$2,title='Superintendent',email=nullif($3,''),phone=nullif($4,''),source_url=$5,verification_status='candidate',evidence_note='Iowa superintendent and reachable contact published in the official Iowa Department of Education 2026-27 public school district directory; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,contact.fullName,contact.email,contact.phone,SOURCE]) as any[];filled+=u.length;}else{unmatched++;await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id=$1 and verification_status='missing'`,[s.id,CHECKED]);}}
   const remaining=Number((await sql.query(`select count(*)::int n from raven_state_contacts where state_code='IA' and scope='district' and role_key='superintendent' and verification_status='missing' and coalesce(evidence_note,'')<>$1`,[CHECKED]) as any[])[0]?.n||0);
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const summary={ok:true,state:"IA",source:SOURCE,fetched:roster.length,districtsNewlyAttempted:slots.length,matched,filled,unmatched,remainingUnattempted:remaining,exhaustedCurrentSource:remaining===0,parserSheets:diagnostics?.sheets||[],before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
+  const summary={ok:true,state:"IA",source:SOURCE,fetched:roster.length,districtsNewlyAttempted:slots.length+residual.length,matched:matched+residual.length,filled:filled+residual.length,unmatched,remainingUnattempted:remaining,exhaustedCurrentSource:remaining===0,parserSheets:diagnostics?.sheets||[],before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
   console.log("RAVEN_IA_AUTHORITATIVE",summary);return NextResponse.json(summary);
 }
