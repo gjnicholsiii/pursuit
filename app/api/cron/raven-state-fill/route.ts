@@ -28,21 +28,39 @@ const STATE_ROUTES=[
   "/api/cron/raven-utah-authoritative"
 ];
 
+function deploymentOrigin(req:NextRequest){
+  const exact=process.env.VERCEL_URL?.trim();
+  if(exact)return exact.startsWith("http")?exact:`https://${exact}`;
+  return req.nextUrl.origin;
+}
+
 async function runState(req:NextRequest,path:string){
   const headers:Record<string,string>={};
   const authorization=req.headers.get("authorization");
-  const cronSecret=req.headers.get("x-cron-secret");
   if(authorization)headers.authorization=authorization;
-  if(cronSecret)headers["x-cron-secret"]=cronSecret;
   const started=Date.now();
+  const origin=deploymentOrigin(req);
   try{
-    const res=await fetch(new URL(path,req.url),{cache:"no-store",headers});
+    const url=new URL(path,origin);
+    const res=await fetch(url,{cache:"no-store",headers,redirect:"manual"});
     const text=await res.text();
-    let body:any=text;
+    const contentType=res.headers.get("content-type")||"";
+    let body:any=null;
     try{body=JSON.parse(text);}catch{}
-    return {path,status:res.status,ok:res.ok,ms:Date.now()-started,body};
+    const json=body!==null&&typeof body==="object";
+    const ok=res.ok&&json;
+    return {
+      path,
+      url:url.toString(),
+      status:res.status,
+      ok,
+      json,
+      contentType,
+      ms:Date.now()-started,
+      body:json?body:text.slice(0,240)
+    };
   }catch(err){
-    return {path,status:0,ok:false,ms:Date.now()-started,error:err instanceof Error?err.message:String(err)};
+    return {path,status:0,ok:false,json:false,ms:Date.now()-started,error:err instanceof Error?err.message:String(err)};
   }
 }
 
@@ -103,9 +121,12 @@ export async function GET(req:NextRequest){
 
   const after=await counts(sql);
   const districtsNewlyFilled=new Set(filled.map(r=>r.agency_id).filter(Boolean)).size;
+  const stateRunsOk=stateRuns.filter(r=>r.ok).length;
+  const stateRunsFailed=stateRuns.length-stateRunsOk;
   const summary={
-    ok:true,
+    ok:stateRunsFailed===0,
     mode:"parallel-statewide-authoritative-plus-promotion",
+    deploymentOrigin:deploymentOrigin(req),
     before,after,
     net:{
       total:after.total-before.total,
@@ -114,10 +135,12 @@ export async function GET(req:NextRequest){
       missing:after.missing-before.missing,
       rejected:after.rejected-before.rejected
     },
+    stateRunsOk,
+    stateRunsFailed,
     stateRuns,
     candidatesFilled:filled.length,
     districtsNewlyFilled
   };
   console.log("RAVEN_STATE_FILL",JSON.stringify(summary));
-  return NextResponse.json(summary);
+  return NextResponse.json(summary,{status:stateRunsFailed===0?200:207});
 }
