@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import * as XLSX from "xlsx";
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { requireInternalAuth } from "@/lib/internal-auth";
@@ -11,6 +12,8 @@ type Source = { state:string; url:string; fetch:()=>Promise<Contact[]>; checkedN
 
 const TX = "https://tealprod.tea.state.tx.us/Tea.AskTed.Web/Forms/DownloadFile2.aspx";
 const TX_CHECKED = "Authoritative Texas TEA AskTED statewide personnel file checked; no matching published reachable contact for this district/role in this source.";
+const TX_BOARD = "https://tealprod.tea.state.tx.us/Tea.AskTed.Web/Content/TSDFiles/TSD-2026-partial.xlsx";
+const TX_BOARD_CHECKED = "Authoritative Texas Education Agency 2025-2026 Texas School Directory Board of Trustee Members roster checked; no matching published board member for this district in this source.";
 const UT = "https://schools.utah.gov/schooldistricts";
 const UT_CHECKED = "Authoritative Utah State Board of Education statewide district directory checked; no matching published reachable superintendent for this district in this source.";
 const BATCH_SIZE = 250;
@@ -20,7 +23,7 @@ function email(v:string){ return /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test
 function person(v:string){ return clean(v).replace(/^(Dr\.|Mr\.|Mrs\.|Ms\.|Miss)\s+/i,""); }
 function districtKey(v:string){
   return clean(v).toLowerCase().replace(/&/g," and ")
-    .replace(/\b(public|community|consolidated|independent|county|city|school|schools|district|isd|csd|usd)\b/g," ")
+    .replace(/\b(public|community|consolidated|independent|county|city|school|schools|district|isd|csd|usd|charter|academy)\b/g," ")
     .replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();
 }
 function csvFields(line:string){
@@ -30,7 +33,7 @@ function csvFields(line:string){
 }
 
 async function texas(){
-  const first=await fetch(TX,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/5.5; authoritative-state-roster)",accept:"text/html,application/xhtml+xml"}});
+  const first=await fetch(TX,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/5.6; authoritative-state-roster)",accept:"text/html,application/xhtml+xml"}});
   if(!first.ok)throw new Error(`Texas AskTED form HTTP ${first.status}`);
   const html=await first.text(); const $=cheerio.load(html); const form=$("form").first(); if(!form.length)throw new Error("Texas AskTED download form not found");
   const body=new URLSearchParams();
@@ -42,7 +45,7 @@ async function texas(){
   for(const v of roleValues)body.append(districtRoleField,v);
   let submitName="",submitValue=""; form.find("input[type=submit],button").each((_,el)=>{const n=$(el).attr("name")||"",v=$(el).attr("value")||clean($(el).text());if(!submitName&&/download/i.test(v)&&n){submitName=n;submitValue=v;}}); if(submitName)body.set(submitName,submitValue);
   if(!superintendentField&&!roleValues.length)throw new Error("Texas AskTED personnel controls not resolved");
-  const post=await fetch(TX,{method:"POST",cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/5.5; authoritative-state-roster)","content-type":"application/x-www-form-urlencoded","referer":TX,accept:"text/csv,text/plain,application/vnd.ms-excel,*/*"},body:body.toString()});
+  const post=await fetch(TX,{method:"POST",cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/5.6; authoritative-state-roster)","content-type":"application/x-www-form-urlencoded","referer":TX,accept:"text/csv,text/plain,application/vnd.ms-excel,*/*"},body:body.toString()});
   if(!post.ok)throw new Error(`Texas AskTED download HTTP ${post.status}`);
   const text=await post.text(); if(/<html|<!doctype/i.test(text.slice(0,500)))throw new Error(`Texas AskTED returned HTML instead of personnel file; superintendentField=${!!superintendentField}; districtRoles=${roleValues.length}`);
   const lines=text.split(/\r?\n/).filter(Boolean); if(lines.length<2)throw new Error("Texas AskTED personnel file empty");
@@ -51,16 +54,51 @@ async function texas(){
   return [...new Map(out.map(x=>[districtKey(x.district)+"|"+x.title.toLowerCase(),x])).values()];
 }
 
+async function texasBoards(){
+  const res=await fetch(TX_BOARD,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/5.6; authoritative-state-board-roster)",accept:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*"}});
+  if(!res.ok)throw new Error(`Texas TEA school directory workbook HTTP ${res.status}`);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  const wb=XLSX.read(bytes,{type:"array"});
+  const sheetName=wb.SheetNames.find(n=>/board.*trustee|trustee.*member|board.*member/i.test(n));
+  if(!sheetName)throw new Error(`Texas TEA workbook missing Board of Trustee Members sheet; sheets=${wb.SheetNames.join("|")}`);
+  const rows=XLSX.utils.sheet_to_json<any[]>(wb.Sheets[sheetName],{header:1,defval:"",raw:false}).map(r=>r.map(v=>clean(String(v??""))));
+  let headerAt=-1, districtCol=-1, nameCol=-1, titleCol=-1, emailCol=-1, phoneCol=-1;
+  for(let i=0;i<Math.min(rows.length,30);i++){
+    const r=rows[i].map(v=>v.toLowerCase());
+    const d=r.findIndex(v=>/district|charter|organization/.test(v));
+    const n=r.findIndex(v=>/trustee.*name|member.*name|board.*member|full.*name|^name$/.test(v));
+    if(d>=0&&n>=0){ headerAt=i; districtCol=d; nameCol=n; titleCol=r.findIndex(v=>/title|office|position|role/.test(v)); emailCol=r.findIndex(v=>/email/.test(v)); phoneCol=r.findIndex(v=>/phone|telephone/.test(v)); break; }
+  }
+  if(headerAt<0)throw new Error(`Texas TEA board sheet header not resolved; firstRows=${rows.slice(0,8).map(r=>r.join(" | ")).join(" || ")}`);
+  const out:Contact[]=[];
+  for(const r of rows.slice(headerAt+1)){
+    const district=clean(r[districtCol]||""); const fullName=person(r[nameCol]||"");
+    const title=clean(titleCol>=0?(r[titleCol]||""):"")||"Board Trustee";
+    const e=clean(emailCol>=0?(r[emailCol]||""):""); const p=clean(phoneCol>=0?(r[phoneCol]||""):"");
+    if(!district||!fullName||!/\p{L}/u.test(fullName))continue;
+    out.push({district,fullName,title,email:email(e)?e:"",phone:p});
+  }
+  if(out.length<100)throw new Error(`Texas TEA board roster confidence guard: only ${out.length} board rows parsed`);
+  const priority=(t:string)=>/president|chair/i.test(t)?0:/vice/i.test(t)?1:/secretary/i.test(t)?2:3;
+  const best=new Map<string,Contact>();
+  for(const c of out){ const k=districtKey(c.district); const prior=best.get(k); if(!prior||priority(c.title)<priority(prior.title))best.set(k,c); }
+  return [...best.values()];
+}
+
 async function utah(){
-  const res=await fetch(UT,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/5.5; authoritative-state-roster)",accept:"text/html,application/xhtml+xml"}});
+  const res=await fetch(UT,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/5.6; authoritative-state-roster)",accept:"text/html,application/xhtml+xml"}});
   if(!res.ok)throw new Error(`Utah USBE directory HTTP ${res.status}`);
   const $=cheerio.load(await res.text()); const out:Contact[]=[];
   $("table tr").each((_,tr)=>{ const cells=$(tr).find("th,td").map((__,td)=>clean($(td).text())).get(); if(cells.length<10)return; if(/district/i.test(cells[0]||"")&&/superintendent/i.test(cells.join(" ")))return; const district=cells[0]||""; let fullName="",e="",phone=""; for(const cell of cells){ if(!e&&email(cell))e=cell; if(!phone&&/\(?\d{3}\)?[^\d]*\d{3}[^\d]*\d{4}/.test(cell))phone=cell; } const emailIndex=cells.findIndex(email); if(emailIndex>0){ for(let i=emailIndex-1;i>=0;i--){ const v=person(cells[i]||""); if(v&&v!==district&&!/^(ut|utah)$/i.test(v)&&!/^\d/.test(v)){ fullName=v; break; } } } if(!fullName){ const likely=cells.find((v,i)=>i>0&&i<14&&/[A-Za-z]+\s+[A-Za-z]+/.test(v)&&!/(street|road|avenue|city|district|school)/i.test(v)); fullName=person(likely||""); } if(district&&fullName&&(e||phone))out.push({district,fullName,title:"Superintendent",email:e,phone}); });
   return [...new Map(out.map(x=>[districtKey(x.district),x])).values()];
 }
 
-const SOURCES:Source[]=[{state:"TX",url:TX,fetch:texas,checkedNote:TX_CHECKED},{state:"UT",url:UT,fetch:utah,checkedNote:UT_CHECKED}];
-function roleFor(title:string){ if(/cybersecurity|technology|information/i.test(title))return "it_director"; if(/police chief|head of security|safe.*supportive|security/i.test(title))return "security_director"; if(/assistant|associate|deputy superintendent/i.test(title))return "assistant_superintendent"; return "superintendent"; }
+const SOURCES:Source[]=[
+  {state:"TX",url:TX,fetch:texas,checkedNote:TX_CHECKED},
+  {state:"TX",url:TX_BOARD,fetch:texasBoards,checkedNote:TX_BOARD_CHECKED},
+  {state:"UT",url:UT,fetch:utah,checkedNote:UT_CHECKED}
+];
+function roleFor(title:string){ if(/board|trustee/i.test(title))return "school_board"; if(/cybersecurity|technology|information/i.test(title))return "it_director"; if(/police chief|head of security|safe.*supportive|security/i.test(title))return "security_director"; if(/assistant|associate|deputy superintendent/i.test(title))return "assistant_superintendent"; return "superintendent"; }
 function sameDistrict(slot:any, contact:Contact){ const dk=districtKey(contact.district); const ak=districtKey(slot.canonical_name||""); const ck=districtKey(slot.county||""); return !!dk && (ak===dk||ck===dk||(ak&&ak.includes(dk))||(dk&&ak&&dk.includes(ak))); }
 
 export async function GET(req:NextRequest){
@@ -76,7 +114,7 @@ export async function GET(req:NextRequest){
     if(!supportedRoles.length){ results.push({state:source.state,source:source.url,fetched:roster.length,supportedRoles,districtsNewlyAttempted:0,matched:0,filled:0,unmatched:0,remainingUnattempted:available,exhaustedCurrentSource:false,blocker:"authoritative roster parsed but exposed no supported Raven leadership roles"}); continue; }
     const slots=await sql.query(`select c.id::text,c.county,c.role_key,a.canonical_name from raven_state_contacts c left join agencies a on a.id=c.agency_id where c.state_code=$1 and c.scope='district' and c.verification_status='missing' and coalesce(c.evidence_note,'') <> $2 and c.role_key = any($4::text[]) order by coalesce(c.updated_at,c.created_at) asc,c.id asc limit $3`,[source.state,source.checkedNote,BATCH_SIZE,supportedRoles]) as any[];
     let matched=0,filled=0,unmatched=0;
-    for(const s of slots){ const contact=roster.find(r=>roleFor(r.title)===s.role_key&&sameDistrict(s,r)); if(contact){ matched++; const u=await sql.query(`update raven_state_contacts set full_name=$2,title=$3,email=nullif($4,''),phone=nullif($5,''),source_url=$6,verification_status='candidate',evidence_note='Reachable contact ingested directly from authoritative statewide education directory; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,contact.fullName,contact.title,contact.email,contact.phone,source.url]) as any[]; filled+=u.length; } else { unmatched++; await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id=$1 and verification_status='missing'`,[s.id,source.checkedNote]); } }
+    for(const s of slots){ const contact=roster.find(r=>roleFor(r.title)===s.role_key&&sameDistrict(s,r)); if(contact){ matched++; const u=await sql.query(`update raven_state_contacts set full_name=$2,title=$3,email=nullif($4,''),phone=nullif($5,''),source_url=$6,verification_status='candidate',evidence_note='Contact ingested directly from an authoritative statewide education directory; awaiting strict live revalidation.',updated_at=now() where id=$1 and verification_status='missing' returning id`,[s.id,contact.fullName,contact.title,contact.email,contact.phone,source.url]) as any[]; filled+=u.length; } else { unmatched++; await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id=$1 and verification_status='missing'`,[s.id,source.checkedNote]); } }
     const remaining=(await sql.query(`select count(*)::int n from raven_state_contacts where state_code=$1 and scope='district' and verification_status='missing' and coalesce(evidence_note,'') <> $2 and role_key = any($3::text[])`,[source.state,source.checkedNote,supportedRoles]) as any[])[0]?.n||0;
     results.push({state:source.state,source:source.url,fetched:roster.length,supportedRoles,districtsNewlyAttempted:slots.length,matched,filled,unmatched,remainingUnattempted:remaining,exhaustedCurrentSource:remaining===0});
   }
