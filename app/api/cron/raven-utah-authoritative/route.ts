@@ -14,7 +14,7 @@ type Contact = { district:string; fullName:string; email:string; phone:string };
 
 function clean(v:any){ return String(v ?? "").replace(/\u00a0/g," ").replace(/\s+/g," ").trim(); }
 function validEmail(v:string){ return /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(clean(v)); }
-function person(v:string){ return clean(v).replace(/^(Dr\.|Mr\.|Mrs\.|Ms\.|Miss)\s+/i,"").replace(/\s*[-,]\s*Superintendent.*$/i,"").trim(); }
+function person(v:string){ return clean(v).replace(/^(Dr\.|Mr\.|Mrs\.|Ms\.|Miss)\s+/i,"").replace(/\s*[-,]\s*(?:State\s+)?Superintendent.*$/i,"").trim(); }
 function districtKey(v:string){
   return clean(v).toLowerCase().replace(/&/g," and ")
     .replace(/\b(public|community|consolidated|independent|county|city|school|schools|district|isd|csd|usd|charter|academy)\b/g," ")
@@ -25,38 +25,55 @@ function sameDistrict(slot:any, contact:Contact){
   return !!dk && (ak===dk || ck===dk || (ak&&ak.includes(dk)) || (dk&&ak&&dk.includes(ak)));
 }
 
-async function fetchUtah():Promise<{contacts:Contact[]; diagnostics:any}>{
-  const res=await fetch(SOURCE,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/8.3; authoritative-superintendent-association)",accept:"text/html,application/xhtml+xml"}});
-  if(!res.ok) throw new Error(`Utah USSA superintendent roster HTTP ${res.status}`);
-  const html=await res.text();
+function parseRosterPage(html:string):Contact[]{
   const $=cheerio.load(html);
-  const contacts:Contact[]=[];
-
-  $("a[href^='mailto:']").each((_,el)=>{
-    const href=clean($(el).attr("href")||"");
-    const email=clean(href.replace(/^mailto:/i,"").split("?")[0]);
-    if(!validEmail(email)) return;
-    let node=$(el).parent();
-    let block="";
-    for(let i=0;i<7 && node.length;i++,node=node.parent()){
-      const t=clean(node.text());
-      if(/superintendent/i.test(t) && /district/i.test(t) && t.length<1200){ block=t; break; }
-    }
-    if(!block) return;
-    const districtMatch=block.match(/([A-Za-z0-9 .&'’\/-]+?\sDistrict)\b/i);
-    const superMatch=block.match(/([A-Z][A-Za-z.'’\-]+(?:\s+[A-Z][A-Za-z.'’\-]+){1,3})\s*[-,]?\s*Superintendent\b/i);
-    if(!districtMatch || !superMatch) return;
-    const district=clean(districtMatch[1]);
-    const fullName=person(superMatch[1]);
-    if(!district || !fullName) return;
-    const phoneMatch=block.match(/(?:\+?1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}/);
-    contacts.push({district,fullName,email,phone:clean(phoneMatch?.[0]||"")});
+  const candidates:string[]=[];
+  $("body *").each((_,el)=>{
+    const t=clean($(el).text());
+    if(t.length<25 || t.length>650 || !/\bSuperintendent\b/i.test(t)) return;
+    if(!/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(t)) return;
+    candidates.push(t);
   });
+  candidates.sort((a,b)=>a.length-b.length);
+
+  const out:Contact[]=[];
+  const seenEmail=new Set<string>();
+  for(const block of candidates){
+    const email=clean(block.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]||"");
+    if(!validEmail(email) || seenEmail.has(email.toLowerCase())) continue;
+    const superMatch=block.match(/([A-Z][A-Za-z.'’\-]*(?:\s+(?:[A-Z][A-Za-z.'’\-]*|[A-Z]\.?)){1,4})\s*[-,]\s*(?:State\s+)?Superintendent\b/i);
+    if(!superMatch) continue;
+    const fullName=person(superMatch[1]);
+    const before=clean(block.slice(0,superMatch.index));
+    const districtMatch=before.match(/([A-Z][A-Za-z0-9 .&'’\/-]{1,90}?(?:\sDistrict|\sCity|\sSanpete|\sSummit))\s*$/i)
+      || before.match(/([A-Z][A-Za-z0-9 .&'’\/-]{2,90})\s*$/i);
+    const district=clean(districtMatch?.[1]||"");
+    if(!district || !fullName || /Utah State Board of Education|Superintendents Association|Educational Services|Education Service Center|Development Center/i.test(district)) continue;
+    const phoneMatch=block.match(/(?:\+?1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}/);
+    seenEmail.add(email.toLowerCase());
+    out.push({district,fullName,email,phone:clean(phoneMatch?.[0]||"")});
+  }
+  return out;
+}
+
+async function fetchUtah():Promise<{contacts:Contact[]; diagnostics:any}>{
+  const pages=[1,2,3];
+  const contacts:Contact[]=[];
+  const pageDiagnostics:any[]=[];
+  for(const page of pages){
+    const url=`${SOURCE}?page_no=${page}`;
+    const res=await fetch(url,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/8.4; authoritative-superintendent-association)",accept:"text/html,application/xhtml+xml"}});
+    if(!res.ok) throw new Error(`Utah USSA superintendent roster page ${page} HTTP ${res.status}`);
+    const html=await res.text();
+    const parsed=parseRosterPage(html);
+    contacts.push(...parsed);
+    pageDiagnostics.push({page,htmlBytes:html.length,parsed:parsed.length});
+  }
 
   const unique=new Map<string,Contact>();
   for(const c of contacts){ const k=districtKey(c.district); if(k && !unique.has(k)) unique.set(k,c); }
-  if(unique.size<30) throw new Error(`Utah USSA confidence guard: only ${unique.size} superintendent records parsed from current statewide roster; htmlBytes=${html.length}`);
-  return {contacts:[...unique.values()],diagnostics:{htmlBytes:html.length,parsed:unique.size}};
+  if(unique.size<35) throw new Error(`Utah USSA confidence guard: only ${unique.size} district superintendent records parsed across statewide roster pages; diagnostics=${JSON.stringify(pageDiagnostics)}`);
+  return {contacts:[...unique.values()],diagnostics:{pages:pageDiagnostics,parsed:unique.size}};
 }
 
 export async function GET(req:NextRequest){
