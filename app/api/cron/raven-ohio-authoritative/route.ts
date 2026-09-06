@@ -19,6 +19,7 @@ type Discovery = {
   inputNames: string[];
   generateControls: string[];
   scriptHints: string[];
+  externalScripts: string[];
   hasPublicDistrict: boolean;
   hasPersonFields: boolean;
   hasPublicEmail: boolean;
@@ -43,6 +44,7 @@ function discover(source: string, html: string, status: number): Discovery {
   const inputNames = new Set<string>();
   const generateControls = new Set<string>();
   const scriptHints = new Set<string>();
+  const externalScripts = new Set<string>();
 
   $("form").each((_, el) => {
     const raw = clean($(el).attr("action"));
@@ -77,6 +79,7 @@ function discover(source: string, html: string, status: number): Discovery {
     const raw = clean($(el).attr("href") || $(el).attr("src"));
     if (!raw) return;
     const url = absolute(source, raw);
+    if ($(el).is("script") && url) externalScripts.add(url);
     if (url && /(extract|report|export|download|data)/i.test(url)) candidateEndpoints.add(url);
   });
 
@@ -109,6 +112,7 @@ function discover(source: string, html: string, status: number): Discovery {
     inputNames: [...inputNames].slice(0, 250),
     generateControls: [...generateControls].slice(0, 30),
     scriptHints: [...scriptHints].slice(0, 40),
+    externalScripts: [...externalScripts].slice(0, 80),
     hasPublicDistrict: /Public District/i.test(body),
     hasPersonFields: /First Name/i.test(body) && /Last Name/i.test(body) && /Title/i.test(body),
     hasPublicEmail: /Email\s*\(Primary\/Public\)/i.test(body),
@@ -142,6 +146,7 @@ export async function GET(req: NextRequest) {
         inputNames: [],
         generateControls: [],
         scriptHints: [],
+        externalScripts: [],
         hasPublicDistrict: false,
         hasPersonFields: false,
         hasPublicEmail: false,
@@ -161,7 +166,7 @@ export async function GET(req: NextRequest) {
         source: usable.source,
         mode: "oeds-report-contract-discovery",
         blocker:
-          "OEDS is reachable and exposes the required public district/person/public-email fields. This worker now emits form input names, Generate Report control attributes, candidate endpoints, and relevant script snippets so the generated-report request contract can be wired without guessing. Database writes remain fail-closed until that contract is validated.",
+          "OEDS is reachable and exposes the required public district/person/public-email fields. Full request-contract diagnostics are emitted as JSON for the next production wiring step. Database writes remain fail-closed until that contract is validated.",
         diagnostics,
       }
     : {
@@ -172,6 +177,6 @@ export async function GET(req: NextRequest) {
         diagnostics,
       };
 
-  console.error("RAVEN_OH_AUTHORITATIVE_DISCOVERY", body);
+  console.error("RAVEN_OH_AUTHORITATIVE_DISCOVERY_JSON", JSON.stringify(body));
   return NextResponse.json(body, { status: 502 });
 }
