@@ -64,16 +64,18 @@ function findOfficial(html:string,base:string):string|null{
   return candidates[0]?.url||null;
 }
 
-export async function resolveK12OfficialSites(limit=120){
+export async function resolveK12OfficialSites(limit=120,stateCode?:string){
   const sql=getSql();
+  const state=(stateCode||'').trim().toUpperCase();
   const rows=await sql.query(`
     select a.id::text,a.canonical_name,a.website
     from agencies a
     where a.agency_type='k12'
       and a.website ~* '^https?://nces\\.ed\\.gov/'
+      and ($2='' or a.state_code=$2)
     order by coalesce((select max(r.started_at) from raven_enrichment_runs r where r.agency_id=a.id),'1970-01-01'::timestamptz),a.canonical_name
     limit $1
-  `,[Math.max(1,Math.min(limit,160))]) as AgencyRow[];
+  `,[Math.max(1,Math.min(limit,160)),state]) as AgencyRow[];
   let resolved=0,failed=0;
   const results:Array<{agency:string;website?:string;ok:boolean}>=[];
   for(let i=0;i<rows.length;i+=12){
