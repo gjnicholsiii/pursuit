@@ -18,6 +18,7 @@ const STATE_ROUTES:StateRoute[]=[
   {path:"/api/cron/raven-arkansas-authoritative",load:()=>import("../raven-arkansas-authoritative/route")},
   {path:"/api/cron/raven-florida-authoritative",load:()=>import("../raven-florida-authoritative/route")},
   {path:"/api/cron/raven-florida-safety-authoritative",load:()=>import("../raven-florida-safety-authoritative/route")},
+  {path:"/api/cron/raven-florida-district-authoritative",load:()=>import("../raven-florida-district-authoritative/route")},
   {path:"/api/cron/raven-idaho-authoritative",load:()=>import("../raven-idaho-authoritative/route")},
   {path:"/api/cron/raven-indiana-authoritative",load:()=>import("../raven-indiana-authoritative/route")},
   {path:"/api/cron/raven-iowa-authoritative",load:()=>import("../raven-iowa-authoritative/route")},
