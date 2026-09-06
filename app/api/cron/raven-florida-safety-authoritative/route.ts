@@ -51,15 +51,28 @@ function parse(html:string):Contact[]{
   }
   return Array.from(new Map(out.map(c=>[`${norm(c.district)}|${c.fullName.toLowerCase()}`,c])).values());
 }
+function sourceAliases(c:Contact){
+  const d=norm(c.district); const out=[d];
+  if(/\bmiami[- ]?dade\b/i.test(c.district)) out.push("miami dade","dade");
+  if(/\bFLVS\b|florida virtual/i.test(c.district)) out.push("florida virtual","flvs");
+  if(/\bFSDB\b|deaf.*blind/i.test(c.district)) out.push("florida for deaf and blind","florida deaf blind","deaf blind","fsdb");
+  if(/\bFAMU\b/i.test(c.district)) out.push("famu","florida a m university","developmental research");
+  if(/\bFAU\b/i.test(c.district)) out.push("fau","florida atlantic","henderson");
+  return Array.from(new Set(out.filter(Boolean)));
+}
 function matchSlot(c:Contact,slots:Slot[]){
   const d=norm(c.district); if(!d) return null;
-  const aliases = d === "miami dade" ? ["miami dade","dade"] : d === "florida virtual" ? ["fl virtual","florida virtual"] : d === "florida deaf blind" ? ["deaf blind","florida deaf blind"] : [d];
+  const aliases=sourceAliases(c);
   let hits=slots.filter(s=>{const n=norm(s.canonical_name); return aliases.some(a=>n===a || n.startsWith(a+" ") || n.endsWith(" "+a));});
   if(hits.length===1) return hits[0];
-  // Florida county districts are unique statewide. If legacy agency labels retain extra words,
-  // accept a unique whole-token containment match but never an ambiguous one.
   if(d.split(" ").length<=2){
     hits=slots.filter(s=>{const n=` ${norm(s.canonical_name)} `; return aliases.some(a=>n.includes(` ${a} `));});
+    if(hits.length===1) return hits[0];
+  }
+  // Statewide special public-school entities often use acronyms or formal university-system labels
+  // that differ from FLDOE's short directory label. Accept only a unique alias-token hit.
+  if(/\b(FAMU|FAU|FSDB|FLVS)\b/i.test(c.district) || /deaf.*blind|florida virtual/i.test(c.district)){
+    hits=slots.filter(s=>{const n=` ${norm(s.canonical_name)} `; return aliases.some(a=>a.length>=3 && (n.includes(` ${a} `) || n.includes(a)));});
     if(hits.length===1) return hits[0];
   }
   return null;
@@ -84,7 +97,8 @@ export async function GET(req:NextRequest){
     if(rows.length){filled+=rows.length;touched.add(slot.canonical_name);}
   }
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const remaining=(await sql.query(`select count(*)::int n from raven_state_contacts where state_code='FL' and scope='district' and role_key='security_director' and verification_status='missing'`) as any[])[0].n;
-  const summary={ok:true,state:"FL",source:SOURCE,parsedSafetySpecialists:contacts.length,districtsNewlyAttempted:touched.size,filled,unmatched:unmatched.slice(0,20),remainingUnattempted:remaining,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
+  const remainingSlots=await sql.query(`select a.canonical_name from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code='FL' and c.scope='district' and c.role_key='security_director' and c.verification_status='missing' order by a.canonical_name`) as any[];
+  const remaining=remainingSlots.length;
+  const summary={ok:true,state:"FL",source:SOURCE,parsedSafetySpecialists:contacts.length,districtsNewlyAttempted:touched.size,filled,unmatched:unmatched.slice(0,20),remainingUnattempted:remaining,remainingDistricts:remainingSlots.slice(0,20).map((r:any)=>r.canonical_name),before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
   console.log("RAVEN_FL_SAFETY_AUTHORITATIVE",summary); return NextResponse.json(summary);
 }
