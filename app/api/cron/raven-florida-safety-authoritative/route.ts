@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const SOURCE = "https://origin.fldoe.org/schools/k-12-public-schools/sss/dist-mental-coor.stml";
+const EXHAUSTED_MARKER = `Authoritative FLDOE safety source checked with no unique district match: ${SOURCE}`;
 
 type Contact = { district:string; fullName:string; email:string|null; phone:string|null };
 type Slot = { id:string; canonical_name:string };
@@ -69,8 +70,6 @@ function matchSlot(c:Contact,slots:Slot[]){
     hits=slots.filter(s=>{const n=` ${norm(s.canonical_name)} `; return aliases.some(a=>n.includes(` ${a} `));});
     if(hits.length===1) return hits[0];
   }
-  // Statewide special public-school entities often use acronyms or formal university-system labels
-  // that differ from FLDOE's short directory label. Accept only a unique alias-token hit.
   if(/\b(FAMU|FAU|FSDB|FLVS)\b/i.test(c.district) || /deaf.*blind|florida virtual/i.test(c.district)){
     hits=slots.filter(s=>{const n=` ${norm(s.canonical_name)} `; return aliases.some(a=>a.length>=3 && (n.includes(` ${a} `) || n.includes(a)));});
     if(hits.length===1) return hits[0];
@@ -81,7 +80,7 @@ function matchSlot(c:Contact,slots:Slot[]){
 export async function GET(req:NextRequest){
   const auth=requireInternalAuth(req); if(auth)return auth; const sql=getSql();
   const before=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const slots=await sql.query(`select c.id::text,a.canonical_name from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code='FL' and c.scope='district' and c.verification_status='missing' and c.role_key='security_director'`) as Slot[];
+  const slots=await sql.query(`select c.id::text,a.canonical_name from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code='FL' and c.scope='district' and c.verification_status='missing' and c.role_key='security_director' and coalesce(c.evidence_note,'') <> $1`,[EXHAUSTED_MARKER]) as Slot[];
   if(!slots.length) return NextResponse.json({ok:true,state:"FL",source:SOURCE,districtsNewlyAttempted:0,filled:0,remainingUnattempted:0,before,after:before,net:{total:0,verified:0,candidate:0,missing:0,rejected:0}});
   let html=""; let fetchError:string|null=null;
   try{const res=await fetch(SOURCE,{headers:{"user-agent":"Mozilla/5.0 Raven/1.0"},cache:"no-store"}); if(!res.ok) fetchError=`FLDOE ${res.status}`; else html=await res.text();}catch(e:any){fetchError=e?.message||"FLDOE fetch failed";}
@@ -90,15 +89,19 @@ export async function GET(req:NextRequest){
     console.log("RAVEN_FL_SAFETY_PARSE_BLOCKED",{fetchError,htmlBytes:html.length,parsedSafetySpecialists:contacts.length,sample:contacts.slice(0,8)});
     return NextResponse.json({ok:false,state:"FL",source:SOURCE,fetchError,htmlBytes:html.length,parsedSafetySpecialists:contacts.length,sample:contacts.slice(0,8),error:"Authoritative FLDOE safety directory parser returned too few records; refusing partial promotion."},{status:502});
   }
-  let filled=0; const touched=new Set<string>(); const unmatched:string[]=[];
+  let filled=0; const touched=new Set<string>(); const matchedSlotIds=new Set<string>(); const unmatched:string[]=[];
   for(const c of contacts){
     const slot=matchSlot(c,slots); if(!slot){unmatched.push(c.district);continue;}
     const rows=await sql.query(`update raven_state_contacts set full_name=$2,title='School Safety Specialist',email=$3,phone=$4,source_url=$5,verification_status='candidate',evidence_note='Current district School Safety Specialist published by the Florida Department of Education statewide directory.',updated_at=now() where id=$1 and role_key='security_director' and verification_status='missing' returning id`,[slot.id,c.fullName,c.email,c.phone,SOURCE]) as any[];
-    if(rows.length){filled+=rows.length;touched.add(slot.canonical_name);}
+    if(rows.length){filled+=rows.length;touched.add(slot.canonical_name);matchedSlotIds.add(slot.id);}
+  }
+  const unmatchedSlots=slots.filter(s=>!matchedSlotIds.has(s.id));
+  for(const slot of unmatchedSlots){
+    await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id=$1 and role_key='security_director' and verification_status='missing'`,[slot.id,EXHAUSTED_MARKER]);
   }
   const after=(await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[])[0];
-  const remainingSlots=await sql.query(`select a.canonical_name from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code='FL' and c.scope='district' and c.role_key='security_director' and c.verification_status='missing' order by a.canonical_name`) as any[];
+  const remainingSlots=await sql.query(`select a.canonical_name from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code='FL' and c.scope='district' and c.role_key='security_director' and c.verification_status='missing' and coalesce(c.evidence_note,'') <> $1 order by a.canonical_name`,[EXHAUSTED_MARKER]) as any[];
   const remaining=remainingSlots.length;
-  const summary={ok:true,state:"FL",source:SOURCE,parsedSafetySpecialists:contacts.length,districtsNewlyAttempted:touched.size,filled,unmatched:unmatched.slice(0,20),remainingUnattempted:remaining,remainingDistricts:remainingSlots.slice(0,20).map((r:any)=>r.canonical_name),before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
+  const summary={ok:true,state:"FL",source:SOURCE,parsedSafetySpecialists:contacts.length,districtsNewlyAttempted:slots.length,filled,sourceExhaustedMarked:unmatchedSlots.length,unmatched:unmatched.slice(0,20),remainingUnattempted:remaining,remainingDistricts:remainingSlots.slice(0,20).map((r:any)=>r.canonical_name),before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected}};
   console.log("RAVEN_FL_SAFETY_AUTHORITATIVE",summary); return NextResponse.json(summary);
 }
