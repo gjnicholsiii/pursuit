@@ -16,6 +16,8 @@ async function counts(sql:ReturnType<typeof getSql>):Promise<Counts>{
 const STATE_ROUTES:StateRoute[]=[
   {path:"/api/cron/raven-alabama-authoritative",load:()=>import("../raven-alabama-authoritative/route")},
   {path:"/api/cron/raven-arkansas-authoritative",load:()=>import("../raven-arkansas-authoritative/route")},
+  {path:"/api/cron/raven-florida-authoritative",load:()=>import("../raven-florida-authoritative/route")},
+  {path:"/api/cron/raven-florida-safety-authoritative",load:()=>import("../raven-florida-safety-authoritative/route")},
   {path:"/api/cron/raven-idaho-authoritative",load:()=>import("../raven-idaho-authoritative/route")},
   {path:"/api/cron/raven-indiana-authoritative",load:()=>import("../raven-indiana-authoritative/route")},
   {path:"/api/cron/raven-iowa-authoritative",load:()=>import("../raven-iowa-authoritative/route")},
