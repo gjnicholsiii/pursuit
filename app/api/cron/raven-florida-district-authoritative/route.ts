@@ -75,11 +75,141 @@ const SEEDS: Seed[] = [
     email: "bradyd@columbiak12.com",
     sourceUrl: "https://www.columbiak12.com/school-board",
     evidence: "Official Columbia County School District School Board page lists Dana Brady-Giddens as Chairman with district email."
+  },
+  {
+    agency: "BAKER",
+    role: "assistant_superintendent",
+    fullName: "Thomas Hill",
+    title: "Associate Superintendent of Schools",
+    email: "thomas.hill@bakerk12.org",
+    phone: "904-259-6251",
+    sourceUrl: "https://www.bakerk12.org/about-us/our-educational-leaders",
+    evidence: "Current official Baker County School District educational leaders page lists Thomas Hill as Associate Superintendent of Schools with district email and phone."
+  },
+  {
+    agency: "BAKER",
+    role: "school_board",
+    fullName: "Jack Baker Jr.",
+    title: "School Board Chairperson",
+    email: "jack.baker@bakerk12.org",
+    sourceUrl: "https://www.bakerk12.org/board-of-education/about-the-board/board-members",
+    evidence: "Current official Baker County School District board page lists Jack Baker Jr. as Chairperson with district email."
+  },
+  {
+    agency: "BAY",
+    role: "school_board",
+    fullName: "Jerry Register",
+    title: "School Board Member",
+    sourceUrl: "https://www.bay.k12.fl.us/page/school-board",
+    evidence: "Current official Bay District Schools board page lists Jerry Register as a School Board member."
+  },
+  {
+    agency: "DESOTO",
+    role: "it_director",
+    fullName: "Brent Scribner",
+    title: "Director of Technology and Student Information Services",
+    sourceUrl: "https://www.desotoschools.com/about/administration",
+    evidence: "Current official School District of DeSoto County administration page lists Brent Scribner as Director of Technology and Student Information Services."
+  },
+  {
+    agency: "DESOTO",
+    role: "school_board",
+    fullName: "Jami Schueneman",
+    title: "School Board Chair",
+    email: "jami.schueneman@desotoschools.com",
+    sourceUrl: "https://www.desotoschools.com/school-board/board-members",
+    evidence: "Current official School District of DeSoto County board page lists Jami Schueneman as Chair with district email."
+  },
+  {
+    agency: "DIXIE",
+    role: "it_director",
+    fullName: "Tony Scott",
+    title: "Technology Coordinator",
+    email: "tonyscott@dixie.k12.fl.us",
+    sourceUrl: "https://www.dixie.k12.fl.us/technologyservices",
+    evidence: "Current official Dixie District Schools Technology Services page lists Tony Scott as Technology Coordinator with district email."
+  },
+  {
+    agency: "DIXIE",
+    role: "school_board",
+    fullName: "Timothy Alexander",
+    title: "School Board Chair",
+    sourceUrl: "https://www.dixie.k12.fl.us/schoolboard",
+    evidence: "Current official Dixie District Schools board page lists Timothy Alexander as District 4 Chair."
+  },
+  {
+    agency: "FRANKLIN",
+    role: "school_board",
+    fullName: "Fonda Davis, Sr.",
+    title: "School Board Chairman",
+    sourceUrl: "https://www.franklincountyschools.org/our-district/board/franklin-county-school-board",
+    evidence: "Current official Franklin County School District board page lists Fonda Davis, Sr. as Chairman."
+  },
+  {
+    agency: "GADSDEN",
+    role: "school_board",
+    fullName: "Leroy McMillan",
+    title: "School Board Chair",
+    sourceUrl: "https://www.gadsdenschools.org/boardofeducation",
+    evidence: "Current official Gadsden County Public Schools Board of Education page lists Leroy McMillan as District 3 Chair."
+  },
+  {
+    agency: "HAMILTON",
+    role: "assistant_superintendent",
+    fullName: "Philip H. Pinello",
+    title: "Assistant Superintendent",
+    email: "philip.pinello@hamiltonfl.com",
+    phone: "386-792-7815",
+    sourceUrl: "https://www.hamiltonfl.com/55904_3",
+    evidence: "Current official Hamilton County School District employment page lists Philip H. Pinello as Assistant Superintendent with district email and phone."
+  },
+  {
+    agency: "HAMILTON",
+    role: "it_director",
+    fullName: "Amber Cribbs",
+    title: "Coordinator of Information Technology",
+    sourceUrl: "https://www.hamiltonfl.com/55902_3",
+    evidence: "Current official Hamilton County School District Information Technology page lists Amber Cribbs as Coordinator of Information Technology."
+  },
+  {
+    agency: "HAMILTON",
+    role: "school_board",
+    fullName: "Johnny Bullard",
+    title: "School Board Chairman",
+    email: "johnny.bullard@hamiltonfl.com",
+    phone: "386-688-6080",
+    sourceUrl: "https://www.hamiltonfl.com/93145_2",
+    evidence: "Current official Hamilton County School District board page lists Johnny Bullard as Chairman with district email and phone."
+  },
+  {
+    agency: "HARDEE",
+    role: "assistant_superintendent",
+    fullName: "Sherri Albritton",
+    title: "Deputy Superintendent of Schools",
+    sourceUrl: "https://www.hardee.k12.fl.us/article/1924951",
+    evidence: "Official School Board of Hardee County district announcement identifies Sherri Albritton as Deputy Superintendent of Schools."
+  },
+  {
+    agency: "HARDEE",
+    role: "it_director",
+    fullName: "Todd Markel",
+    title: "Director, Information Technology",
+    sourceUrl: "https://www.hardee.k12.fl.us/page/information-technology",
+    evidence: "Current official School Board of Hardee County Information Technology page lists Todd Markel as Director."
+  },
+  {
+    agency: "HARDEE",
+    role: "school_board",
+    fullName: "Mark Gilliard",
+    title: "School Board Chair",
+    email: "mgilliard@hardee.k12.fl.us",
+    sourceUrl: "https://www.hardee.k12.fl.us/page/school-board",
+    evidence: "Current official School Board of Hardee County board page lists Mark Gilliard as School Board Chair with district email."
   }
 ];
 
 async function counts(sql: ReturnType<typeof getSql>) {
-  const rows = await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[];
+  const rows = await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts where state_code='FL'`) as any[];
   return rows[0];
 }
 
