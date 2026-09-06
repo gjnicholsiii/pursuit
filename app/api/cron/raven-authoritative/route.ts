@@ -147,7 +147,7 @@ export async function GET(req:NextRequest){
     if(matches.length){
       const updated=await sql.query(`
         with incoming as (
-          select * from jsonb_to_recordset($1::jsonb) as x(id uuid, full_name text, title text, email text, phone text, source_url text)
+          select * from jsonb_to_recordset($1::jsonb) as x(id bigint, full_name text, title text, email text, phone text, source_url text)
         )
         update raven_state_contacts c
         set full_name=i.full_name,
@@ -167,7 +167,7 @@ export async function GET(req:NextRequest){
     }
 
     if(unmatched.length){
-      await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id = any($1::uuid[]) and verification_status='missing'`,[unmatched,source.checkedNote]);
+      await sql.query(`update raven_state_contacts set evidence_note=$2,updated_at=now() where id = any($1::bigint[]) and verification_status='missing'`,[unmatched,source.checkedNote]);
     }
 
     results.push({state:source.state,source:source.url,fetched:roster.length,supportedRoles,processed:slots.length,matched:matches.length,filled,unmatched:unmatched.length});
