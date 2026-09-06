@@ -27,31 +27,61 @@ function sameDistrict(slot:any, contact:Contact){
 
 function parseRosterPage(html:string):Contact[]{
   const $=cheerio.load(html);
-  const candidates:string[]=[];
-  $("body *").each((_,el)=>{
-    const t=clean($(el).text());
-    if(t.length<25 || t.length>650 || !/\bSuperintendent\b/i.test(t)) return;
-    if(!/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(t)) return;
-    candidates.push(t);
+  const tokens:string[]=[];
+
+  // Apptegy/Thrillshare staff cards frequently concatenate child text when read
+  // through an ancestor.  Read leaf text nodes in DOM order instead so the
+  // published district -> superintendent -> email sequence is preserved.
+  $("body").find("*").each((_,el)=>{
+    const own=$(el).clone().children().remove().end().text();
+    const t=clean(own);
+    if(t && t.length<=180) tokens.push(t);
   });
-  candidates.sort((a,b)=>a.length-b.length);
+
+  // The same staff data can also be present in hydration JSON. Add short
+  // decoded string values as a fallback without trusting any inferred data.
+  const decoded=html
+    .replace(/\\u0026/g,"&").replace(/\\u0027/g,"'").replace(/\\u002D/gi,"-")
+    .replace(/\\u003C/gi,"<").replace(/\\u003E/gi,">").replace(/\\\"/g,'"');
+  const jsonStrings=decoded.match(/"([^"\\]{2,180})"/g)||[];
+  for(const raw of jsonStrings){
+    const t=clean(raw.slice(1,-1));
+    if(t && (/Superintendent/i.test(t) || validEmail(t) || /\b(?:District|City|Summit|Sanpete)\b/i.test(t))) tokens.push(t);
+  }
 
   const out:Contact[]=[];
   const seenEmail=new Set<string>();
-  for(const block of candidates){
-    const email=clean(block.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]||"");
-    if(!validEmail(email) || seenEmail.has(email.toLowerCase())) continue;
-    const superMatch=block.match(/([A-Z][A-Za-z.'’\-]*(?:\s+(?:[A-Z][A-Za-z.'’\-]*|[A-Z]\.?)){1,4})\s*[-,]\s*(?:State\s+)?Superintendent\b/i);
-    if(!superMatch) continue;
-    const fullName=person(superMatch[1]);
-    const before=clean(block.slice(0,superMatch.index));
-    const districtMatch=before.match(/([A-Z][A-Za-z0-9 .&'’\/-]{1,90}?(?:\sDistrict|\sCity|\sSanpete|\sSummit))\s*$/i)
-      || before.match(/([A-Z][A-Za-z0-9 .&'’\/-]{2,90})\s*$/i);
-    const district=clean(districtMatch?.[1]||"");
-    if(!district || !fullName || /Utah State Board of Education|Superintendents Association|Educational Services|Education Service Center|Development Center/i.test(district)) continue;
-    const phoneMatch=block.match(/(?:\+?1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}/);
+  for(let i=0;i<tokens.length;i++){
+    const title=tokens[i];
+    const m=title.match(/^(.{2,90}?)\s*[-,]\s*(?:State\s+)?Superintendent\s*$/i);
+    if(!m) continue;
+    const fullName=person(m[1]);
+    if(!fullName) continue;
+
+    let district="";
+    for(let j=i-1;j>=Math.max(0,i-8);j--){
+      const t=tokens[j];
+      if(/^(?:Alpine|Aspen Peaks|Beaver|Box Elder|Cache|Canyons|Carbon|Daggett|Davis|Duchesne|Emery|Garfield|Grand|Granite|Iron|Jordan|Juab|Kane|Lake Mountain|Logan|Millard|Morgan|Murray|Nebo|North Summit|North Sanpete|Ogden|Park City|Piute|Provo|Rich|Salt Lake|San Juan|Sevier|South Sanpete|South Summit|Timpanogos|Tintic|Tooele|Uintah|Wasatch|Washington|Wayne|Weber)(?:\s+(?:District|City))?$/i.test(t)) { district=t; break; }
+      if(/\b(?:District|City|Summit|Sanpete)\b/i.test(t) && !/Superintendent|Association|Educational Services|Education Service Center|Development Center|State Board/i.test(t)){ district=t; break; }
+    }
+    if(!district) continue;
+
+    let email="";
+    let phone="";
+    for(let j=i+1;j<=Math.min(tokens.length-1,i+8);j++){
+      if(!email){
+        const em=tokens[j].match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]||"";
+        if(validEmail(em)) email=clean(em);
+      }
+      if(!phone){
+        const ph=tokens[j].match(/(?:\+?1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}/)?.[0]||"";
+        if(ph) phone=clean(ph);
+      }
+      if(email) break;
+    }
+    if(!email || seenEmail.has(email.toLowerCase())) continue;
     seenEmail.add(email.toLowerCase());
-    out.push({district,fullName,email,phone:clean(phoneMatch?.[0]||"")});
+    out.push({district:clean(district),fullName,email,phone});
   }
   return out;
 }
@@ -62,7 +92,7 @@ async function fetchUtah():Promise<{contacts:Contact[]; diagnostics:any}>{
   const pageDiagnostics:any[]=[];
   for(const page of pages){
     const url=`${SOURCE}?page_no=${page}`;
-    const res=await fetch(url,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/8.4; authoritative-superintendent-association)",accept:"text/html,application/xhtml+xml"}});
+    const res=await fetch(url,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/8.5; authoritative-superintendent-association)",accept:"text/html,application/xhtml+xml"}});
     if(!res.ok) throw new Error(`Utah USSA superintendent roster page ${page} HTTP ${res.status}`);
     const html=await res.text();
     const parsed=parseRosterPage(html);
