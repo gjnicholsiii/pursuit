@@ -53,7 +53,7 @@ export async function GET(req:NextRequest){
       and a.website !~* '^https?://nces\\.ed\\.gov/'
       and not exists (
         select 1 from raven_enrichment_runs r
-        where r.agency_id=a.id and r.status='completed'
+        where r.agency_id=a.id and r.status in ('running','completed')
           and r.diagnostics->>'sourceClass'=$2
           and r.diagnostics->>'website'=a.website
       )
@@ -67,6 +67,6 @@ export async function GET(req:NextRequest){
 
   for(let i=0;i<agencies.length&&Date.now()-started<RUN_BUDGET;i+=CONCURRENCY)await Promise.all(agencies.slice(i,i+CONCURRENCY).map(crawl));
   const after=await counts(sql);
-  const remainingUntouched=(await sql.query(`select count(distinct c.agency_id)::int n from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code=$1 and c.scope='district' and c.verification_status='missing' and c.role_key in ('assistant_superintendent','it_director','school_board','security_director') and a.website is not null and btrim(a.website)<>'' and a.website !~* '^https?://nces\\.ed\\.gov/' and not exists(select 1 from raven_enrichment_runs r where r.agency_id=a.id and r.status='completed' and r.diagnostics->>'sourceClass'=$2 and r.diagnostics->>'website'=a.website)`,[STATE,SOURCE_CLASS]) as any[])[0]?.n||0;
+  const remainingUntouched=(await sql.query(`select count(distinct c.agency_id)::int n from raven_state_contacts c join agencies a on a.id=c.agency_id where c.state_code=$1 and c.scope='district' and c.verification_status='missing' and c.role_key in ('assistant_superintendent','it_director','school_board','security_director') and a.website is not null and btrim(a.website)<>'' and a.website !~* '^https?://nces\\.ed\\.gov/' and not exists(select 1 from raven_enrichment_runs r where r.agency_id=a.id and r.status in ('running','completed') and r.diagnostics->>'sourceClass'=$2 and r.diagnostics->>'website'=a.website)`,[STATE,SOURCE_CLASS]) as any[])[0]?.n||0;
   return NextResponse.json({ok:true,state:STATE,mode:'durable-statewide-official-district-queue',sourceClass:SOURCE_CLASS,siteResolution,districtsSelected:agencies.length,districtsNewlyAttempted:touched.size,pagesScanned:pages,candidatesPromoted:promoted,blocked,remainingUntouched,before,after,net:{total:after.total-before.total,verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected},elapsedMs:Date.now()-started});
 }
