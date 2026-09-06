@@ -5,7 +5,7 @@ import { requireInternalAuth } from "@/lib/internal-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const SOURCE = "https://www.fldoe.org/schools/k-12-public-schools/sss/dist-mental-coor.stml";
+const SOURCE = "https://origin.fldoe.org/schools/k-12-public-schools/sss/dist-mental-coor.stml";
 
 type Contact = { district:string; fullName:string; email:string|null; phone:string|null };
 type Slot = { id:string; canonical_name:string };
