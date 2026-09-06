@@ -6,61 +6,41 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 type Counts={total:number;verified:number;candidate:number;missing:number;rejected:number};
+type StateRoute={path:string;load:()=>Promise<{GET:(req:NextRequest)=>Promise<Response>|Response}>};
 
 async function counts(sql:ReturnType<typeof getSql>):Promise<Counts>{
   const rows=await sql.query(`select count(*)::int total,count(*) filter(where verification_status='verified')::int verified,count(*) filter(where verification_status='candidate')::int candidate,count(*) filter(where verification_status='missing')::int missing,count(*) filter(where verification_status='rejected')::int rejected from raven_state_contacts`) as any[];
   return rows[0] as Counts;
 }
 
-const STATE_ROUTES=[
-  "/api/cron/raven-alabama-authoritative",
-  "/api/cron/raven-arkansas-authoritative",
-  "/api/cron/raven-idaho-authoritative",
-  "/api/cron/raven-indiana-authoritative",
-  "/api/cron/raven-iowa-authoritative",
-  "/api/cron/raven-mississippi-authoritative",
-  "/api/cron/raven-montana-bulk",
-  "/api/cron/raven-nebraska-authoritative",
-  "/api/cron/raven-nevada-authoritative",
-  "/api/cron/raven-oklahoma-authoritative",
-  "/api/cron/raven-pennsylvania-authoritative",
-  "/api/cron/raven-rhode-island-authoritative",
-  "/api/cron/raven-utah-authoritative"
+const STATE_ROUTES:StateRoute[]=[
+  {path:"/api/cron/raven-alabama-authoritative",load:()=>import("../raven-alabama-authoritative/route")},
+  {path:"/api/cron/raven-arkansas-authoritative",load:()=>import("../raven-arkansas-authoritative/route")},
+  {path:"/api/cron/raven-idaho-authoritative",load:()=>import("../raven-idaho-authoritative/route")},
+  {path:"/api/cron/raven-indiana-authoritative",load:()=>import("../raven-indiana-authoritative/route")},
+  {path:"/api/cron/raven-iowa-authoritative",load:()=>import("../raven-iowa-authoritative/route")},
+  {path:"/api/cron/raven-mississippi-authoritative",load:()=>import("../raven-mississippi-authoritative/route")},
+  {path:"/api/cron/raven-montana-bulk",load:()=>import("../raven-montana-bulk/route")},
+  {path:"/api/cron/raven-nebraska-authoritative",load:()=>import("../raven-nebraska-authoritative/route")},
+  {path:"/api/cron/raven-nevada-authoritative",load:()=>import("../raven-nevada-authoritative/route")},
+  {path:"/api/cron/raven-oklahoma-authoritative",load:()=>import("../raven-oklahoma-authoritative/route")},
+  {path:"/api/cron/raven-pennsylvania-authoritative",load:()=>import("../raven-pennsylvania-authoritative/route")},
+  {path:"/api/cron/raven-rhode-island-authoritative",load:()=>import("../raven-rhode-island-authoritative/route")},
+  {path:"/api/cron/raven-utah-authoritative",load:()=>import("../raven-utah-authoritative/route")}
 ];
 
-function deploymentOrigin(req:NextRequest){
-  const exact=process.env.VERCEL_URL?.trim();
-  if(exact)return exact.startsWith("http")?exact:`https://${exact}`;
-  return req.nextUrl.origin;
-}
-
-async function runState(req:NextRequest,path:string){
-  const headers:Record<string,string>={};
-  const authorization=req.headers.get("authorization");
-  if(authorization)headers.authorization=authorization;
+async function runState(req:NextRequest,route:StateRoute){
   const started=Date.now();
-  const origin=deploymentOrigin(req);
   try{
-    const url=new URL(path,origin);
-    const res=await fetch(url,{cache:"no-store",headers,redirect:"manual"});
+    const mod=await route.load();
+    const res=await mod.GET(req);
     const text=await res.text();
-    const contentType=res.headers.get("content-type")||"";
     let body:any=null;
     try{body=JSON.parse(text);}catch{}
     const json=body!==null&&typeof body==="object";
-    const ok=res.ok&&json;
-    return {
-      path,
-      url:url.toString(),
-      status:res.status,
-      ok,
-      json,
-      contentType,
-      ms:Date.now()-started,
-      body:json?body:text.slice(0,240)
-    };
+    return {path:route.path,status:res.status,ok:res.ok&&json,json,ms:Date.now()-started,body:json?body:text.slice(0,240)};
   }catch(err){
-    return {path,status:0,ok:false,json:false,ms:Date.now()-started,error:err instanceof Error?err.message:String(err)};
+    return {path:route.path,status:0,ok:false,json:false,ms:Date.now()-started,error:err instanceof Error?err.message:String(err)};
   }
 }
 
@@ -69,7 +49,7 @@ export async function GET(req:NextRequest){
   const sql=getSql();
   const before=await counts(sql);
 
-  const stateRuns=await Promise.all(STATE_ROUTES.map(path=>runState(req,path)));
+  const stateRuns=await Promise.all(STATE_ROUTES.map(route=>runState(req,route)));
 
   const filled=await sql.query(`
     with ranked as (
@@ -123,10 +103,10 @@ export async function GET(req:NextRequest){
   const districtsNewlyFilled=new Set(filled.map(r=>r.agency_id).filter(Boolean)).size;
   const stateRunsOk=stateRuns.filter(r=>r.ok).length;
   const stateRunsFailed=stateRuns.length-stateRunsOk;
+  const districtsNewlyAttempted=stateRuns.reduce((sum,r)=>sum+Number(r.body?.districtsNewlyAttempted??r.body?.districtSitesNewlyAttempted??r.body?.districtsProcessedInBulk??0),0);
   const summary={
     ok:stateRunsFailed===0,
-    mode:"parallel-statewide-authoritative-plus-promotion",
-    deploymentOrigin:deploymentOrigin(req),
+    mode:"in-process-parallel-statewide-authoritative-plus-promotion",
     before,after,
     net:{
       total:after.total-before.total,
@@ -137,6 +117,7 @@ export async function GET(req:NextRequest){
     },
     stateRunsOk,
     stateRunsFailed,
+    districtsNewlyAttempted,
     stateRuns,
     candidatesFilled:filled.length,
     districtsNewlyFilled
