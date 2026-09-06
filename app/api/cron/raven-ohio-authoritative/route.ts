@@ -16,6 +16,9 @@ type Discovery = {
   bytes: number;
   formActions: string[];
   candidateEndpoints: string[];
+  inputNames: string[];
+  generateControls: string[];
+  scriptHints: string[];
   hasPublicDistrict: boolean;
   hasPersonFields: boolean;
   hasPublicEmail: boolean;
@@ -37,6 +40,9 @@ function discover(source: string, html: string, status: number): Discovery {
   const $ = cheerio.load(html);
   const formActions = new Set<string>();
   const candidateEndpoints = new Set<string>();
+  const inputNames = new Set<string>();
+  const generateControls = new Set<string>();
+  const scriptHints = new Set<string>();
 
   $("form").each((_, el) => {
     const raw = clean($(el).attr("action"));
@@ -46,11 +52,39 @@ function discover(source: string, html: string, status: number): Discovery {
     }
   });
 
+  $("input[name],select[name],button[name],textarea[name]").each((_, el) => {
+    const name = clean($(el).attr("name"));
+    if (name) inputNames.add(name);
+  });
+
+  $("button,input[type=button],input[type=submit],a").each((_, el) => {
+    const text = clean($(el).text() || $(el).attr("value"));
+    if (!/generate\s*report|report|extract/i.test(text)) return;
+    const detail = [
+      $(el).get(0)?.tagName || "control",
+      `text=${text}`,
+      `id=${clean($(el).attr("id"))}`,
+      `name=${clean($(el).attr("name"))}`,
+      `value=${clean($(el).attr("value"))}`,
+      `href=${clean($(el).attr("href"))}`,
+      `onclick=${clean($(el).attr("onclick"))}`,
+      `data-url=${clean($(el).attr("data-url"))}`,
+    ].join("|");
+    generateControls.add(detail.slice(0, 1200));
+  });
+
   $("a[href],script[src]").each((_, el) => {
     const raw = clean($(el).attr("href") || $(el).attr("src"));
     if (!raw) return;
     const url = absolute(source, raw);
     if (url && /(extract|report|export|download|data)/i.test(url)) candidateEndpoints.add(url);
+  });
+
+  $("script").each((_, el) => {
+    const text = clean($(el).html());
+    if (!text || !/(generate\s*report|dataextract|report|export|download|ajax|fetch\()/i.test(text)) return;
+    const matches = text.match(/.{0,180}(?:generate\s*report|dataextract|report|export|download|ajax|fetch\().{0,420}/gi) || [];
+    for (const match of matches) scriptHints.add(clean(match).slice(0, 700));
   });
 
   const decoded = html
@@ -71,7 +105,10 @@ function discover(source: string, html: string, status: number): Discovery {
     status,
     bytes: html.length,
     formActions: [...formActions].slice(0, 20),
-    candidateEndpoints: [...candidateEndpoints].slice(0, 40),
+    candidateEndpoints: [...candidateEndpoints].slice(0, 60),
+    inputNames: [...inputNames].slice(0, 250),
+    generateControls: [...generateControls].slice(0, 30),
+    scriptHints: [...scriptHints].slice(0, 40),
     hasPublicDistrict: /Public District/i.test(body),
     hasPersonFields: /First Name/i.test(body) && /Last Name/i.test(body) && /Title/i.test(body),
     hasPublicEmail: /Email\s*\(Primary\/Public\)/i.test(body),
@@ -102,6 +139,9 @@ export async function GET(req: NextRequest) {
         bytes: 0,
         formActions: [],
         candidateEndpoints: [],
+        inputNames: [],
+        generateControls: [],
+        scriptHints: [],
         hasPublicDistrict: false,
         hasPersonFields: false,
         hasPublicEmail: false,
@@ -119,15 +159,15 @@ export async function GET(req: NextRequest) {
         ok: false,
         state: "OH",
         source: usable.source,
-        mode: "oeds-live-extract-discovery",
+        mode: "oeds-report-contract-discovery",
         blocker:
-          "OEDS public DataExtract is reachable and exposes Public District plus person name/title/public-email fields. The worker now discovers the live form/report endpoints instead of permanently returning a hard-coded 503; database writes remain fail-closed until the generated-report request contract is identified and validated.",
+          "OEDS is reachable and exposes the required public district/person/public-email fields. This worker now emits form input names, Generate Report control attributes, candidate endpoints, and relevant script snippets so the generated-report request contract can be wired without guessing. Database writes remain fail-closed until that contract is validated.",
         diagnostics,
       }
     : {
         ok: false,
         state: "OH",
-        mode: "oeds-live-extract-discovery",
+        mode: "oeds-report-contract-discovery",
         blocker: "No reachable OEDS DataExtract surface passed the public district/person/public-email confidence checks; no database writes performed.",
         diagnostics,
       };
