@@ -12,7 +12,12 @@ type Slot = { id:string; canonical_name:string };
 
 function decode(s:string){return s.replace(/&nbsp;|&#160;/gi," ").replace(/&amp;/gi,"&").replace(/&#39;|&apos;/gi,"'").replace(/&quot;/gi,'"').replace(/&ndash;|&mdash;/gi,"-").replace(/&#8211;|&#8212;/g,"-");}
 function textLines(html:string){
-  const text=decode(html).replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<br\s*\/?\s*>/gi,"\n").replace(/<\/(p|div|li|h[1-6]|tr|td|section|article|a)>/gi,"\n").replace(/<[^>]+>/g," ");
+  const text=decode(html)
+    .replace(/<script[\s\S]*?<\/script>/gi," ")
+    .replace(/<style[\s\S]*?<\/style>/gi," ")
+    .replace(/<br\s*\/?\s*>/gi,"\n")
+    .replace(/<\/[^>]+>/g,"\n")
+    .replace(/<[^>]+>/g," ");
   return text.split(/\n+/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
 }
 function norm(v:string){return (v||"").toLowerCase().replace(/\b(public|schools?|school district|county|district|city|board of education)\b/g," ").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();}
@@ -21,15 +26,15 @@ function parse(html:string):Contact[]{
   for(let i=0;i<lines.length;i++){
     if(!/^School Safety Specialist$/i.test(lines[i])) continue;
     const fullName=(lines[i+1]||"").trim();
-    if(!fullName || /@/.test(fullName)) continue;
+    if(!fullName || /@/.test(fullName) || /^(Mental Health Coordinator|School Safety Specialist)$/i.test(fullName)) continue;
     let phone:string|null=null, email:string|null=null;
-    for(let j=i+2;j<Math.min(lines.length,i+7);j++){
+    for(let j=i+2;j<Math.min(lines.length,i+9);j++){
       if(!phone && /\d{3}[-.)\s]\d{3}[-\s]\d{4}/.test(lines[j])) phone=lines[j];
       const em=lines[j].match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); if(em){email=em[0];break;}
       if(/^Mental Health Coordinator$/i.test(lines[j]) || /^School Safety Specialist$/i.test(lines[j])) break;
     }
     let district="";
-    for(let j=i-1;j>=Math.max(0,i-12);j--){
+    for(let j=i-1;j>=Math.max(0,i-20);j--){
       const x=lines[j].trim();
       if(!x || /^(Mental Health Coordinator|School Safety Specialist)$/i.test(x) || /@/.test(x) || /\d{3}[-.)\s]\d{3}/.test(x)) continue;
       if(/County$|School$|Schools$|LEA$|Charter$|Academy$|District$|FSDB$|FLVS$/i.test(x)){district=x;break;}
@@ -53,7 +58,10 @@ export async function GET(req:NextRequest){
   let html=""; let fetchError:string|null=null;
   try{const res=await fetch(SOURCE,{headers:{"user-agent":"Mozilla/5.0 Raven/1.0"},cache:"no-store"}); if(!res.ok) fetchError=`FLDOE ${res.status}`; else html=await res.text();}catch(e:any){fetchError=e?.message||"FLDOE fetch failed";}
   const contacts=html?parse(html):[];
-  if(contacts.length<50) return NextResponse.json({ok:false,state:"FL",source:SOURCE,fetchError,parsedSafetySpecialists:contacts.length,error:"Authoritative FLDOE safety directory parser returned too few records; refusing partial promotion."},{status:502});
+  if(contacts.length<50){
+    console.log("RAVEN_FL_SAFETY_PARSE_BLOCKED",{fetchError,htmlBytes:html.length,parsedSafetySpecialists:contacts.length,sample:contacts.slice(0,8)});
+    return NextResponse.json({ok:false,state:"FL",source:SOURCE,fetchError,htmlBytes:html.length,parsedSafetySpecialists:contacts.length,sample:contacts.slice(0,8),error:"Authoritative FLDOE safety directory parser returned too few records; refusing partial promotion."},{status:502});
+  }
   let filled=0; const touched=new Set<string>(); const unmatched:string[]=[];
   for(const c of contacts){
     const slot=matchSlot(c,slots); if(!slot){unmatched.push(c.district);continue;}
