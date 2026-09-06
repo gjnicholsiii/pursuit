@@ -12,10 +12,10 @@ const AGENCY_LIMIT=96;
 const CONCURRENCY=8;
 const EMAIL_RE=/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig;
 const PHONE_RE=/(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/;
-const BANNED=/\b(facilit(?:y|ies)|plant|maintenance|buildings?\s*(?:&|and)\s*grounds|procurement|purchasing|finance|financial|principal|teacher|operations?|transportation|food service|human resources|\bhr\b)\b/i;
+const BANNED=/\b(facilit(?:y|ies)|plant|maintenance|buildings?\s*(?:&|and)\s*grounds|procurement|purchasing|finance|financial|principal|teacher|transportation|food service|human resources|\bhr\b)\b/i;
 const ROLE_RX:Record<string,RegExp>={
   superintendent:/\b(?!(?:assistant|deputy|associate)\s+)(?:district\s+)?superintendent\b/i,
-  assistant_superintendent:/\b(?:assistant|asst\.?)\s+superintendent\b/i,
+  assistant_superintendent:/\b(?:assistant|asst\.?|deputy|associate)\s+superintendent\b/i,
   security_director:/\b(?:director|chief|executive director|senior director|associate superintendent|program coordinator)\b.{0,80}\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b|\b(?:security|school safety|public safety|safety and security|security and safety|emergency management|safe schools)\b.{0,80}\b(?:director|chief|executive director|senior director|associate superintendent|program coordinator)\b/i,
   it_director:/\b(?:director|executive director|chief information officer|chief technology officer|cio|cto)\b.{0,70}\b(?:information technology|technology|information systems|it services|network services|tech infrastructure|cybersecurity)\b|\b(?:information technology|technology|information systems|it services|network services|tech infrastructure|cybersecurity)\b.{0,70}\b(?:director|executive director|chief information officer|chief technology officer|cio|cto)\b/i,
   school_board:/\b(?:school\s+|governing\s+)?board\s+(?:member|chair|chairman|chairwoman|president|vice president|trustee|clerk)\b|\bboard trustee\b/i,
