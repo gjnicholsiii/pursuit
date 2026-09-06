@@ -20,7 +20,15 @@ function textLines(html:string){
     .replace(/<[^>]+>/g," ");
   return text.split(/\n+/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
 }
-function norm(v:string){return (v||"").toLowerCase().replace(/\b(public|schools?|school district|county|district|city|board of education)\b/g," ").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();}
+function norm(v:string){
+  return (v||"")
+    .toLowerCase()
+    .replace(/\([^)]*\)/g," ")
+    .replace(/\b(district school board|county school board|school board|board of education|public school district|school district|public schools?|schools?|district|county|city|board|of|the)\b/g," ")
+    .replace(/[^a-z0-9]+/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
 function parse(html:string):Contact[]{
   const lines=textLines(html); const out:Contact[]=[];
   for(let i=0;i<lines.length;i++){
@@ -37,7 +45,7 @@ function parse(html:string):Contact[]{
     for(let j=i-1;j>=Math.max(0,i-20);j--){
       const x=lines[j].trim();
       if(!x || /^(Mental Health Coordinator|School Safety Specialist)$/i.test(x) || /@/.test(x) || /\d{3}[-.)\s]\d{3}/.test(x)) continue;
-      if(/County$|School$|Schools$|LEA$|Charter$|Academy$|District$|FSDB$|FLVS$/i.test(x)){district=x;break;}
+      if(/County$|School(?:\s*\([^)]*\))?$|Schools$|LEA$|Charter$|Academy$|District$|FSDB\)?$|FLVS\)?$/i.test(x)){district=x;break;}
     }
     if(district) out.push({district,fullName,email,phone});
   }
@@ -45,9 +53,16 @@ function parse(html:string):Contact[]{
 }
 function matchSlot(c:Contact,slots:Slot[]){
   const d=norm(c.district); if(!d) return null;
-  const aliases = d === "miami dade" ? ["miami dade","dade"] : d === "florida virtual" ? ["fl virtual","florida virtual"] : d === "florida school for the deaf and blind" ? ["deaf blind","florida school for the deaf and blind"] : [d];
-  const hits=slots.filter(s=>{const n=norm(s.canonical_name); return aliases.some(a=>n===a || n.startsWith(a+" ") || n.endsWith(" "+a));});
-  return hits.length===1?hits[0]:null;
+  const aliases = d === "miami dade" ? ["miami dade","dade"] : d === "florida virtual" ? ["fl virtual","florida virtual"] : d === "florida deaf blind" ? ["deaf blind","florida deaf blind"] : [d];
+  let hits=slots.filter(s=>{const n=norm(s.canonical_name); return aliases.some(a=>n===a || n.startsWith(a+" ") || n.endsWith(" "+a));});
+  if(hits.length===1) return hits[0];
+  // Florida county districts are unique statewide. If legacy agency labels retain extra words,
+  // accept a unique whole-token containment match but never an ambiguous one.
+  if(d.split(" ").length<=2){
+    hits=slots.filter(s=>{const n=` ${norm(s.canonical_name)} `; return aliases.some(a=>n.includes(` ${a} `));});
+    if(hits.length===1) return hits[0];
+  }
+  return null;
 }
 
 export async function GET(req:NextRequest){
