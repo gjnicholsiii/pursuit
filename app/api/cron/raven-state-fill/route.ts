@@ -45,7 +45,7 @@ async function actionable(sql:ReturnType<typeof getSql>,state:string){
       and a.website !~* '^https?://nces\\.ed\\.gov/'
       and not exists(
         select 1 from raven_enrichment_runs r
-        where r.agency_id=a.id and r.status='completed'
+        where r.agency_id=a.id and r.status in ('running','completed')
           and r.diagnostics->>'sourceClass'='fl_official_district_v2'
           and r.diagnostics->>'website'=a.website
       )
