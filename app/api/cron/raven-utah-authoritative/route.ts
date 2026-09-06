@@ -79,7 +79,7 @@ async function fetchUtah():Promise<{contacts:Contact[]; exportUrl:string; diagno
   }
   const unique=new Map<string,Contact>(); for(const c of contacts){const k=districtKey(c.district);if(k&&!unique.has(k))unique.set(k,c);}
   if(unique.size<20) throw new Error(`Utah USBE CSV confidence guard: only ${unique.size} reachable superintendent records parsed; headers=${header.join("|")}`);
-  return {contacts:[...unique.values()],exportUrl,diagnostics:{htmlBytes:html.length,csvRows:lines.length,headers,parsed:unique.size}};
+  return {contacts:[...unique.values()],exportUrl,diagnostics:{htmlBytes:html.length,csvRows:lines.length,headers:header,parsed:unique.size}};
 }
 
 export async function GET(req:NextRequest){
