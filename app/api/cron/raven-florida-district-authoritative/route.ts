@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const STATE="FL";
-const SOURCE_CLASS="fl_official_district";
+const SOURCE_CLASS="fl_official_district_v2";
 const RUN_BUDGET=250000;
 const FETCH_TIMEOUT=7000;
 const CONCURRENCY=8;
