@@ -12,10 +12,46 @@ async function counts(sql:ReturnType<typeof getSql>):Promise<Counts>{
   return rows[0] as Counts;
 }
 
+const STATE_ROUTES=[
+  "/api/cron/raven-alabama-authoritative",
+  "/api/cron/raven-arkansas-authoritative",
+  "/api/cron/raven-idaho-authoritative",
+  "/api/cron/raven-indiana-authoritative",
+  "/api/cron/raven-iowa-authoritative",
+  "/api/cron/raven-mississippi-authoritative",
+  "/api/cron/raven-montana-bulk",
+  "/api/cron/raven-nebraska-authoritative",
+  "/api/cron/raven-nevada-authoritative",
+  "/api/cron/raven-oklahoma-authoritative",
+  "/api/cron/raven-pennsylvania-authoritative",
+  "/api/cron/raven-rhode-island-authoritative",
+  "/api/cron/raven-utah-authoritative"
+];
+
+async function runState(req:NextRequest,path:string){
+  const headers:Record<string,string>={};
+  const authorization=req.headers.get("authorization");
+  const cronSecret=req.headers.get("x-cron-secret");
+  if(authorization)headers.authorization=authorization;
+  if(cronSecret)headers["x-cron-secret"]=cronSecret;
+  const started=Date.now();
+  try{
+    const res=await fetch(new URL(path,req.url),{cache:"no-store",headers});
+    const text=await res.text();
+    let body:any=text;
+    try{body=JSON.parse(text);}catch{}
+    return {path,status:res.status,ok:res.ok,ms:Date.now()-started,body};
+  }catch(err){
+    return {path,status:0,ok:false,ms:Date.now()-started,error:err instanceof Error?err.message:String(err)};
+  }
+}
+
 export async function GET(req:NextRequest){
   const auth=requireInternalAuth(req); if(auth)return auth;
   const sql=getSql();
   const before=await counts(sql);
+
+  const stateRuns=await Promise.all(STATE_ROUTES.map(path=>runState(req,path)));
 
   const filled=await sql.query(`
     with ranked as (
@@ -69,7 +105,7 @@ export async function GET(req:NextRequest){
   const districtsNewlyFilled=new Set(filled.map(r=>r.agency_id).filter(Boolean)).size;
   const summary={
     ok:true,
-    mode:"bulk-official-k12-promotion",
+    mode:"parallel-statewide-authoritative-plus-promotion",
     before,after,
     net:{
       total:after.total-before.total,
@@ -78,10 +114,10 @@ export async function GET(req:NextRequest){
       missing:after.missing-before.missing,
       rejected:after.rejected-before.rejected
     },
+    stateRuns,
     candidatesFilled:filled.length,
-    districtsNewlyFilled,
-    repeatedStateFetches:0
+    districtsNewlyFilled
   };
-  console.log("RAVEN_STATE_FILL",summary);
+  console.log("RAVEN_STATE_FILL",JSON.stringify(summary));
   return NextResponse.json(summary);
 }
