@@ -34,24 +34,58 @@ function sameDistrict(slot:any, contact:Contact){
   const dk=districtKey(contact.district), ak=districtKey(slot.canonical_name||""), ck=districtKey(slot.county||"");
   return !!dk && (ak===dk || ck===dk || (ak&&ak.includes(dk)) || (dk&&ak&&dk.includes(ak)));
 }
+function usableExportHref(v:string){
+  const s=clean(v);
+  if(!s || s==="#" || /^javascript:/i.test(s)) return "";
+  return s;
+}
+function extractUrlFromJavascript(v:string){
+  const s=clean(v);
+  if(!/^javascript:/i.test(s)) return "";
+  const m=s.match(/(?:location(?:\.href)?|window\.open)\s*\(?\s*["']([^"']+)["']/i);
+  return usableExportHref(m?.[1]||"");
+}
 
 async function fetchUtah():Promise<{contacts:Contact[]; exportUrl:string; diagnostics:any}>{
-  const res=await fetch(INDEX,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/8.1; authoritative-state-roster)",accept:"text/html,application/xhtml+xml"}});
+  const res=await fetch(INDEX,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/8.2; authoritative-state-roster)",accept:"text/html,application/xhtml+xml"}});
   if(!res.ok) throw new Error(`Utah USBE district directory HTTP ${res.status}`);
   const html=await res.text();
   const $=cheerio.load(html);
   let exportHref="";
+  let exportAnchor="";
   $("a").each((_,el)=>{
-    const text=clean($(el).text()); const href=clean($(el).attr("href")||"");
-    if(!exportHref && href && /export\s+to\s+csv/i.test(text)) exportHref=href;
+    const text=clean($(el).text());
+    if(!/export\s+to\s+csv/i.test(text)) return;
+    exportAnchor=$.html(el).slice(0,1200);
+    const attrs=["href","data-href","data-url","data-export","data-download","data-csv","formaction"];
+    for(const attr of attrs){
+      const raw=clean($(el).attr(attr)||"");
+      const direct=usableExportHref(raw);
+      const js=extractUrlFromJavascript(raw);
+      const hit=direct||js;
+      if(!exportHref && hit && /csv|export|download/i.test(hit)) exportHref=hit;
+    }
+    const onclick=clean($(el).attr("onclick")||"");
+    const jsUrl=extractUrlFromJavascript(`javascript:${onclick}`);
+    if(!exportHref && jsUrl) exportHref=jsUrl;
   });
   if(!exportHref){
-    const candidates=[...html.matchAll(/href=["']([^"']*(?:csv|export)[^"']*)["']/ig)].map(m=>m[1]);
-    exportHref=candidates.find(Boolean)||"";
+    const candidates=[...html.matchAll(/["']([^"']{1,500}(?:csv|export|download)[^"']{0,500})["']/ig)]
+      .map(m=>clean(m[1]))
+      .map(v=>extractUrlFromJavascript(v)||usableExportHref(v))
+      .filter(v=>v && !/^#/.test(v));
+    exportHref=candidates.find(v=>/\.csv(?:$|\?)/i.test(v)) || candidates.find(v=>/export|download/i.test(v)) || "";
   }
-  if(!exportHref) throw new Error(`Utah USBE CSV export link not resolved from directory HTML; htmlBytes=${html.length}`);
+  if(!exportHref){
+    const scriptSnippets:string[]=[];
+    $("script").each((_,el)=>{
+      const s=clean($(el).html()||"");
+      if(/csv|export|schooldistrict/i.test(s) && scriptSnippets.join(" ").length<3500) scriptSnippets.push(s.slice(0,1200));
+    });
+    throw new Error(`Utah USBE CSV export endpoint unresolved; htmlBytes=${html.length}; anchor=${exportAnchor}; scripts=${scriptSnippets.join(" || ").slice(0,3500)}`);
+  }
   const exportUrl=new URL(exportHref,INDEX).toString();
-  const csvRes=await fetch(exportUrl,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/8.1; authoritative-state-roster)",referer:INDEX,accept:"text/csv,text/plain,application/csv,application/octet-stream,*/*"}});
+  const csvRes=await fetch(exportUrl,{cache:"no-store",redirect:"follow",headers:{"user-agent":"Mozilla/5.0 (compatible; Pursuit-Raven/8.2; authoritative-state-roster)",referer:INDEX,accept:"text/csv,text/plain,application/csv,application/octet-stream,*/*"}});
   if(!csvRes.ok) throw new Error(`Utah USBE CSV export HTTP ${csvRes.status}; url=${exportUrl}`);
   const text=await csvRes.text();
   if(/<html|<!doctype/i.test(text.slice(0,500))) throw new Error(`Utah USBE export returned HTML instead of CSV; url=${exportUrl}; bytes=${text.length}`);
