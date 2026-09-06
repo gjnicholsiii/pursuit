@@ -1,16 +1,18 @@
-import { GET as runDurableK12Queue } from "../raven-k12/route";
-import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 30;
 
-export async function GET(request: NextRequest) {
-  const response = await runDurableK12Queue(request);
-  try {
-    const body = await response.clone().json();
-    console.log("RAVEN_SCHOOLS_FAST_DURABLE_QUEUE", body);
-  } catch (e) {
-    console.log("RAVEN_SCHOOLS_FAST_LOG_ERROR", String(e));
-  }
-  return response;
+export async function GET() {
+  const body = {
+    ok: true,
+    mode: "paused-exhausted-generic-district-crawler",
+    attempted: 0,
+    pagesScanned: 0,
+    contactsFound: 0,
+    candidatesPromoted: 0,
+    reason: "Generic district crawling is paused after sustained zero-yield runs. Authoritative statewide Raven workers remain active and own the durable missing-slot queue so their source-exhaustion markers are not overwritten or retried.",
+  };
+  console.log("RAVEN_SCHOOLS_FAST_PAUSED_FOR_AUTHORITATIVE_BULK", body);
+  return NextResponse.json(body);
 }
