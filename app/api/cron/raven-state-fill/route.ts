@@ -70,8 +70,14 @@ export async function GET(req:NextRequest){
  if(requested)selected=GROUPS.filter(g=>g.state===requested);
  else{
   const rows=await sql.query(`select state_code,count(*) filter(where verification_status='missing')::int missing from raven_state_contacts where state_code=any($1::text[]) group by state_code having count(*) filter(where verification_status='missing')>0 order by missing desc`,[GROUPS.map(g=>g.state)]) as any[];
-  const priority=new Map(rows.map((r:any,i:number)=>[String(r.state_code),i]));
-  selected=GROUPS.filter(g=>priority.has(g.state)).sort((a,b)=>(priority.get(a.state)??999)-(priority.get(b.state)??999)).slice(0,4);
+  const unresolved=rows.map((r:any)=>String(r.state_code));
+  const ordered=unresolved.map(s=>GROUPS.find(g=>g.state===s)).filter(Boolean) as StateGroup[];
+  const pageSize=4;
+  const pages=Math.max(1,Math.ceil(ordered.length/pageSize));
+  const page=new Date().getUTCMinutes()%pages;
+  const start=page*pageSize;
+  selected=ordered.slice(start,start+pageSize);
+  if(selected.length<pageSize)selected=selected.concat(ordered.slice(0,pageSize-selected.length));
  }
  if(!selected.length)return NextResponse.json({ok:true,mode:'multi-state-authoritative-bulk',done:true,message:'No unresolved supported states.'});
  const states=await Promise.all(selected.map(g=>runState(req,sql,g)));
