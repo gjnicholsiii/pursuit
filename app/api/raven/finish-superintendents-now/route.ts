@@ -13,6 +13,7 @@ const JOBS:Job[] = [
   {state:"KY",path:"/api/cron/raven-kentucky-authoritative",trustedHosts:["openhouse.education.ky.gov","applications.education.ky.gov"]},
   {state:"MS",path:"/api/cron/raven-mississippi-authoritative",trustedHosts:["mdek12.org"]},
   {state:"MT",path:"/api/cron/raven-montana-authoritative",trustedHosts:["apps.opi.mt.gov"]},
+  {state:"NC",path:"/api/cron/raven-north-carolina-authoritative",trustedHosts:["apps.schools.nc.gov"]},
   {state:"NE",path:"/api/cron/raven-nebraska-authoritative",trustedHosts:["educdirsrc.education.ne.gov"]},
   {state:"NY",path:"/api/cron/raven-new-york-authoritative",trustedHosts:["p12.nysed.gov"]},
   {state:"OR",path:"/api/cron/raven-oregon-authoritative",trustedHosts:["oregon.gov"]},
