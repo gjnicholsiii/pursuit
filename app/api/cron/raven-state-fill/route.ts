@@ -41,6 +41,44 @@ async function counts(sql:ReturnType<typeof getSql>,state?:string):Promise<Count
  return rows[0] as Counts;
 }
 
+async function reconcileDuplicateCoverage(sql:ReturnType<typeof getSql>){
+ const before=await counts(sql);
+ const rows=await sql.query(`
+  with best as (
+   select distinct on (state_code,agency_id,scope,role_key)
+    state_code,agency_id,scope,role_key,full_name,title,email,phone,source_url,verification_status,evidence_note
+   from raven_state_contacts
+   where scope='district'
+     and agency_id is not null
+     and verification_status in ('verified','candidate')
+     and coalesce(full_name,'')<>''
+   order by state_code,agency_id,scope,role_key,
+    case verification_status when 'verified' then 0 else 1 end,
+    updated_at desc nulls last
+  )
+  update raven_state_contacts m
+  set full_name=b.full_name,
+      title=b.title,
+      email=b.email,
+      phone=b.phone,
+      source_url=b.source_url,
+      verification_status=b.verification_status,
+      evidence_note=concat('Reconciled from existing ',b.verification_status,' authoritative coverage for the same agency and Raven role. ',coalesce(b.evidence_note,'')),
+      updated_at=now()
+  from best b
+  where m.scope='district'
+    and m.agency_id=b.agency_id
+    and m.state_code=b.state_code
+    and m.role_key=b.role_key
+    and m.verification_status='missing'
+  returning m.state_code,m.role_key,m.agency_id::text,m.verification_status
+ `) as any[];
+ const after=await counts(sql);
+ const byStateRole=new Map<string,number>();
+ for(const r of rows){const k=`${r.state_code}|${r.role_key}`;byStateRole.set(k,(byStateRole.get(k)||0)+1);}
+ return {reconciled:rows.length,before,after,net:{verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected,total:after.total-before.total},byStateRole:[...byStateRole.entries()].map(([k,n])=>{const [state,role]=k.split('|');return{state,role,reconciled:n};})};
+}
+
 async function run(req:NextRequest,path:string,load:RouteLoader){
  const started=Date.now();
  try{
@@ -57,7 +95,7 @@ async function runState(req:NextRequest,sql:ReturnType<typeof getSql>,group:Stat
  if(before.missing<=0)return{state:group.state,skipped:true,before,after:before,net:{verified:0,candidate:0,missing:0,rejected:0,total:0},districtsProcessed:0,runs:[]};
  const runs=await Promise.all(group.routes.map(r=>run(req,r.path,r.load)));
  const after=await counts(sql,group.state);
- const districtsProcessed=runs.reduce((n,r)=>n+Number(r.body?.districtsNewlyAttempted||r.body?.processed||r.body?.districtsProcessed||0),0);
+ const districtsProcessed=runs.reduce((n,r)=>n+Number(r.body?.districtsNewlyAttempted||r.body?.districtsProcessedInBulk||r.body?.processed||r.body?.districtsProcessed||0),0);
  return{state:group.state,before,after,net:{verified:after.verified-before.verified,candidate:after.candidate-before.candidate,missing:after.missing-before.missing,rejected:after.rejected-before.rejected,total:after.total-before.total},districtsProcessed,runs};
 }
 
@@ -66,6 +104,7 @@ export async function GET(req:NextRequest){
  const sql=getSql();
  const requested=(req.nextUrl.searchParams.get('state')||'').trim().toUpperCase();
  const globalBefore=await counts(sql);
+ const reconciliation=await reconcileDuplicateCoverage(sql);
  let selected=GROUPS;
  if(requested)selected=GROUPS.filter(g=>g.state===requested);
  else{
@@ -79,10 +118,10 @@ export async function GET(req:NextRequest){
   selected=ordered.slice(start,start+pageSize);
   if(selected.length<pageSize)selected=selected.concat(ordered.slice(0,pageSize-selected.length));
  }
- if(!selected.length)return NextResponse.json({ok:true,mode:'multi-state-authoritative-bulk',done:true,message:'No unresolved supported states.'});
+ if(!selected.length){const globalAfter=await counts(sql);const summary={ok:true,mode:'multi-state-authoritative-bulk',done:true,reconciliation,globalBefore,globalAfter,message:'No unresolved supported states.'};console.log('RAVEN_MULTI_STATE_BULK',summary);return NextResponse.json(summary);}
  const states=await Promise.all(selected.map(g=>runState(req,sql,g)));
  const globalAfter=await counts(sql);
- const summary={ok:states.every((s:any)=>s.runs.every((r:any)=>r.ok)),mode:'multi-state-authoritative-bulk',statesProcessed:states.map((s:any)=>s.state),globalBefore,globalAfter,net:{verified:globalAfter.verified-globalBefore.verified,candidate:globalAfter.candidate-globalBefore.candidate,missing:globalAfter.missing-globalBefore.missing,rejected:globalAfter.rejected-globalBefore.rejected,total:globalAfter.total-globalBefore.total},states};
+ const summary={ok:states.every((s:any)=>s.runs.every((r:any)=>r.ok)),mode:'multi-state-authoritative-bulk',statesProcessed:states.map((s:any)=>s.state),reconciliation,globalBefore,globalAfter,net:{verified:globalAfter.verified-globalBefore.verified,candidate:globalAfter.candidate-globalBefore.candidate,missing:globalAfter.missing-globalBefore.missing,rejected:globalAfter.rejected-globalBefore.rejected,total:globalAfter.total-globalBefore.total},states};
  console.log('RAVEN_MULTI_STATE_BULK',summary);
  return NextResponse.json(summary,{status:summary.ok?200:207});
 }
