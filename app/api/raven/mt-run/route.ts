@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export async function GET(req: NextRequest) {
-  if (req.nextUrl.searchParams.get("run") !== "new-york-authoritative-20260907") return NextResponse.json({ok:false},{status:404});
+  if (req.nextUrl.searchParams.get("run") !== "pennsylvania-authoritative-20260907") return NextResponse.json({ok:false},{status:404});
   const secret = process.env.CRON_SECRET;
   if (!secret) return NextResponse.json({ok:false,error:"cron auth unavailable"},{status:500});
   const origin = req.nextUrl.origin;
@@ -14,7 +14,6 @@ export async function GET(req: NextRequest) {
     let body:any; try{body=JSON.parse(text);}catch{body={text};}
     return {status:r.status,body};
   };
-  const authoritative = await invoke('/api/cron/raven-new-york-authoritative');
-  const verify = authoritative.status===200 ? await invoke('/api/cron/raven-new-york-verify-authoritative') : null;
-  return NextResponse.json({ok:authoritative.status===200,authoritative,verify});
+  const authoritative = await invoke('/api/cron/raven-pennsylvania-authoritative');
+  return NextResponse.json({ok:authoritative.status===200,authoritative});
 }
