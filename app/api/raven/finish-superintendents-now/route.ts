@@ -15,6 +15,7 @@ const JOBS:Job[] = [
   {state:"MT",path:"/api/cron/raven-montana-authoritative",trustedHosts:["apps.opi.mt.gov"]},
   {state:"NE",path:"/api/cron/raven-nebraska-authoritative",trustedHosts:["educdirsrc.education.ne.gov"]},
   {state:"NY",path:"/api/cron/raven-new-york-authoritative",trustedHosts:["p12.nysed.gov"]},
+  {state:"OR",path:"/api/cron/raven-oregon-authoritative",trustedHosts:["oregon.gov"]},
   {state:"PA",path:"/api/cron/raven-pennsylvania-authoritative",trustedHosts:["edna.pa.gov"]},
   {state:"RI",trustedHosts:["datacenter.ride.ri.gov","ride.ri.gov"]},
   {state:"SD",path:"/api/cron/raven-south-dakota-authoritative",trustedHosts:["doe.sd.gov"]},
