@@ -61,11 +61,14 @@ export async function GET(req:NextRequest){
   if(req.nextUrl.searchParams.get("run")!==RUN_TOKEN) return NextResponse.json({ok:false},{status:404});
   const secret=process.env.CRON_SECRET;
   if(!secret) return NextResponse.json({ok:false,error:"cron auth unavailable"},{status:500});
+  const requested=(req.nextUrl.searchParams.get("state")||"").trim().toUpperCase();
+  const jobs=requested?JOBS.filter(j=>j.state===requested):JOBS;
+  if(requested&&!jobs.length)return NextResponse.json({ok:false,error:"state not configured"},{status:404});
   const sql=getSql();
   const origin=req.nextUrl.origin;
   const results:any[]=[];
 
-  for(const job of JOBS){
+  for(const job of jobs){
     const before=await stateCounts(sql,job.state);
     let invoked:any=null;
     if(job.path){
