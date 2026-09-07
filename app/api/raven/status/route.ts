@@ -7,6 +7,7 @@ export async function GET(req: NextRequest) {
   const sql = getSql();
   const requestedState = (req.nextUrl.searchParams.get("state") || "").toUpperCase();
   const wantMissing = req.nextUrl.searchParams.get("missing") === "1";
+  const wantLanes = req.nextUrl.searchParams.get("lanes") === "1";
 
   if (wantMissing && /^[A-Z]{2}$/.test(requestedState)) {
     const missing = await sql.query(`
@@ -21,6 +22,24 @@ export async function GET(req: NextRequest) {
       limit 250
     `,[requestedState]);
     return NextResponse.json({ok:true,state:requestedState,missing});
+  }
+
+  if (wantLanes) {
+    const lanes = await sql.query(`
+      select state_code,role_key,
+        count(*)::int slots,
+        count(*) filter(where verification_status='verified')::int verified,
+        count(*) filter(where verification_status='candidate')::int candidate,
+        count(*) filter(where verification_status='missing')::int missing,
+        count(*) filter(where verification_status='rejected')::int rejected,
+        max(updated_at) latest_update
+      from raven_state_contacts
+      where scope='district'
+        and role_key in ('superintendent','it_director','school_board','security_director')
+      group by state_code,role_key
+      order by state_code,role_key
+    `);
+    return NextResponse.json({ok:true,lanes});
   }
 
   const states = await sql.query(`
