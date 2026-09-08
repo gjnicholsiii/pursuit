@@ -11,6 +11,7 @@ type Job = { state:string; path?:string; trustedHosts:string[] };
 const JOBS:Job[] = [
   {state:"KS",path:"/api/cron/raven-kansas-authoritative",trustedHosts:["ksde.gov"]},
   {state:"KY",path:"/api/cron/raven-kentucky-authoritative",trustedHosts:["openhouse.education.ky.gov","applications.education.ky.gov"]},
+  {state:"ME",path:"/api/cron/raven-maine-authoritative",trustedHosts:["maine.gov"]},
   {state:"MN",path:"/api/cron/raven-minnesota-authoritative",trustedHosts:["pub.education.mn.gov"]},
   {state:"MO",path:"/api/cron/raven-missouri-authoritative",trustedHosts:["fliphtml5.com"]},
   {state:"MS",path:"/api/cron/raven-mississippi-authoritative",trustedHosts:["mdek12.org"]},
