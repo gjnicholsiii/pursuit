@@ -3,7 +3,8 @@ import { Search } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
-import { getCurrentCustomerProfile, getCustomerMatches } from "@/lib/customer-profile";
+import { getActiveCustomerProfile, getCustomerMatches } from "@/lib/customer-profile";
+import { demoHref, isFourStateDemo } from "@/lib/demo-mode";
 import { getStoredFederalOpportunities, getStoredSledOpportunities } from "@/lib/opportunity-store";
 import { getSql } from "@/lib/db";
 import type { CustomerProfile } from "@/lib/customer-profile";
@@ -18,7 +19,8 @@ interface ProofRow {
   k12_agencies: number | string;
 }
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const demo = isFourStateDemo((await searchParams)?.demo);
   let dataError: string | undefined;
   let profile: CustomerProfile | null = null;
   let opportunities: Opportunity[] = [];
@@ -26,9 +28,9 @@ export default async function Home() {
   let proof: ProofRow = { open_total: 0, federal_open: 0, sled_open: 0, k12_agencies: 0 };
 
   try {
-    profile = await getCurrentCustomerProfile();
+    profile = await getActiveCustomerProfile(demo);
     if (profile) {
-      opportunities = await getCustomerMatches(profile, { limit: 12, threshold: 45 });
+      opportunities = await getCustomerMatches(profile, { limit: 12, threshold: demo ? 15 : 45, territoryStrict: demo });
     } else {
       const [federal, sled, proofRowsRaw] = await Promise.all([
         getStoredFederalOpportunities(2),
@@ -60,10 +62,10 @@ export default async function Home() {
 
   return (
     <main className="shell">
-      <Sidebar />
+      <Sidebar demo={demo} />
       <section className="workspace">
         <header className="topbar">
-          <Link href={profile ? "/opportunities?scope=matches" : "/opportunities?scope=all"} className="searchbox">
+          <Link href={demoHref(profile ? "/opportunities?scope=matches" : "/opportunities?scope=all", demo)} className="searchbox">
             <Search size={17} />
             <span>{profile ? "Search your matches, or widen to all Pursuit..." : "Search live federal, state, local and education opportunities..."}</span>
           </Link>
@@ -78,7 +80,7 @@ export default async function Home() {
                   <h1>WIN MORE / WORK LESS</h1>
                   <p>Government opportunities worth pursuing, ranked for your company. Pursuit searches federal, state, local, K-12, higher education, agencies and authorities, then tells you which opportunities fit, why they fit, what the solicitation requires and how reliable the underlying information is.</p>
                 </div>
-                <Link href="/profile" className="secondary-button">Build my opportunity feed</Link>
+                <Link href={demoHref("/profile", demo)} className="secondary-button">Build my opportunity feed</Link>
               </div>
 
               <div className="metrics">
@@ -107,10 +109,10 @@ export default async function Home() {
               <section className="section-block">
                 <div className="section-heading">
                   <div><span>LIVE IN PURSUIT NOW</span><h2>Real opportunities. One national market.</h2></div>
-                  <Link href="/opportunities?scope=all" className="section-link">Search all opportunities</Link>
+                  <Link href={demoHref("/opportunities?scope=all", demo)} className="section-link">Search all opportunities</Link>
                 </div>
                 {demoOpportunities.length > 0 ? (
-                  <div className="opportunity-list">{demoOpportunities.map(item => <OpportunityCard key={item.id} opportunity={item} />)}</div>
+                  <div className="opportunity-list">{demoOpportunities.map(item => <OpportunityCard key={item.id} opportunity={item} demo={demo} />)}</div>
                 ) : (
                   <div className="readiness-panel"><div className="readiness-copy"><h2>Live inventory is loading.</h2><p>{dataError || "Pursuit is connecting to the current opportunity inventory."}</p></div></div>
                 )}
@@ -123,7 +125,7 @@ export default async function Home() {
                   <p>Tell Pursuit what you sell, where you sell it, your NAICS and PSC codes, certifications and target contract size. Your homepage becomes a ranked revenue feed built around your company.</p>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
-                  <Link href="/profile" className="secondary-button">Build my opportunity feed</Link>
+                  <Link href={demoHref("/profile", demo)} className="secondary-button">Build my opportunity feed</Link>
                 </div>
               </section>
             </>
@@ -135,7 +137,7 @@ export default async function Home() {
                   <h1>REVENUE TODAY</h1>
                   <p>{profile.organizationName}. Ranked by how closely each live opportunity fits your selling profile.</p>
                 </div>
-                <Link href="/profile" className="secondary-button">Edit selling profile</Link>
+                <Link href={demoHref("/profile", demo)} className="secondary-button">Edit selling profile</Link>
               </div>
 
               <div className="metrics">
@@ -155,7 +157,7 @@ export default async function Home() {
                   <div className="readiness-item"><div><strong>NAICS + PSC</strong><small>{[...profile.naicsCodes, ...profile.pscCodes].join(", ") || "Not configured"}</small></div></div>
                   <div className="readiness-item"><div><strong>Capabilities</strong><small>{profile.capabilityTerms.slice(0, 4).join(" · ") || "Not configured"}</small></div></div>
                   <div className="readiness-item"><div><strong>Territories</strong><small>{profile.territories.join(", ") || "Not configured"}</small></div></div>
-                  <div className="readiness-item"><div><strong>Match floor</strong><small>Homepage shows 45%+ profile matches</small></div></div>
+                  <div className="readiness-item"><div><strong>Match floor</strong><small>{demo ? "Four-state territory first, then ranked by low-voltage fit" : "Homepage shows 45%+ profile matches"}</small></div></div>
                 </div>
               </section>
 
@@ -166,10 +168,10 @@ export default async function Home() {
               <section className="section-block">
                 <div className="section-heading">
                   <div><span>RANKED FOR YOU</span><h2>Best current matches</h2></div>
-                  <Link href="/opportunities?scope=matches" className="section-link">Search your matches</Link>
+                  <Link href={demoHref("/opportunities?scope=matches", demo)} className="section-link">Search your matches</Link>
                 </div>
                 {opportunities.length > 0 ? (
-                  <div className="opportunity-list">{opportunities.map(item => <OpportunityCard key={item.id} opportunity={item} />)}</div>
+                  <div className="opportunity-list">{opportunities.map(item => <OpportunityCard key={item.id} opportunity={item} demo={demo} />)}</div>
                 ) : (
                   <div className="readiness-panel"><div className="readiness-copy"><h2>No opportunities currently clear your match threshold.</h2><p>Edit your selling profile or search the full Pursuit inventory deliberately. Unrelated bids will not be substituted into your homepage.</p></div></div>
                 )}

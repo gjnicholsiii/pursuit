@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ArrowUpRight, Clock3, Crosshair, Radar, ShieldCheck } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
-import { getCurrentCustomerProfile } from "@/lib/customer-profile";
+import { getActiveCustomerProfile } from "@/lib/customer-profile";
+import { demoHref, isFourStateDemo } from "@/lib/demo-mode";
 import { getOverwatchFeed, type OverwatchAward } from "@/lib/overwatch";
 import styles from "./overwatch.module.css";
 
@@ -50,8 +51,9 @@ function awardUrl(award: OverwatchAward) {
   return award.generatedId ? `https://www.usaspending.gov/award/${encodeURIComponent(award.generatedId)}/` : "https://www.usaspending.gov/";
 }
 
-export default async function OverwatchPage() {
-  const profile = await getCurrentCustomerProfile();
+export default async function OverwatchPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const demo = isFourStateDemo((await searchParams)?.demo);
+  const profile = await getActiveCustomerProfile(demo);
   const feed = await getOverwatchFeed(profile);
   const awards = feed.awards;
   const now = Date.now();
@@ -77,11 +79,11 @@ export default async function OverwatchPage() {
 
   return (
     <main className="shell">
-      <Sidebar active="Overwatch" />
+      <Sidebar active="Overwatch" demo={demo} />
       <section className="workspace">
         <header className="topbar">
-          <div className="searchbox"><Radar size={17} /><span>Federal contract horizon · USAspending award history</span></div>
-          <div className="top-actions"><Link href="/profile" className="secondary-button">Tune company profile</Link></div>
+          <div className="searchbox"><Radar size={17} /><span>{demo ? "IN · OH · KY · TN contract horizon · USAspending award history" : "Federal contract horizon · USAspending award history"}</span></div>
+          <div className="top-actions"><Link href={demoHref("/profile", demo)} className="secondary-button">Tune company profile</Link></div>
         </header>
 
         <div className="content">
@@ -89,7 +91,7 @@ export default async function OverwatchPage() {
             <div>
               <span className="eyebrow">OVERWATCH / FORWARD REVENUE INTELLIGENCE</span>
               <h1>SEE THE WORK BEFORE IT RETURNS.</h1>
-              <p>Track contracts approaching the end of performance, see who owns the work now, and identify where future pursuit activity is concentrating.</p>
+              <p>{demo ? "Track contracts performed in Indiana, Ohio, Kentucky and Tennessee as they approach end of performance, then identify incumbents and likely recompete windows." : "Track contracts approaching the end of performance, see who owns the work now, and identify where future pursuit activity is concentrating."}</p>
             </div>
           </div>
 

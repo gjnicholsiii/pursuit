@@ -77,6 +77,10 @@ async function searchAwards(profile: CustomerProfile | null, mode: "naics" | "ps
     time_period: [{ start_date: isoDate(start), end_date: isoDate(now), date_type: "action_date" }],
   };
 
+  if (profile?.organizationId === "demo-four-state-low-voltage") {
+    filters.place_of_performance_locations = profile.territories.slice(0, 12).map(state => ({ country: "USA", state }));
+  }
+
   if (mode === "naics" && profile?.naicsCodes.length) {
     filters.naics_codes = { require: profile.naicsCodes.slice(0, 12) };
   }
@@ -130,6 +134,10 @@ export async function getOverwatchFeed(profile: CustomerProfile | null): Promise
   if (profile?.pscCodes.length) {
     modes.push("psc");
     filters.push(`PSC ${profile.pscCodes.slice(0, 6).join(", ")}`);
+  }
+  if (profile?.organizationId === "demo-four-state-low-voltage") {
+    modes.push("broad");
+    filters.push("Place of performance: IN, OH, KY, TN");
   }
   if (!modes.length) {
     modes.push("broad");

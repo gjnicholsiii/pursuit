@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { ArrowUpRight, Clock3, DollarSign, MapPin } from "lucide-react";
 import { getSql } from "@/lib/db";
 import type { Opportunity } from "@/lib/types";
+import { demoHref } from "@/lib/demo-mode";
 
 const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 const STALE_PACKAGE_MESSAGE = "No bid-package documents have been identified in Pursuit yet.";
@@ -59,8 +60,8 @@ async function prioritizeRatedLeadDocuments(opportunity: Opportunity) {
   });
 }
 
-export async function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
-  await prioritizeRatedLeadDocuments(opportunity);
+export async function OpportunityCard({ opportunity, demo = false }: { opportunity: Opportunity; demo?: boolean }) {
+  if (!demo) await prioritizeRatedLeadDocuments(opportunity);
 
   const lowConfidence = opportunity.confidence < 75;
   const rawInsight = opportunity.matchScore != null
@@ -74,7 +75,7 @@ export async function OpportunityCard({ opportunity }: { opportunity: Opportunit
     <article className="opportunity-card">
       <div className="opp-main">
         <div className="opp-kicker"><span className="agency">{opportunity.agency}</span><span className={`eligibility-pill ${opportunity.eligibility}`}>{opportunity.eligibility.toUpperCase()}</span></div>
-        <h3><Link href={`/opportunities/${opportunity.id}`}>{opportunity.title}</Link></h3>
+        <h3><Link href={demoHref(`/opportunities/${opportunity.id}`, demo)}>{opportunity.title}</Link></h3>
         <div className="opp-meta"><span><MapPin size={14} />{opportunity.location}</span><span><DollarSign size={14} />{opportunity.value == null ? "Value not stated" : money(opportunity.value)}</span><span><Clock3 size={14} />Due {opportunity.due}</span></div>
         <div className="tags"><span className="path-tag">{opportunity.procurementPath}</span>{opportunity.tags.map(tag => <span key={tag}>{tag}</span>)}</div>
       </div>
@@ -85,8 +86,8 @@ export async function OpportunityCard({ opportunity }: { opportunity: Opportunit
       </div>
       <div className="opp-score">
         {opportunity.matchScore != null && <><span>Relevance</span><strong>{opportunity.matchScore}%</strong></>}
-        {opportunity.matchScore != null ? <form action={`/api/opportunities/${opportunity.id}/go-no-go`} method="post"><button className="filter-button" type="submit">GO / NO-GO</button></form> : <><span>Confidence</span><strong>{opportunity.confidence}%</strong></>}
-        <Link href={`/opportunities/${opportunity.id}`} aria-label="Open opportunity brief"><ArrowUpRight size={18} /></Link>
+        {opportunity.matchScore != null ? demo ? <Link className="filter-button" href={demoHref(`/opportunities/${opportunity.id}`, true)}>VIEW BRIEF</Link> : <form action={`/api/opportunities/${opportunity.id}/go-no-go`} method="post"><button className="filter-button" type="submit">GO / NO-GO</button></form> : <><span>Confidence</span><strong>{opportunity.confidence}%</strong></>}
+        <Link href={demoHref(`/opportunities/${opportunity.id}`, demo)} aria-label="Open opportunity brief"><ArrowUpRight size={18} /></Link>
       </div>
     </article>
   );

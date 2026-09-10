@@ -5,14 +5,16 @@ import { Sidebar } from "@/components/sidebar";
 import { GoNoGoPanel } from "@/components/go-no-go-panel";
 import { getStoredOpportunityById } from "@/lib/opportunity-store";
 import { getOpportunityDocumentSummary } from "@/lib/document-store";
+import { demoHref, isFourStateDemo } from "@/lib/demo-mode";
 
 export const dynamic = "force-dynamic";
 
 const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 const categoryLabel = (category: string) => category.replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
 
-export default async function OpportunityBriefPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function OpportunityBriefPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
+  const demo = isFourStateDemo((await searchParams)?.demo);
   const [opportunity, documents] = await Promise.all([getStoredOpportunityById(id), getOpportunityDocumentSummary(id)]);
   if (!opportunity) notFound();
 
@@ -37,10 +39,10 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
 
   return (
     <main className="shell">
-      <Sidebar active="Opportunities" />
+      <Sidebar active="Opportunities" demo={demo} />
       <section className="workspace">
         <header className="topbar brief-topbar">
-          <Link href="/opportunities" className="brief-back"><ArrowLeft size={16} />Back to opportunities</Link>
+          <Link href={demoHref("/opportunities?scope=matches", demo)} className="brief-back"><ArrowLeft size={16} />Back to opportunities</Link>
           {opportunity.sourceUrl && <a className="secondary-button" href={opportunity.sourceUrl} target="_blank" rel="noreferrer">Original source <ArrowUpRight size={15} /></a>}
         </header>
 
@@ -66,7 +68,7 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
             <div><FileSearch size={16} /><span>Solicitation</span><strong>{opportunity.solicitationNumber || "Not stated"}</strong></div>
           </section>
 
-          <GoNoGoPanel opportunityId={id} />
+          <GoNoGoPanel opportunityId={id} demo={demo} />
 
           <section className="brief-grid">
             <article className="brief-panel verified-panel">
@@ -110,7 +112,7 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
             {documents.documents.length > 0 ? <div className="package-list">{documents.documents.map(document => (
               <a key={document.id} href={document.sourceUrl} target="_blank" rel="noreferrer"><FileCheck2 size={15} /><span>{document.filename}</span><small>{document.fetchedAt ? document.extractionStatus : "cataloged · queued for retrieval"}</small><ArrowUpRight size={14} /></a>
             ))}</div> : <p className="brief-explainer">{emptyPackageMessage}</p>}
-            {documents.identified > documents.fetched && <form action={`/api/opportunities/${id}/package`} method="post" className="profile-actions"><button className="secondary-button" type="submit">Get complete bid package</button></form>}
+            {!demo && documents.identified > documents.fetched && <form action={`/api/opportunities/${id}/package`} method="post" className="profile-actions"><button className="secondary-button" type="submit">Get complete bid package</button></form>}
           </section>
 
           <section className="brief-grid lower-grid">
@@ -123,7 +125,7 @@ export default async function OpportunityBriefPage({ params }: { params: Promise
             <article className="brief-panel next-action-panel">
               <div className="brief-panel-heading"><ArrowUpRight size={18} /><div><span>NEXT ACTION</span><h2>Decide whether this deserves pursuit time</h2></div></div>
               <p className="next-action-copy">Run GO / NO-GO to compare the actual solicitation requirements against your saved company qualifications. Retrieve the full package only if you decide to proceed.</p>
-              <form action={`/api/opportunities/${id}/go-no-go`} method="post"><button className="filter-button" type="submit">GO / NO-GO</button></form>
+              {demo ? opportunity.sourceUrl && <a className="filter-button" href={opportunity.sourceUrl} target="_blank" rel="noreferrer">VIEW SOURCE</a> : <form action={`/api/opportunities/${id}/go-no-go`} method="post"><button className="filter-button" type="submit">GO / NO-GO</button></form>}
             </article>
           </section>
 

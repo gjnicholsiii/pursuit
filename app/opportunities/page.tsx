@@ -2,7 +2,8 @@ import Link from "next/link";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { Sidebar } from "@/components/sidebar";
-import { getCurrentCustomerProfile, getCustomerMatches } from "@/lib/customer-profile";
+import { getActiveCustomerProfile, getCustomerMatches } from "@/lib/customer-profile";
+import { demoHref, FOUR_STATE_CODES, FOUR_STATE_DEMO, isFourStateDemo } from "@/lib/demo-mode";
 import { getSql } from "@/lib/db";
 import { getStoredFederalCount, getStoredSledCount } from "@/lib/opportunity-store";
 import type { Opportunity } from "@/lib/types";
@@ -106,7 +107,7 @@ function toOpportunity(row: SearchRow): Opportunity {
   };
 }
 
-async function searchInventory(query: string, source: InventorySource, state: string) {
+async function searchInventory(query: string, source: InventorySource, state: string, states: string[] = []) {
   const sql = getSql();
   const clauses = ["o.status = 'open'", "(o.due_at is null or o.due_at >= now())"];
   const values: unknown[] = [];
@@ -118,6 +119,10 @@ async function searchInventory(query: string, source: InventorySource, state: st
   if (state && STATE_CODES.includes(state)) {
     values.push(state);
     clauses.push(`o.state_code = $${values.length}`);
+  }
+  else if (states.length) {
+    values.push(states);
+    clauses.push(`o.state_code = any($${values.length}::text[])`);
   }
 
   if (query) {
@@ -170,11 +175,13 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
   const rawSource = first(params.source);
   const source: InventorySource = rawSource === "federal" || rawSource === "sled" ? rawSource : "all";
   const state = first(params.state).toUpperCase();
-  const profile = await getCurrentCustomerProfile();
+  const demo = isFourStateDemo(params.demo);
+  const profile = await getActiveCustomerProfile(demo);
   const requestedScope = first(params.scope);
   const scope: SearchScope = profile && requestedScope !== "all" ? "matches" : "all";
-  const thresholdInput = Number(first(params.match) || "45");
-  const threshold = Number.isFinite(thresholdInput) ? Math.max(0, Math.min(100, thresholdInput)) : 45;
+  const defaultThreshold = demo ? 15 : 45;
+  const thresholdInput = Number(first(params.match) || String(defaultThreshold));
+  const threshold = Number.isFinite(thresholdInput) ? Math.max(0, Math.min(100, thresholdInput)) : defaultThreshold;
 
   let opportunities: Opportunity[] = [];
   let matchingCount = 0;
@@ -185,8 +192,8 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
   try {
     const [results, federalTotal, sledTotal] = await Promise.all([
       scope === "matches" && profile
-        ? getCustomerMatches(profile, { limit: 500, threshold, query, source, state: STATE_CODES.includes(state) ? state : "" }).then(items => ({ opportunities: items, total: items.length }))
-        : searchInventory(query, source, state),
+        ? getCustomerMatches(profile, { limit: 500, threshold, query, source, state: STATE_CODES.includes(state) ? state : "", territoryStrict: demo }).then(items => ({ opportunities: items, total: items.length }))
+        : searchInventory(query, source, state, demo ? FOUR_STATE_CODES : []),
       getStoredFederalCount(),
       getStoredSledCount(),
     ]);
@@ -203,10 +210,10 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
 
   return (
     <main className="shell">
-      <Sidebar active="Opportunities" />
+      <Sidebar active="Opportunities" demo={demo} />
       <section className="workspace">
         <header className="topbar">
-          <Link href={profile ? "/opportunities?scope=matches" : "/opportunities"} className="searchbox"><Search size={17} /><span>{profile ? "Search your matches or all Pursuit..." : "Search federal, state, local, K-12, higher ed..."}</span></Link>
+          <Link href={demoHref(profile ? "/opportunities?scope=matches" : "/opportunities", demo)} className="searchbox"><Search size={17} /><span>{profile ? "Search your matches or all Pursuit..." : "Search federal, state, local, K-12, higher ed..."}</span></Link>
         </header>
 
         <div className="content">
@@ -214,21 +221,22 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
             <div>
               <span className="eyebrow">{scope === "matches" ? "YOUR SEARCH" : "LIVE INVENTORY"}</span>
               <h1>{scope === "matches" ? "MY MATCHES" : "ALL OPPORTUNITIES"}</h1>
-              <p>{scope === "matches" ? `Ranked against ${profile?.organizationName}'s selling profile.` : `${totalLive.toLocaleString()} current federal + SLED opportunities searchable in Pursuit.`}</p>
+              <p>{scope === "matches" ? `Ranked against ${profile?.organizationName}'s selling profile.` : demo ? "Current opportunities across Indiana, Ohio, Kentucky and Tennessee." : `${totalLive.toLocaleString()} current federal + SLED opportunities searchable in Pursuit.`}</p>
             </div>
-            <Link href="/" className="secondary-button">Revenue Today</Link>
+            <Link href={demoHref("/", demo)} className="secondary-button">Revenue Today</Link>
           </div>
 
           {profile && (
             <div className="inventory-summary">
               <div><strong>{scope === "matches" ? "My Matches" : "All Pursuit"}</strong><span>current search scope</span></div>
-              <Link href={scope === "matches" ? "/opportunities?scope=all" : "/opportunities?scope=matches"}>{scope === "matches" ? "Search all Pursuit" : "Return to my matches"}</Link>
-              <Link href="/profile">Edit selling profile</Link>
+              <Link href={demoHref(scope === "matches" ? "/opportunities?scope=all" : "/opportunities?scope=matches", demo)}>{scope === "matches" ? demo ? "Search all four-state inventory" : "Search all Pursuit" : "Return to my matches"}</Link>
+              <Link href={demoHref("/profile", demo)}>Edit selling profile</Link>
             </div>
           )}
 
           <form className="opportunity-filters" action="/opportunities" method="get">
             <input type="hidden" name="scope" value={scope} />
+            {demo && <input type="hidden" name="demo" value={FOUR_STATE_DEMO} />}
             <label className="filter-search">
               <Search size={16} />
               <input name="q" defaultValue={query} placeholder="Agency, keyword, NAICS, PSC, solicitation..." />
@@ -255,6 +263,7 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
                   <option value="80">80%+ excellent fits</option>
                   <option value="60">60%+ strong fits</option>
                   <option value="45">45%+ relevant</option>
+                  <option value="15">15%+ territory fits</option>
                   <option value="25">25%+ broad</option>
                   <option value="0">Any profile match</option>
                 </select>
@@ -267,7 +276,7 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
             <div><strong>{matchingCount.toLocaleString()}</strong><span>{scope === "matches" ? "ranked matches shown" : "matching opportunities"}</span></div>
             <div><strong>{federalCount.toLocaleString()}</strong><span>federal live</span></div>
             <div><strong>{sledCount.toLocaleString()}</strong><span>SLED live</span></div>
-            {(query || source !== "all" || state || (scope === "matches" && threshold !== 45)) && <Link href={scope === "matches" ? "/opportunities?scope=matches" : "/opportunities?scope=all"}>Clear filters</Link>}
+            {(query || source !== "all" || state || (scope === "matches" && threshold !== defaultThreshold)) && <Link href={demoHref(scope === "matches" ? "/opportunities?scope=matches" : "/opportunities?scope=all", demo)}>Clear filters</Link>}
           </div>
 
           {capped && <p className="inventory-note">Showing the first 500 matches. Refine the filters to narrow the result set.</p>}
@@ -279,7 +288,7 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
           <section className="section-block inventory-results">
             <div className="section-heading"><div><span>SEARCH RESULTS</span><h2>{opportunities.length ? scope === "matches" ? "Ranked for your company" : "Current opportunities" : "No matching opportunities"}</h2></div></div>
             {opportunities.length > 0 ? (
-              <div className="opportunity-list">{opportunities.map(item => <OpportunityCard key={item.id} opportunity={item} />)}</div>
+              <div className="opportunity-list">{opportunities.map(item => <OpportunityCard key={item.id} opportunity={item} demo={demo} />)}</div>
             ) : (
               <div className="empty-state"><Search size={20} /><strong>Nothing matches those filters.</strong><p>{scope === "matches" ? "Lower the match threshold, edit your profile, or deliberately search all Pursuit." : "Clear one or more filters to widen the live inventory."}</p></div>
             )}

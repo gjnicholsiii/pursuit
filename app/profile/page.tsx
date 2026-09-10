@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Sidebar } from "@/components/sidebar";
-import { getCurrentCustomerProfile } from "@/lib/customer-profile";
+import { DEMO_PROFILE, getCurrentCustomerProfile } from "@/lib/customer-profile";
+import { demoHref, isFourStateDemo } from "@/lib/demo-mode";
 import { getSql } from "@/lib/db";
 import { saveProfileAction } from "./actions";
 import "./profile.css";
@@ -10,7 +11,20 @@ function join(items: string[]) { return items.join(", "); }
 
 type QualificationRow={bonding_limit:string|number|null;contract_vehicles:string[]|null};
 
-export default async function ProfilePage() {
+export default async function ProfilePage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const demo = isFourStateDemo((await searchParams)?.demo);
+  if (demo) return (
+    <main className="shell">
+      <Sidebar active="Profile" demo />
+      <section className="workspace">
+        <header className="topbar"><Link href={demoHref("/", true)} className="searchbox"><span>Back to Demo Opportunities</span></Link></header>
+        <div className="content">
+          <div className="hero-row inventory-hero"><div><span className="eyebrow">DEMO SELLING PROFILE</span><h1>FOUR-STATE LOW-VOLTAGE INTEGRATOR</h1><p>This read-only profile drives the client demo without changing any saved Pursuit customer data.</p></div></div>
+          <section className="readiness-panel"><div className="readiness-copy"><span className="eyebrow">TERRITORY</span><h2>{DEMO_PROFILE.territories.join(" · ")}</h2><p>Indiana, Ohio, Kentucky and Tennessee</p></div><div className="readiness-grid"><div className="readiness-item"><div><strong>CAPABILITIES</strong><small>{DEMO_PROFILE.capabilityTerms.join(" · ")}</small></div></div><div className="readiness-item"><div><strong>NAICS</strong><small>{DEMO_PROFILE.naicsCodes.join(" · ")}</small></div></div><div className="readiness-item"><div><strong>PSC</strong><small>{DEMO_PROFILE.pscCodes.join(" · ")}</small></div></div><div className="readiness-item"><div><strong>TARGET VALUE</strong><small>$25,000 to $5,000,000</small></div></div></div></section>
+        </div>
+      </section>
+    </main>
+  );
   const profile = await getCurrentCustomerProfile();
   let qualification:QualificationRow|null=null;
   if(profile){const rows=await getSql().query(`select bonding_limit,contract_vehicles from selling_profiles where organization_id=$1 order by updated_at desc limit 1`,[profile.organizationId]) as QualificationRow[];qualification=rows[0]||null}

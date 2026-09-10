@@ -5,6 +5,23 @@ import type { Opportunity } from "@/lib/types";
 
 const PROFILE_COOKIE = "pursuit_org_id";
 
+export const DEMO_PROFILE: CustomerProfile = {
+  organizationId: "demo-four-state-low-voltage",
+  organizationName: "Four-State Low-Voltage Integrator",
+  territories: ["IN", "OH", "KY", "TN"],
+  capabilityTerms: [
+    "access control", "video surveillance", "security camera", "fire alarm",
+    "structured cabling", "fiber optic", "network infrastructure",
+    "intrusion detection", "intercom", "mass notification", "nurse call", "audio visual", "low voltage",
+  ],
+  naicsCodes: ["561621", "238210", "541512"],
+  pscCodes: ["6350", "J063", "N063", "7B22"],
+  certifications: [],
+  smallBusinessStatuses: [],
+  minContractValue: 25_000,
+  maxContractValue: 5_000_000,
+};
+
 export interface CustomerProfile {
   organizationId: string;
   organizationName: string;
@@ -96,6 +113,10 @@ export async function getCurrentCustomerProfile(): Promise<CustomerProfile | nul
   ) as ProfileRow[];
 
   return rows[0] ? decodeProfile(rows[0]) : null;
+}
+
+export async function getActiveCustomerProfile(demo = false): Promise<CustomerProfile | null> {
+  return (await getCurrentCustomerProfile()) || (demo ? DEMO_PROFILE : null);
 }
 
 export async function saveCustomerProfile(input: {
@@ -225,7 +246,7 @@ function toOpportunity(row: MatchRow): Opportunity {
   };
 }
 
-export async function getCustomerMatches(profile: CustomerProfile, options: { limit?: number; threshold?: number; query?: string; source?: "all" | "federal" | "sled"; state?: string } = {}) {
+export async function getCustomerMatches(profile: CustomerProfile, options: { limit?: number; threshold?: number; query?: string; source?: "all" | "federal" | "sled"; state?: string; territoryStrict?: boolean } = {}) {
   const sql = getSql();
   const limit = Math.max(1, Math.min(options.limit || 50, 500));
   const threshold = Math.max(0, Math.min(options.threshold ?? 45, 100));
@@ -250,13 +271,14 @@ export async function getCustomerMatches(profile: CustomerProfile, options: { li
       where o.status = 'open'
         and (o.due_at is null or o.due_at >= now())
         and (s.adapter_key = 'sam_gov' or s.source_family = 'sled')
+        and (not $13::boolean or cardinality($3::text[]) = 0 or 'NATIONAL' = any($3::text[]) or o.state_code = any($3::text[]))
         and ($9 = 'all' or ($9 = 'federal' and s.adapter_key = 'sam_gov') or ($9 = 'sled' and s.source_family = 'sled'))
         and ($10 = '' or o.state_code = $10)
         and ($11 = '' or lower(coalesce(o.title,'') || ' ' || coalesce(o.description,'') || ' ' || a.canonical_name || ' ' || coalesce(o.external_id,'') || ' ' || array_to_string(o.naics_codes,' ') || ' ' || coalesce(o.raw_payload->>'classificationCode','')) like '%' || lower($11) || '%')
     ), scored as (
       select c.*,
         ((
-          case when cardinality($1::text[]) > 0 then 40 else 0 end +
+          case when cardinality($1::text[]) > 0 and (not $13::boolean or cardinality(c.naics_codes) > 0 or c.psc_code <> '') then 40 else 0 end +
           case when cardinality($2::text[]) > 0 then 25 else 0 end +
           case when cardinality($3::text[]) > 0 then 15 else 0 end +
           case when cardinality($4::text[]) > 0 and c.set_aside is not null then 10 else 0 end +
@@ -299,7 +321,7 @@ export async function getCustomerMatches(profile: CustomerProfile, options: { li
     where r.match_score >= $8
     order by r.match_score desc, r.due_at asc nulls last, r.last_seen_at desc
     limit $12`,
-    [profile.naicsCodes, profile.capabilityTerms, profile.territories, [...profile.certifications, ...profile.smallBusinessStatuses], profile.minContractValue, profile.maxContractValue, profile.pscCodes, threshold, source, state, query, limit],
+    [profile.naicsCodes, profile.capabilityTerms, profile.territories, [...profile.certifications, ...profile.smallBusinessStatuses], profile.minContractValue, profile.maxContractValue, profile.pscCodes, threshold, source, state, query, limit, Boolean(options.territoryStrict)],
   ) as MatchRow[];
 
   return rows.map(toOpportunity);

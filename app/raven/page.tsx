@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { getSql } from "@/lib/db";
 import { RAVEN_VERTICALS, getRavenVertical } from "@/lib/raven-verticals";
+import { demoHref, FOUR_STATE_CODES, FOUR_STATE_DEMO, isFourStateDemo } from "@/lib/demo-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +79,7 @@ export default async function RavenPage({
   const q = typeof params.q === "string" ? params.q.trim() : "";
   const verticalKey = typeof params.vertical === "string" ? params.vertical : "k12";
   const state = typeof params.state === "string" ? params.state.toUpperCase().slice(0, 2) : "";
+  const demo = isFourStateDemo(params.demo);
   const vertical = getRavenVertical(verticalKey);
 
   let rows: RavenAgencyRow[] = [];
@@ -108,6 +110,10 @@ export default async function RavenPage({
       if (state) {
         values.push(state);
         where.push(`a.state_code=$${values.length}`);
+      }
+      else if (demo) {
+        values.push(FOUR_STATE_CODES);
+        where.push(`a.state_code=any($${values.length}::text[])`);
       }
 
       const clause = `where ${where.join(" and ")}`;
@@ -204,17 +210,18 @@ export default async function RavenPage({
     dataError = error instanceof Error ? error.message : "Unable to load Raven";
   }
 
-  const buildHref = (key: string) => `/raven?vertical=${encodeURIComponent(key)}`;
+  const buildHref = (key: string) => demoHref(`/raven?vertical=${encodeURIComponent(key)}`, demo);
 
   return (
     <main className="shell">
-      <Sidebar active="Raven" />
+      <Sidebar active="Raven" demo={demo} />
       <section className="workspace">
         <header className="topbar">
           <form className="searchbox" action="/raven" method="get">
             <Search size={17} />
             <input name="q" defaultValue={q} placeholder="Search organization, buyer, trigger, email or solicitation..." style={{ width: "100%", border: 0, background: "transparent", outline: 0, color: "inherit", font: "inherit" }} />
             <input type="hidden" name="vertical" value={vertical.key} />
+            {demo && <input type="hidden" name="demo" value={FOUR_STATE_DEMO} />}
           </form>
         </header>
 
@@ -222,7 +229,7 @@ export default async function RavenPage({
           <div className="hero-row"><div>
             <span className="eyebrow">RAVEN / MARKET INTELLIGENCE</span>
             <h1>WHO MATTERS. WHY NOW.</h1>
-            <p>Decision-makers plus the public evidence that explains why an organization deserves attention now.</p>
+            <p>{demo ? "Decision-makers and buying signals across Indiana, Ohio, Kentucky and Tennessee." : "Decision-makers plus the public evidence that explains why an organization deserves attention now."}</p>
           </div></div>
 
           <section className="readiness-panel">
